@@ -1,0 +1,22 @@
+[package]
+
+name = "skiplist"
+version = "0.1.0"
+authors = ["JP-Ellis <coujellis@gmail.com>"]
+
+description = "Skiplist implementatino in rust, providing fast insertion and removal from an always-sorted list."
+
+documentation = "https://jp-ellis.github.io/rust-skiplist/"
+homepage = "https://www.github.com/JP-Ellis/rust-skiplist/"
+repository = "https://www.github.com/JP-Ellis/rust-skiplist/"
+
+readme = "README.md"
+
+keywords = ["collection", "skiplist", "sorted"]
+
+license = "MIT"
+# license-file = "LICENSE"
+
+[dependencies]
+
+rand = "*"
