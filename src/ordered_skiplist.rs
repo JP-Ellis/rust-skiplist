@@ -302,6 +302,17 @@ impl<T> OrderedSkipList<T> {
     /// ```
     #[inline]
     pub fn clear(&mut self) {
+        unsafe {
+            let node: *mut SkipNode<T> = mem::transmute_copy(&self.head);
+
+            while let Some(ref mut next) = (*node).next {
+                mem::replace(
+                    &mut (*node).next,
+                    mem::replace(
+                        &mut next.next,
+                        None));
+            }
+        }
         let new_head = box SkipNode::head(self.level_generator.total());
         self.len = 0;
         mem::replace(&mut self.head, new_head);
