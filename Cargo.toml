@@ -1,10 +1,10 @@
 [package]
 
 name = "skiplist"
-version = "0.1.0"
+version = "0.1.1"
 authors = ["JP-Ellis <coujellis@gmail.com>"]
 
-description = "Skiplist implementatino in rust, providing fast insertion and removal from an always-sorted list."
+description = "Skiplist implementation in rust, providing fast insertion and removal from an always-sorted list."
 
 documentation = "https://jp-ellis.github.io/rust-skiplist/skiplist/"
 homepage = "https://www.github.com/JP-Ellis/rust-skiplist/"
