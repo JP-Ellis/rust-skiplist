@@ -105,6 +105,7 @@ impl<T> fmt::Display for SkipNode<T>
 
 /// The ordered skiplist provides a way of storing elements such that they are always
 /// sorted and at the same time provides efficient way to access, insert and remove nodes.
+/// Just like `SkipList`, it also provides access to indices.
 ///
 /// By default, the OrderedSkipList uses the comparison function `a.partial_cmp(b).expect("Value
 /// cannot be ordered")`.  This allows the list to handles all types which implement `Ord` and
@@ -202,20 +203,31 @@ impl<T> OrderedSkipList<T> {
     /// Create a new skiplist using the provided function in order to determine the ordering of
     /// elements within the list.  It will be generated with 16 levels.
     ///
-    /// # Examples
+    /// # Warning
     ///
-    /// Floats cannot be used by default because they aren't absolutely ordered (where does `NAN`
-    /// fit in?).  The following skiplist will accept floats as long as they are well-ordered.
+    /// The sorting function which **must** be well-behaved.  Specifically, given some ordering
+    /// function `f(a, b)`, it must satisfy the folowing properties:
+    ///
+    /// - Be well defined: `f(a, b)` should always return the same value
+    /// - Be anti-symmetric: `f(a, b) == Greater` iff `f(b, a) == Less` and `f(a, b) == Equal == f(b,
+    ///   a)`.
+    /// - By transitive: If `f(a, b) == Greater` and `f(b, c) == Greater` then `f(a, c) == Greater`.
+    ///
+    /// **Failure to satisfy these properties can result in unexpected behaviour at best, and at worst
+    /// will cause a segfault, null deref, or some other bad behaviour.**
+    ///
+    /// # Examples
     ///
     /// ```
     /// use skiplist::OrderedSkipList;
+    /// use std::path::Path;
     ///
-    /// let mut skiplist = OrderedSkipList::with_comp(|a: &f64, b: &f64| {
-    ///     a.partial_cmp(b).expect("Non-ordered value provided.")
-    /// });
+    /// let mut skiplist = unsafe { OrderedSkipList::with_comp(
+    ///     |a: &Path, b: &Path| a.extension().cmp(&b.extension())
+    /// )};
     /// ```
     #[inline]
-    pub fn with_comp<F>(f: F) -> Self where
+    pub unsafe fn with_comp<F>(f: F) -> Self where
             F: 'static + Fn(&T, &T) -> Ordering {
         let lg = GeometricalLevelGenerator::new(16, 1.0/2.0);
         OrderedSkipList {
@@ -224,6 +236,56 @@ impl<T> OrderedSkipList<T> {
             level_generator: lg,
             compare: box f,
         }
+    }
+
+    /// Change the method which determines the ordering of the elements in the skiplist.
+    ///
+    /// # Panics
+    ///
+    /// This call will panic if the ordering of the elements will be changed as a result of this
+    /// new comparison method.
+    ///
+    /// As a result, `sort_by` is best to call if the skiplist is empty or has just a single
+    /// element and may panic with 2 or more elements.
+    ///
+    /// # Warning
+    ///
+    /// The sorting function which **must** be well-behaved.  Specifically, given some ordering
+    /// function `f(a, b)`, it must satisfy the folowing properties:
+    ///
+    /// - Be well defined: `f(a, b)` should always return the same value
+    /// - Be anti-symmetric: `f(a, b) == Greater` iff `f(b, a) == Less` and `f(a, b) == Equal == f(b,
+    ///   a)`.
+    /// - By transitive: If `f(a, b) == Greater` and `f(b, c) == Greater` then `f(a, c) == Greater`.
+    ///
+    /// **Failure to satisfy these properties can result in unexpected behaviour at best, and at worst
+    /// will cause a segfault, null deref, or some other bad behaviour.**
+    ///
+    /// # Examples
+    ///
+    /// ```should_fail
+    /// use skiplist::OrderedSkipList;
+    ///
+    /// let mut skiplist = OrderedSkipList::new();
+    /// unsafe { skiplist.sort_by(|a: &i64, b: &i64| b.cmp(a)) } // All good; skiplist empty.
+    /// skiplist.insert(0);                                       // Would still be good here.
+    /// skiplist.insert(10);
+    /// unsafe { skiplist.sort_by(|a: &i64, b: &i64| a.cmp(b)) } // Panics; order would change.
+    /// ```
+    pub unsafe fn sort_by<F>(&mut self, f: F) where
+            F: 'static + Fn(&T, &T) -> Ordering {
+        let mut node: *mut SkipNode<T> = mem::transmute_copy(&mut self.head);
+
+        while let Some(next) = (*node).links[0] {
+            if let (&Some(ref a), &Some(ref b)) = (&(*node).value, &(*next).value) {
+                if f(a, b) == Ordering::Greater {
+                    panic!("New ordering function cannot be used.");
+                }
+            }
+            node = next;
+        }
+
+        self.compare = box f;
     }
 
     /// Clears the skiplist, removing all values.
@@ -277,45 +339,6 @@ impl<T> OrderedSkipList<T> {
     #[inline]
     pub fn is_empty(&self) -> bool {
         self.len == 0
-    }
-
-    /// Change the method which determines the ordering of the elements in the skiplist.
-    ///
-    /// # Panics
-    ///
-    /// This call will panic if the ordering of the elements will be changed as a result of this
-    /// new comparison method.
-    ///
-    /// As a result, `sort_by` is safe to call if the skiplist is empty or has just a single
-    /// element and may panic with 2 or more elements.
-    ///
-    /// # Examples
-    ///
-    /// ```should_fail
-    /// use skiplist::OrderedSkipList;
-    ///
-    /// let mut skiplist = OrderedSkipList::new();
-    /// skiplist.sort_by(|a: &i64, b: &i64| b.cmp(a)); // All good; skiplist empty.
-    /// skiplist.insert(0);
-    /// skiplist.insert(10);
-    /// skiplist.sort_by(|a: &i64, b: &i64| a.cmp(b)); // Panics; order would change.
-    /// ```
-    pub fn sort_by<F>(&mut self, f: F) where
-            F: 'static + Fn(&T, &T) -> Ordering {
-        unsafe {
-            let mut node: *mut SkipNode<T> = mem::transmute_copy(&mut self.head);
-
-            while let Some(next) = (*node).links[0] {
-                if let (&Some(ref a), &Some(ref b)) = (&(*node).value, &(*next).value) {
-                    if f(a, b) == Ordering::Greater {
-                        panic!("New ordering function cannot be used.");
-                    }
-                }
-                node = next;
-            }
-        }
-
-        self.compare = box f;
     }
 
     /// Insert the element into the skiplist.
