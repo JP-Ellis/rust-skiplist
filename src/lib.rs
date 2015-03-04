@@ -38,5 +38,7 @@ extern crate test;
 
 mod level_generator;
 mod ordered_skiplist;
+mod skipmap;
 
 pub use ordered_skiplist::OrderedSkipList;
+pub use skipmap::SkipMap;
