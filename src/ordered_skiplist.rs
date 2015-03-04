@@ -1743,8 +1743,7 @@ mod tests {
 
     #[test]
     fn iter_rev() {
-        // let size = 10000;
-        let size = 10;
+        let size = 10000;
 
         let sl: OrderedSkipList<_> = (0..size).collect();
 
@@ -1763,8 +1762,7 @@ mod tests {
 
     #[test]
     fn iter_mixed() {
-        // let size = 10000;
-        let size = 12;
+        let size = 10000;
 
         let sl: OrderedSkipList<_> = (0..size).collect();
 
