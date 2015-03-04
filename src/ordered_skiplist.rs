@@ -1237,13 +1237,13 @@ impl<T> OrderedSkipList<T> {
             let mut length = 0;
             let mut node = start;
             if lvl == 0 {
-                // Since the head node is not a node proper, the link between it and the next node
-                // (on level 0) is actual 0 hence the offset here.
-                if (*node).is_head() {
-                    length -= 1;
-                }
                 while Some(node) != end {
                     length += 1;
+                    // Since the head node is not a node proper, the link between it and the next node
+                    // (on level 0) is actual 0 hence the offset here.
+                    if (*node).is_head() {
+                        length -= 1;
+                    }
                     match (*node).links[lvl] {
                         Some(ptr) => node = ptr,
                         None => break,
@@ -1589,7 +1589,9 @@ impl<'a, T> Iterator for Iter<T> {
             }
             if let Some(next) = (*self.start).links[0] {
                 self.start = next;
-                self.size -= 1;
+                if self.size > 0 {
+                    self.size -= 1;
+                }
                 return (*self.start).value.as_ref();
             }
             None
