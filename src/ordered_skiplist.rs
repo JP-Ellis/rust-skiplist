@@ -645,12 +645,6 @@ impl<T> OrderedSkipList<T> {
                         }
                     }
                 } else {
-                    // We have not yet found the node, and there are no further nodes at this
-                    // level, so the return node (if present) is between `node` and tail.
-                    if (*node).links[lvl].is_none() {
-                        prev_nodes.push(node);
-                        continue;
-                    }
                     while let Some(next) = (*node).links[lvl] {
                         if let &Some(ref next_value) = &(*next).value {
                             match (self.compare)(next_value, value) {
@@ -669,6 +663,12 @@ impl<T> OrderedSkipList<T> {
                                 },
                             }
                         }
+                    }
+                    // We have not yet found the node, and there are no further nodes at this
+                    // level, so the return node (if present) is between `node` and tail.
+                    if (*node).links[lvl].is_none() {
+                        prev_nodes.push(node);
+                        continue;
                     }
                 }
             }
@@ -752,10 +752,6 @@ impl<T> OrderedSkipList<T> {
                         }
                     }
                 } else {
-                    if (*node).links[lvl].is_none() {
-                        prev_nodes.push(node);
-                        continue;
-                    }
                     while let Some(next) = (*node).links[lvl] {
                         if let Some(ref next_value) = (*next).value {
                             match (self.compare)(next_value, value) {
@@ -780,6 +776,10 @@ impl<T> OrderedSkipList<T> {
                                 },
                             }
                         }
+                    }
+                    if (*node).links[lvl].is_none() {
+                        prev_nodes.push(node);
+                        continue;
                     }
                 }
             }
