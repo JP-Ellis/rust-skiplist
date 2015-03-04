@@ -220,11 +220,18 @@ impl<T> OrderedSkipList<T> {
     ///
     /// ```
     /// use skiplist::OrderedSkipList;
-    /// use std::path::Path;
+    /// use std::cmp::Ordering;
     ///
+    /// // Store even number before odd ones and sort as usual within same parity group.
     /// let mut skiplist = unsafe { OrderedSkipList::with_comp(
-    ///     |a: &Path, b: &Path| a.extension().cmp(&b.extension())
-    /// )};
+    ///     |a: &u64, b: &u64|
+    ///     if a%2 == b%2 {
+    ///         a.cmp(b)
+    ///     } else if a%2 == 0 {
+    ///         Ordering::Less
+    ///     } else {
+    ///         Ordering::Greater
+    ///     })};
     /// ```
     #[inline]
     pub unsafe fn with_comp<F>(f: F) -> Self where
