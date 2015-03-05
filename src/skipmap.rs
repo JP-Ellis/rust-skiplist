@@ -872,6 +872,48 @@ impl<K, V> SkipMap<K, V> {
         }
     }
 
+    /// Creates an iterator over the keys of the skipmap.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use skiplist::SkipMap;
+    ///
+    /// let mut skipmap = SkipMap::new();
+    /// skipmap.extend((0..10).map(|x| (x, x)));
+    /// for k in skipmap.keys() {
+    ///     println!("Key: {}", k);
+    /// }
+    /// ```
+    pub fn keys(&self) -> Keys<K, V> {
+        Keys {
+            start: unsafe { mem::transmute_copy(&self.head) },
+            end: self.get_last(),
+            size: self.len(),
+        }
+    }
+
+    /// Creates an iterator over the values of the skipmap.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use skiplist::SkipMap;
+    ///
+    /// let mut skipmap = SkipMap::new();
+    /// skipmap.extend((0..10).map(|x| (x, x)));
+    /// for v in skipmap.values() {
+    ///     println!("Value: {}", v);
+    /// }
+    /// ```
+    pub fn values(&self) -> Values<K, V> {
+        Values {
+            start: unsafe { mem::transmute_copy(&self.head) },
+            end: self.get_last(),
+            size: self.len(),
+        }
+    }
+
     /// Constructs a double-ended iterator over a sub-range of elements in the skipmap, starting
     /// at min, and ending at max. If min is `Unbounded`, then it will be treated as "negative
     /// infinity", and if max is `Unbounded`, then it will be treated as "positive infinity".  Thus
@@ -1529,6 +1571,101 @@ impl<K, V> DoubleEndedIterator for IntoIter<K, V> {
         }
     }
 }
+
+pub struct Keys<K, V> {
+    start: *const SkipNode<K, V>,
+    end: *const SkipNode<K, V>,
+    size: usize
+}
+
+impl<'a, K, V> Iterator for Keys<K, V> {
+    type Item = &'a K;
+
+    fn next(&mut self) -> Option<&K> {
+        unsafe {
+            if self.start == self.end {
+                return None;
+            }
+            if let Some(next) = (*self.start).links[0] {
+                self.start = next;
+                if self.size > 0 {
+                    self.size -= 1;
+                }
+                return (*self.start).key.as_ref();
+            }
+            None
+        }
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        (self.size, Some(self.size))
+    }
+}
+
+impl<K, V> DoubleEndedIterator for Keys<K, V> {
+    fn next_back(&mut self) -> Option<&K> {
+        unsafe {
+            if self.end == self.start {
+                return None;
+            }
+            if let Some(prev) = (*self.end).prev {
+                let node = self.end;
+                self.size -= 1;
+                self.end = prev;
+                return (*node).key.as_ref();
+            }
+            None
+        }
+    }
+}
+
+pub struct Values<K, V> {
+    start: *const SkipNode<K, V>,
+    end: *const SkipNode<K, V>,
+    size: usize
+}
+
+impl<'a, K, V> Iterator for Values<K, V> {
+    type Item = &'a V;
+
+    fn next(&mut self) -> Option<&V> {
+        unsafe {
+            if self.start == self.end {
+                return None;
+            }
+            if let Some(next) = (*self.start).links[0] {
+                self.start = next;
+                if self.size > 0 {
+                    self.size -= 1;
+                }
+                return (*self.start).value.as_ref();
+            }
+            None
+        }
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        (self.size, Some(self.size))
+    }
+}
+
+impl<K, V> DoubleEndedIterator for Values<K, V> {
+    fn next_back(&mut self) -> Option<&V> {
+        unsafe {
+            if self.end == self.start {
+                return None;
+            }
+            if let Some(prev) = (*self.end).prev {
+                let node = self.end;
+                self.size -= 1;
+                self.end = prev;
+                return (*node).value.as_ref();
+            }
+            None
+        }
+    }
+}
+
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // Tests and Benchmarks
