@@ -7,7 +7,6 @@ use std::collections::Bound;
 use std::default;
 use std::fmt;
 use std::hash::{self, Hash};
-use std::iter::IteratorExt;
 use std::iter;
 use std::mem;
 use std::num;
@@ -371,7 +370,7 @@ impl<K, V> SkipMap<K, V> {
         if self.is_empty() {
             None
         } else {
-            let node = self.get_index(&0);
+            let node = self.get_index(0);
             unsafe { Some(((*node).key.as_ref().unwrap(), (*node).value.as_ref().unwrap())) }
         }
     }
@@ -397,7 +396,7 @@ impl<K, V> SkipMap<K, V> {
         if self.is_empty() {
             None
         } else {
-            let node = self.get_index(&0) as *mut SkipNode<K, V>;
+            let node = self.get_index(0) as *mut SkipNode<K, V>;
             unsafe { Some(((*node).key.as_ref().unwrap(), (*node).value.as_mut().unwrap())) }
         }
     }
@@ -420,7 +419,7 @@ impl<K, V> SkipMap<K, V> {
     pub fn back(&self) -> Option<(&K, &V)> {
         let len = self.len();
         if len > 0 {
-            let node = self.get_index(&(len-1));
+            let node = self.get_index(len-1);
             unsafe { Some(((*node).key.as_ref().unwrap(), (*node).value.as_ref().unwrap())) }
         } else {
             None
@@ -447,7 +446,7 @@ impl<K, V> SkipMap<K, V> {
     pub fn back_mut(&mut self) -> Option<(&K, &mut V)> {
         let len = self.len();
         if len > 0 {
-            let node = self.get_index(&(len-1)) as *mut SkipNode<K, V>;
+            let node = self.get_index(len-1) as *mut SkipNode<K, V>;
             unsafe { Some(((*node).key.as_ref().unwrap(), (*node).value.as_mut().unwrap())) }
         } else {
             None
@@ -922,6 +921,7 @@ impl<K, V> SkipMap<K, V> {
     /// # Examples
     ///
     /// ```
+    /// #![feature(collections)]
     /// use skiplist::SkipMap;
     /// use std::collections::Bound::{Included, Unbounded};
     ///
@@ -932,7 +932,7 @@ impl<K, V> SkipMap<K, V> {
     /// }
     /// assert_eq!(Some((&4, &4)), skipmap.range(Included(&4), Unbounded).next());
     /// ```
-    pub fn range<Q: ?Sized>(&self, min: Bound<&Q>, max: Bound<&Q>) -> Iter<K, V> where
+    pub fn range<Q>(&self, min: Bound<&Q>, max: Bound<&Q>) -> Iter<K, V> where
         K: Borrow<Q>,
         Q: Ord
     {
@@ -1137,9 +1137,9 @@ impl<K, V> SkipMap<K, V> {
     /// # Panics
     ///
     /// Panics if the index given is out of bounds.
-    fn get_index(&self, index: &usize) -> *const SkipNode<K, V> {
+    fn get_index(&self, index: usize) -> *const SkipNode<K, V> {
         unsafe {
-            if index >= &self.len() {
+            if index >= self.len() {
                 panic!("Index out of bounds.");
             } else {
                 let mut node: *const SkipNode<K, V> = mem::transmute_copy(&self.head);
@@ -1149,7 +1149,7 @@ impl<K, V> SkipMap<K, V> {
                 while lvl > 0 {
                     lvl -= 1;
 
-                    while &(index_sum + (*node).links_len[lvl]) <= index {
+                    while index_sum + (*node).links_len[lvl] <= index {
                         index_sum += (*node).links_len[lvl];
                         node = (*node).links[lvl].unwrap();
                     }
@@ -1200,9 +1200,9 @@ impl<K, V> SkipMap<K, V> where
                     }
 
                     if lvl <= (*node).level {
-                        rows[lvl].push_str(value_len.as_slice());
+                        rows[lvl].push_str(value_len.as_ref());
                     } else {
-                        rows[lvl].push_str(dashes.as_slice());
+                        rows[lvl].push_str(dashes.as_ref());
                     }
                 }
 
@@ -1227,7 +1227,6 @@ impl<K, V> SkipMap<K, V> where
 unsafe impl<K: Send, V: Send> Send for SkipMap<K, V> { }
 unsafe impl<K: Sync, V: Sync> Sync for SkipMap<K, V> { }
 
-#[unsafe_destructor]
 impl<K, V> ops::Drop for SkipMap<K, V> {
     #[inline]
     fn drop(&mut self) {
@@ -1312,7 +1311,7 @@ impl<K, V> Extend<(K, V)> for SkipMap<K, V> where
 impl<'a, K, V> ops::Index<usize> for SkipMap<K, V> {
     type Output = V;
 
-    fn index(&self, index: &usize) -> &V {
+    fn index(&self, index: usize) -> &V {
         unsafe {
             (*self.get_index(index)).value.as_ref().unwrap()
         }
@@ -1320,7 +1319,7 @@ impl<'a, K, V> ops::Index<usize> for SkipMap<K, V> {
 }
 
 impl<'a, K, V> ops::IndexMut<usize> for SkipMap<K, V> {
-    fn index_mut(&mut self, index: &usize) -> &mut V {
+    fn index_mut(&mut self, index: usize) -> &mut V {
         unsafe {
             (*(self.get_index(index) as *mut SkipNode<K, V>)).value.as_mut().unwrap()
         }

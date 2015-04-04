@@ -6,7 +6,6 @@ use std::collections::Bound;
 use std::default;
 use std::fmt;
 use std::hash::{self, Hash};
-use std::iter::IteratorExt;
 use std::iter;
 use std::mem;
 use std::num;
@@ -1069,6 +1068,7 @@ impl<T> OrderedSkipList<T> {
     /// # Examples
     ///
     /// ```
+    /// #![feature(collections)]
     /// use skiplist::OrderedSkipList;
     /// use std::collections::Bound::{Included, Unbounded};
     ///
@@ -1326,9 +1326,9 @@ impl<T> OrderedSkipList<T> {
     /// # Panics
     ///
     /// Panics if the index given is out of bounds.
-    fn get_index(&self, index: &usize) -> *const SkipNode<T> {
+    fn get_index(&self, index: usize) -> *const SkipNode<T> {
         unsafe {
-            if index >= &self.len() {
+            if index >= self.len() {
                 panic!("Index out of bounds.");
             } else {
                 let mut node: *const SkipNode<T> = mem::transmute_copy(&self.head);
@@ -1338,7 +1338,7 @@ impl<T> OrderedSkipList<T> {
                 while lvl > 0 {
                     lvl -= 1;
 
-                    while &(index_sum + (*node).links_len[lvl]) <= index {
+                    while index_sum + (*node).links_len[lvl] <= index {
                         index_sum += (*node).links_len[lvl];
                         node = (*node).links[lvl].unwrap();
                     }
@@ -1387,9 +1387,9 @@ impl<T> OrderedSkipList<T>
                     }
 
                     if lvl <= (*node).level {
-                        rows[lvl].push_str(value_len.as_slice());
+                        rows[lvl].push_str(value_len.as_ref());
                     } else {
-                        rows[lvl].push_str(dashes.as_slice());
+                        rows[lvl].push_str(dashes.as_ref());
                     }
                 }
 
@@ -1487,7 +1487,7 @@ impl<T> Extend<T> for OrderedSkipList<T> {
 impl<T> ops::Index<usize> for OrderedSkipList<T> {
     type Output = T;
 
-    fn index(&self, index: &usize) -> &T {
+    fn index(&self, index: usize) -> &T {
         unsafe {
             (*self.get_index(index)).value.as_ref().unwrap()
         }

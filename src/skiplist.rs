@@ -6,7 +6,6 @@ use std::collections::Bound;
 use std::default;
 use std::fmt;
 use std::hash::{self, Hash};
-use std::iter::IteratorExt;
 use std::iter;
 use std::mem;
 use std::num;
@@ -256,7 +255,7 @@ impl<T> SkipList<T> {
             // adjusted and the insert nodes are stored in `insert_nodes`.
             let mut node: *mut SkipNode<T> = mem::transmute_copy(&mut self.head);
             let mut insert_nodes: Vec<*mut SkipNode<T>> = Vec::with_capacity(new_node.level);
-            
+
             let mut index_sum = 0;
             let mut lvl = self.level_generator.total();
             while lvl > 0 {
@@ -741,6 +740,7 @@ impl<T> SkipList<T> {
     /// # Examples
     ///
     /// ```
+    /// #![feature(collections)]
     /// use skiplist::SkipList;
     /// use std::collections::Bound::{Included, Unbounded};
     ///
@@ -790,6 +790,7 @@ impl<T> SkipList<T> {
     /// # Examples
     ///
     /// ```
+    /// #![feature(collections)]
     /// use skiplist::SkipList;
     /// use std::collections::Bound::{Included, Unbounded};
     ///
@@ -1119,9 +1120,9 @@ impl<T> SkipList<T>
                     }
 
                     if lvl <= (*node).level {
-                        rows[lvl].push_str(value_len.as_slice());
+                        rows[lvl].push_str(value_len.as_ref());
                     } else {
-                        rows[lvl].push_str(dashes.as_slice());
+                        rows[lvl].push_str(dashes.as_ref());
                     }
                 }
 
@@ -1219,9 +1220,9 @@ impl<T> Extend<T> for SkipList<T> {
 impl<T> ops::Index<usize> for SkipList<T> {
     type Output = T;
 
-    fn index(&self, index: &usize) -> &T {
+    fn index(&self, index: usize) -> &T {
         unsafe {
-            (*self.get_index(*index)).value.as_ref().unwrap()
+            (*self.get_index(index)).value.as_ref().unwrap()
         }
     }
 }
