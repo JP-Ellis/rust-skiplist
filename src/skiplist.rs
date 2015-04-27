@@ -7,8 +7,8 @@ use std::default;
 use std::fmt;
 use std::hash::{self, Hash};
 use std::iter;
+use std::marker::PhantomData;
 use std::mem;
-use std::num;
 use std::ops;
 
 use level_generator::{GeometricalLevelGenerator, LevelGenerator};
@@ -149,7 +149,7 @@ impl<T> SkipList<T> {
     /// ```
     #[inline]
     pub fn with_capacity(capacity: usize) -> Self {
-        let levels = num::Float::floor(num::Float::log2(capacity as f64)) as usize;
+        let levels = (capacity as f64).log2().floor() as usize;
         let lg = GeometricalLevelGenerator::new(levels, 1.0/2.0);
         SkipList {
             head: box SkipNode::head(lg.total()),
@@ -708,6 +708,7 @@ impl<T> SkipList<T> {
             start: unsafe { mem::transmute_copy(&self.head) },
             end: self.get_last(),
             size: self.len(),
+            _lifetime: PhantomData,
         }
     }
 
@@ -729,6 +730,7 @@ impl<T> SkipList<T> {
             start: unsafe { mem::transmute_copy(&self.head) },
             end: self.get_last() as *mut SkipNode<T>,
             size: self.len(),
+            _lifetime: PhantomData,
         }
     }
 
@@ -778,6 +780,7 @@ impl<T> SkipList<T> {
                     start as *mut SkipNode<T>,
                     Some(end as *mut SkipNode<T>),
                     cmp::min((*start).level, (*end).level) + 1),
+                _lifetime: PhantomData,
             }
         }
     }
@@ -828,6 +831,7 @@ impl<T> SkipList<T> {
                     start,
                     Some(end),
                     cmp::min((*start).level, (*end).level) + 1),
+                _lifetime: PhantomData,
             }
         }
     }
@@ -1267,17 +1271,17 @@ impl<T> iter::IntoIterator for SkipList<T> {
 }
 impl<'a, T> iter::IntoIterator for &'a SkipList<T> {
     type Item = &'a T;
-    type IntoIter = Iter<T>;
+    type IntoIter = Iter<'a, T>;
 
-    fn into_iter(self) -> Iter<T> {
+    fn into_iter(self) -> Iter<'a, T> {
         self.iter()
     }
 }
 impl<'a, T> iter::IntoIterator for &'a mut SkipList<T> {
     type Item = &'a mut T;
-    type IntoIter = IterMut<T>;
+    type IntoIter = IterMut<'a, T>;
 
-    fn into_iter(self) -> IterMut<T> {
+    fn into_iter(self) -> IterMut<'a, T> {
         self.iter_mut()
     }
 }
@@ -1306,16 +1310,17 @@ impl<T: Hash> Hash for SkipList<T> {
 // Extra structs
 //////////////////////////////////////////////////
 
-pub struct Iter<T> {
+pub struct Iter<'a, T: 'a> {
     start: *const SkipNode<T>,
     end: *const SkipNode<T>,
-    size: usize
+    size: usize,
+    _lifetime: PhantomData<&'a T>,
 }
 
-impl<'a, T> Iterator for Iter<T> {
+impl<'a, T> Iterator for Iter<'a, T> {
     type Item = &'a T;
 
-    fn next(&mut self) -> Option<&T> {
+    fn next(&mut self) -> Option<&'a T> {
         unsafe {
             if self.start == self.end {
                 return None;
@@ -1336,8 +1341,8 @@ impl<'a, T> Iterator for Iter<T> {
     }
 }
 
-impl<T> DoubleEndedIterator for Iter<T> {
-    fn next_back(&mut self) -> Option<&T> {
+impl<'a, T> DoubleEndedIterator for Iter<'a, T> {
+    fn next_back(&mut self) -> Option<&'a T> {
         unsafe {
             if self.end == self.start {
                 return None;
@@ -1353,16 +1358,17 @@ impl<T> DoubleEndedIterator for Iter<T> {
     }
 }
 
-pub struct IterMut<T> {
+pub struct IterMut<'a, T: 'a> {
     start: *mut SkipNode<T>,
     end: *mut SkipNode<T>,
-    size: usize
+    size: usize,
+    _lifetime: PhantomData<&'a T>,
 }
 
-impl<'a, T> Iterator for IterMut<T> {
+impl<'a, T> Iterator for IterMut<'a, T> {
     type Item = &'a mut T;
 
-    fn next(&mut self) -> Option<&mut T> {
+    fn next(&mut self) -> Option<&'a mut T> {
         unsafe {
             if self.start == self.end {
                 return None;
@@ -1381,8 +1387,8 @@ impl<'a, T> Iterator for IterMut<T> {
     }
 }
 
-impl<T> DoubleEndedIterator for IterMut<T> {
-    fn next_back(&mut self) -> Option<&mut T> {
+impl<'a, T> DoubleEndedIterator for IterMut<'a, T> {
+    fn next_back(&mut self) -> Option<&'a mut T> {
         unsafe {
             if self.end == self.start {
                 return None;
@@ -1646,10 +1652,12 @@ mod tests {
                 sl.insert(i, i*repeats);
             }
         }
-        let mut iter = sl.iter();
-        for i in 0..size {
-            for _ in 0..repeats {
-                assert_eq!(iter.next(), Some(&i));
+        {
+            let mut iter = sl.iter();
+            for i in 0..size {
+                for _ in 0..repeats {
+                    assert_eq!(iter.next(), Some(&i));
+                }
             }
         }
         sl.dedup();
@@ -1671,20 +1679,24 @@ mod tests {
                 sl.insert(i, i*repeats);
             }
         }
-        let mut iter = sl.iter();
-        for i in 0..size {
-            for _ in 0..repeats {
-                assert_eq!(iter.next(), Some(&i));
+        {
+            let mut iter = sl.iter();
+            for i in 0..size {
+                for _ in 0..repeats {
+                    assert_eq!(iter.next(), Some(&i));
+                }
             }
         }
         sl.retain(|&x| x%5 == 0);
         sl.check();
         assert_eq!(sl.len(), repeats * size/5);
 
-        let mut iter = sl.iter();
-        for i in 0..size/5 {
-            for _ in 0..repeats {
-                assert_eq!(iter.next(), Some(&(i*5)));
+        {
+            let mut iter = sl.iter();
+            for i in 0..size/5 {
+                for _ in 0..repeats {
+                    assert_eq!(iter.next(), Some(&(i*5)));
+                }
             }
         }
         sl.retain(|&_| false);

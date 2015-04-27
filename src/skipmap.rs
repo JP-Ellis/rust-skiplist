@@ -8,8 +8,8 @@ use std::default;
 use std::fmt;
 use std::hash::{self, Hash};
 use std::iter;
+use std::marker::PhantomData;
 use std::mem;
-use std::num;
 use std::ops;
 
 use level_generator::{GeometricalLevelGenerator, LevelGenerator};
@@ -167,7 +167,7 @@ impl<K, V> SkipMap<K, V> where
     /// ```
     #[inline]
     pub fn with_capacity(capacity: usize) -> Self {
-        let levels = num::Float::floor(num::Float::log2(capacity as f64)) as usize;
+        let levels = (capacity as f64).log2().floor() as usize;
         let lg = GeometricalLevelGenerator::new(levels, 1.0/2.0);
         SkipMap {
             head: box SkipNode::head(lg.total()),
@@ -845,6 +845,8 @@ impl<K, V> SkipMap<K, V> {
             start: unsafe { mem::transmute_copy(&self.head) },
             end: self.get_last(),
             size: self.len(),
+            _lifetime_k: PhantomData,
+            _lifetime_v: PhantomData,
         }
     }
 
@@ -868,6 +870,8 @@ impl<K, V> SkipMap<K, V> {
             start: unsafe { mem::transmute_copy(&self.head) },
             end: self.get_last() as *mut SkipNode<K, V>,
             size: self.len(),
+            _lifetime_k: PhantomData,
+            _lifetime_v: PhantomData,
         }
     }
 
@@ -889,6 +893,7 @@ impl<K, V> SkipMap<K, V> {
             start: unsafe { mem::transmute_copy(&self.head) },
             end: self.get_last(),
             size: self.len(),
+            _lifetime_k: PhantomData,
         }
     }
 
@@ -910,6 +915,7 @@ impl<K, V> SkipMap<K, V> {
             start: unsafe { mem::transmute_copy(&self.head) },
             end: self.get_last(),
             size: self.len(),
+            _lifetime_v: PhantomData,
         }
     }
 
@@ -976,6 +982,8 @@ impl<K, V> SkipMap<K, V> {
                     start as *mut SkipNode<K, V>,
                     Some(end as *mut SkipNode<K, V>),
                     cmp::min((*start).level, (*end).level) + 1),
+                _lifetime_k: PhantomData,
+                _lifetime_v: PhantomData,
             }
         }
     }
@@ -1371,17 +1379,17 @@ impl<K, V> iter::IntoIterator for SkipMap<K, V> {
 }
 impl<'a, K, V> iter::IntoIterator for &'a SkipMap<K, V> {
     type Item = (&'a K, &'a V);
-    type IntoIter = Iter<K, V>;
+    type IntoIter = Iter<'a, K, V>;
 
-    fn into_iter(self) -> Iter<K, V> {
+    fn into_iter(self) -> Iter<'a, K, V> {
         self.iter()
     }
 }
 impl<'a, K, V> iter::IntoIterator for &'a mut SkipMap<K, V> {
     type Item = (&'a K, &'a mut V);
-    type IntoIter = IterMut<K, V>;
+    type IntoIter = IterMut<'a, K, V>;
 
-    fn into_iter(self) -> IterMut<K, V> {
+    fn into_iter(self) -> IterMut<'a, K, V> {
         self.iter_mut()
     }
 }
@@ -1411,16 +1419,18 @@ impl<K: Hash, V: Hash> Hash for SkipMap<K, V> {
 // Extra structs
 //////////////////////////////////////////////////
 
-pub struct Iter<K, V> {
+pub struct Iter<'a, K: 'a, V: 'a> {
     start: *const SkipNode<K, V>,
     end: *const SkipNode<K, V>,
-    size: usize
+    size: usize,
+    _lifetime_k: PhantomData<&'a K>,
+    _lifetime_v: PhantomData<&'a V>,
 }
 
-impl<'a, K, V> Iterator for Iter<K, V> {
+impl<'a, K, V> Iterator for Iter<'a, K, V> {
     type Item = (&'a K, &'a V);
 
-    fn next(&mut self) -> Option<(&K, &V)> {
+    fn next(&mut self) -> Option<(&'a K, &'a V)> {
         unsafe {
             if self.start == self.end {
                 return None;
@@ -1441,8 +1451,8 @@ impl<'a, K, V> Iterator for Iter<K, V> {
     }
 }
 
-impl<K, V> DoubleEndedIterator for Iter<K, V> {
-    fn next_back(&mut self) -> Option<(&K, &V)> {
+impl<'a, K, V> DoubleEndedIterator for Iter<'a, K, V> {
+    fn next_back(&mut self) -> Option<(&'a K, &'a V)> {
         unsafe {
             if self.end == self.start {
                 return None;
@@ -1460,16 +1470,18 @@ impl<K, V> DoubleEndedIterator for Iter<K, V> {
     }
 }
 
-pub struct IterMut<K, V> {
+pub struct IterMut<'a, K: 'a, V: 'a> {
     start: *mut SkipNode<K, V>,
     end: *mut SkipNode<K, V>,
-    size: usize
+    size: usize,
+    _lifetime_k: PhantomData<&'a K>,
+    _lifetime_v: PhantomData<&'a V>,
 }
 
-impl<'a, K, V> Iterator for IterMut<K, V> {
+impl<'a, K, V> Iterator for IterMut<'a, K, V> {
     type Item = (&'a K, &'a mut V);
 
-    fn next(&mut self) -> Option<(&K, &mut V)> {
+    fn next(&mut self) -> Option<(&'a K, &'a mut V)> {
         unsafe {
             if self.start == self.end {
                 return None;
@@ -1488,8 +1500,8 @@ impl<'a, K, V> Iterator for IterMut<K, V> {
     }
 }
 
-impl<K, V> DoubleEndedIterator for IterMut<K, V> {
-    fn next_back(&mut self) -> Option<(&K, &mut V)> {
+impl<'a, K, V> DoubleEndedIterator for IterMut<'a, K, V> {
+    fn next_back(&mut self) -> Option<(&'a K, &'a mut V)> {
         unsafe {
             if self.end == self.start {
                 return None;
@@ -1571,16 +1583,17 @@ impl<K, V> DoubleEndedIterator for IntoIter<K, V> {
     }
 }
 
-pub struct Keys<K, V> {
+pub struct Keys<'a, K: 'a, V> {
     start: *const SkipNode<K, V>,
     end: *const SkipNode<K, V>,
-    size: usize
+    size: usize,
+    _lifetime_k: PhantomData<&'a K>,
 }
 
-impl<'a, K, V> Iterator for Keys<K, V> {
+impl<'a, K, V> Iterator for Keys<'a, K, V> {
     type Item = &'a K;
 
-    fn next(&mut self) -> Option<&K> {
+    fn next(&mut self) -> Option<&'a K> {
         unsafe {
             if self.start == self.end {
                 return None;
@@ -1601,8 +1614,8 @@ impl<'a, K, V> Iterator for Keys<K, V> {
     }
 }
 
-impl<K, V> DoubleEndedIterator for Keys<K, V> {
-    fn next_back(&mut self) -> Option<&K> {
+impl<'a, K, V> DoubleEndedIterator for Keys<'a, K, V> {
+    fn next_back(&mut self) -> Option<&'a K> {
         unsafe {
             if self.end == self.start {
                 return None;
@@ -1618,16 +1631,17 @@ impl<K, V> DoubleEndedIterator for Keys<K, V> {
     }
 }
 
-pub struct Values<K, V> {
+pub struct Values<'a, K, V: 'a> {
     start: *const SkipNode<K, V>,
     end: *const SkipNode<K, V>,
-    size: usize
+    size: usize,
+    _lifetime_v: PhantomData<&'a V>,
 }
 
-impl<'a, K, V> Iterator for Values<K, V> {
+impl<'a, K, V> Iterator for Values<'a, K, V> {
     type Item = &'a V;
 
-    fn next(&mut self) -> Option<&V> {
+    fn next(&mut self) -> Option<&'a V> {
         unsafe {
             if self.start == self.end {
                 return None;
@@ -1648,8 +1662,8 @@ impl<'a, K, V> Iterator for Values<K, V> {
     }
 }
 
-impl<K, V> DoubleEndedIterator for Values<K, V> {
-    fn next_back(&mut self) -> Option<&V> {
+impl<'a, K, V> DoubleEndedIterator for Values<'a, K, V> {
+    fn next_back(&mut self) -> Option<&'a V> {
         unsafe {
             if self.end == self.start {
                 return None;

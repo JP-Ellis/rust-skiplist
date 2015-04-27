@@ -7,8 +7,8 @@ use std::default;
 use std::fmt;
 use std::hash::{self, Hash};
 use std::iter;
+use std::marker::PhantomData;
 use std::mem;
-use std::num;
 use std::ops;
 
 use level_generator::{GeometricalLevelGenerator, LevelGenerator};
@@ -187,7 +187,7 @@ impl<T> OrderedSkipList<T> where
     /// ```
     #[inline]
     pub fn with_capacity(capacity: usize) -> Self {
-        let levels = num::Float::floor(num::Float::log2(capacity as f64)) as usize;
+        let levels = (capacity as f64).log2().floor() as usize;
         let lg = GeometricalLevelGenerator::new(levels, 1.0/2.0);
         OrderedSkipList {
             head: box SkipNode::head(lg.total()),
@@ -1057,6 +1057,7 @@ impl<T> OrderedSkipList<T> {
             start: unsafe { mem::transmute_copy(&self.head) },
             end: self.get_last(),
             size: self.len(),
+            _lifetime: PhantomData,
         }
     }
 
@@ -1167,6 +1168,7 @@ impl<T> OrderedSkipList<T> {
                     start as *mut SkipNode<T>,
                     Some(end as *mut SkipNode<T>),
                     cmp::min((*start).level, (*end).level) + 1),
+                _lifetime: PhantomData,
             }
         }
     }
@@ -1534,17 +1536,17 @@ impl<T> iter::IntoIterator for OrderedSkipList<T> {
 }
 impl<'a, T> iter::IntoIterator for &'a OrderedSkipList<T> {
     type Item = &'a T;
-    type IntoIter = Iter<T>;
+    type IntoIter = Iter<'a, T>;
 
-    fn into_iter(self) -> Iter<T> {
+    fn into_iter(self) -> Iter<'a, T> {
         self.iter()
     }
 }
 impl<'a, T> iter::IntoIterator for &'a mut OrderedSkipList<T> {
     type Item = &'a T;
-    type IntoIter = Iter<T>;
+    type IntoIter = Iter<'a, T>;
 
-    fn into_iter(self) -> Iter<T> {
+    fn into_iter(self) -> Iter<'a, T> {
         self.iter()
     }
 }
@@ -1573,16 +1575,17 @@ impl<T: Hash> Hash for OrderedSkipList<T> {
 // Extra structs
 //////////////////////////////////////////////////
 
-pub struct Iter<T> {
+pub struct Iter<'a, T: 'a> {
     start: *const SkipNode<T>,
     end: *const SkipNode<T>,
-    size: usize
+    size: usize,
+    _lifetime: PhantomData<&'a T>,
 }
 
-impl<'a, T> Iterator for Iter<T> {
+impl<'a, T> Iterator for Iter<'a, T> {
     type Item = &'a T;
 
-    fn next(&mut self) -> Option<&T> {
+    fn next(&mut self) -> Option<&'a T> {
         unsafe {
             if self.start == self.end {
                 return None;
@@ -1603,8 +1606,8 @@ impl<'a, T> Iterator for Iter<T> {
     }
 }
 
-impl<T> DoubleEndedIterator for Iter<T> {
-    fn next_back(&mut self) -> Option<&T> {
+impl<'a, T> DoubleEndedIterator for Iter<'a, T> {
+    fn next_back(&mut self) -> Option<&'a T> {
         unsafe {
             if self.end == self.start {
                 return None;
@@ -1861,10 +1864,12 @@ mod tests {
         for _ in 0..repeats {
             sl.extend(0..size);
         }
-        let mut iter = sl.iter();
-        for i in 0..size {
-            for _ in 0..repeats {
-                assert_eq!(iter.next(), Some(&i));
+        {
+            let mut iter = sl.iter();
+            for i in 0..size {
+                for _ in 0..repeats {
+                    assert_eq!(iter.next(), Some(&i));
+                }
             }
         }
         sl.dedup();
@@ -1883,20 +1888,24 @@ mod tests {
         for _ in 0..repeats {
             sl.extend(0..size);
         }
-        let mut iter = sl.iter();
-        for i in 0..size {
-            for _ in 0..repeats {
-                assert_eq!(iter.next(), Some(&i));
+        {
+            let mut iter = sl.iter();
+            for i in 0..size {
+                for _ in 0..repeats {
+                    assert_eq!(iter.next(), Some(&i));
+                }
             }
         }
         sl.retain(|&x| x%5 == 0);
         sl.check();
         assert_eq!(sl.len(), repeats * size/5);
 
-        let mut iter = sl.iter();
-        for i in 0..size/5 {
-            for _ in 0..repeats {
-                assert_eq!(iter.next(), Some(&(i*5)));
+        {
+            let mut iter = sl.iter();
+            for i in 0..size/5 {
+                for _ in 0..repeats {
+                    assert_eq!(iter.next(), Some(&(i*5)));
+                }
             }
         }
         sl.retain(|&_| false);
