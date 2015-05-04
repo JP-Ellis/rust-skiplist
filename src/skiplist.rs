@@ -1151,7 +1151,6 @@ impl<T> SkipList<T>
 unsafe impl<T: Send> Send for SkipList<T> { }
 unsafe impl<T: Sync> Sync for SkipList<T> { }
 
-#[unsafe_destructor]
 impl<T> ops::Drop for SkipList<T> {
     #[inline]
     fn drop(&mut self) {

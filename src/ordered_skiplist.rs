@@ -1416,7 +1416,6 @@ impl<T> OrderedSkipList<T>
 unsafe impl<T: Send> Send for OrderedSkipList<T> { }
 unsafe impl<T: Sync> Sync for OrderedSkipList<T> { }
 
-#[unsafe_destructor]
 impl<T> ops::Drop for OrderedSkipList<T> {
     #[inline]
     fn drop(&mut self) {

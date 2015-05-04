@@ -28,7 +28,6 @@
 #![feature(core)]
 #![feature(test)]
 #![feature(unboxed_closures)]
-#![feature(unsafe_destructor)]
 
 #![allow(dead_code)]
 #![allow(raw_pointer_derive)]
