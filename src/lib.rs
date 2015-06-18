@@ -36,6 +36,7 @@ extern crate rand;
 extern crate test;
 
 mod level_generator;
+mod skipnode;
 mod ordered_skiplist;
 mod skipmap;
 mod skiplist;

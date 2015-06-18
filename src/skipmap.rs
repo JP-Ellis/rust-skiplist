@@ -46,15 +46,15 @@ struct SkipNode<K, V> {
 
 impl<K, V> SkipNode<K, V> {
     /// Create a new head node.
-    fn head(total: usize) -> Self {
+    fn head(total_levels: usize) -> Self {
         SkipNode {
             key: None,
             value: None,
-            level: total - 1,
+            level: total_levels - 1,
             next: None,
             prev: None,
-            links: iter::repeat(None).take(total).collect(),
-            links_len: iter::repeat(0).take(total).collect(),
+            links: iter::repeat(None).take(total_levels).collect(),
+            links_len: iter::repeat(0).take(total_levels).collect(),
         }
     }
 
