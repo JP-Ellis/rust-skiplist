@@ -264,7 +264,7 @@ impl<K, V> SkipMap<K, V> where
                             }
                             new_node.links_len[lvl] = 1;
                         } else {
-                            let length = self.link_length(prev_node, Some(new_node_ptr), lvl);
+                            let length = self.link_length(prev_node, Some(new_node_ptr), lvl).unwrap();
                             new_node.links_len[lvl] = (*prev_node).links_len[lvl] - length + 1;
                             (*prev_node).links_len[lvl] = length;
                         }
@@ -975,15 +975,26 @@ impl<K, V> SkipMap<K, V> {
                 },
                 Bound::Unbounded => self.get_last()
             };
-            Iter {
-                start: start,
-                end: end,
-                size: self.link_length(
-                    start as *mut SkipNode<K, V>,
-                    Some(end as *mut SkipNode<K, V>),
-                    cmp::min((*start).level, (*end).level) + 1),
-                _lifetime_k: PhantomData,
-                _lifetime_v: PhantomData,
+            match self.link_length(
+                start as *mut SkipNode<K, V>,
+                Some(end as *mut SkipNode<K, V>),
+                cmp::min((*start).level, (*end).level) + 1) {
+                Err(_) => {
+                    Iter {
+                        start: start,
+                        end: start,
+                        size: 0,
+                        _lifetime_k: PhantomData,
+                        _lifetime_v: PhantomData,
+                    }
+                },
+                Ok(l) => Iter {
+                    start: start,
+                    end: end,
+                    size: l,
+                    _lifetime_k: PhantomData,
+                    _lifetime_v: PhantomData,
+                }
             }
         }
     }
@@ -1016,7 +1027,7 @@ impl<K, V> SkipMap<K, V> {
                         self.link_length(
                             node as *mut SkipNode<K, V>,
                             (*node).links[lvl],
-                            lvl));
+                            lvl).unwrap());
 
                     if lvl == 0 {
                         assert!((*node).next.is_some() == (*node).links[lvl].is_some());
@@ -1051,7 +1062,9 @@ impl<K, V> SkipMap<K, V> {
     /// The `lvl` option specifies the level at which we desire to calculate the length and thus
     /// assumes that `lvl-1` is correct.  `lvl=0` is always guaranteed to be correct if all the
     /// `next[0]` links are in order since at level 0, all links lengths are 1.
-    fn link_length(&self, start: *mut SkipNode<K, V>, end: Option<*mut SkipNode<K, V>>, lvl: usize) -> usize {
+    ///
+    /// If the end node is not encountered, Err(false) is returned.
+    fn link_length(&self, start: *mut SkipNode<K, V>, end: Option<*mut SkipNode<K, V>>, lvl: usize) -> Result<usize, bool> {
         unsafe {
             let mut length = 0;
             let mut node = start;
@@ -1077,12 +1090,13 @@ impl<K, V> SkipMap<K, V> {
                     }
                 }
             }
+            // Check that we actually have calculated the length to the end node we want.
             if let Some(end) = end {
                 if node != end {
-                    panic!("An end node was specified but never encountered.  Reported value is incorect.");
+                    return Err(false);
                 }
             }
-            length
+            Ok(length)
         }
     }
 
@@ -1459,7 +1473,11 @@ impl<'a, K, V> DoubleEndedIterator for Iter<'a, K, V> {
             }
             if let Some(prev) = (*self.end).prev {
                 let node = self.end;
-                self.size -= 1;
+                if prev as *const SkipNode<K, V> != self.start {
+                    self.size -= 1;
+                } else {
+                    self.size = 0;
+                }
                 self.end = prev;
                 if (*node).key.is_some() {
                     return Some(((*node).key.as_ref().unwrap(), (*node).value.as_ref().unwrap()));
@@ -1508,7 +1526,11 @@ impl<'a, K, V> DoubleEndedIterator for IterMut<'a, K, V> {
             }
             if let Some(prev) = (*self.end).prev {
                 let node = self.end;
-                self.size -= 1;
+                if prev as *const SkipNode<K, V> != self.start {
+                    self.size -= 1;
+                } else {
+                    self.size = 0;
+                }
                 self.end = prev;
                 if (*node).key.is_some() {
                     return Some(((*node).key.as_ref().unwrap(), (*node).value.as_mut().unwrap()));
@@ -1571,7 +1593,11 @@ impl<K, V> DoubleEndedIterator for IntoIter<K, V> {
                 return None;
             }
             if let Some(prev) = (*self.end).prev {
-                self.size -= 1;
+                if prev as *const SkipNode<K, V> != self.head {
+                    self.size -= 1;
+                } else {
+                    self.size = 0;
+                }
                 self.end = prev;
                 (*self.end).links[0] = None;
                 return mem::replace(&mut (*self.end).next, None)
@@ -1602,6 +1628,8 @@ impl<'a, K, V> Iterator for Keys<'a, K, V> {
                 self.start = next;
                 if self.size > 0 {
                     self.size -= 1;
+                } else {
+                    self.size = 0;
                 }
                 return (*self.start).key.as_ref();
             }
@@ -1622,7 +1650,11 @@ impl<'a, K, V> DoubleEndedIterator for Keys<'a, K, V> {
             }
             if let Some(prev) = (*self.end).prev {
                 let node = self.end;
-                self.size -= 1;
+                if prev as *const SkipNode<K, V> != self.start {
+                    self.size -= 1;
+                } else {
+                    self.size = 0;
+                }
                 self.end = prev;
                 return (*node).key.as_ref();
             }
@@ -1670,7 +1702,11 @@ impl<'a, K, V> DoubleEndedIterator for Values<'a, K, V> {
             }
             if let Some(prev) = (*self.end).prev {
                 let node = self.end;
-                self.size -= 1;
+                if prev as *const SkipNode<K, V> != self.start {
+                    self.size -= 1;
+                } else {
+                    self.size = 0;
+                }
                 self.end = prev;
                 return (*node).value.as_ref();
             }
@@ -1833,7 +1869,7 @@ mod tests {
         let sm: SkipMap<_, _> = (0..size).map(|x| (x, x)).collect();
 
         for i in 0..size {
-            for j in i..size {
+            for j in 0..size {
                 let mut values = sm.range(Included(&i), Included(&j)).map(|(&a, &b)| (a, b));
                 let mut expects = range_inclusive(i, j);
 
@@ -1845,6 +1881,9 @@ mod tests {
                 assert_eq!(expects.next(), None);
             }
         }
+
+        // let mut values = sm.range(Included(&10), Included(&5)).map(|(&a, &b)| (a, b));
+        // assert_eq!(values.next(), None);
     }
 
     #[test]

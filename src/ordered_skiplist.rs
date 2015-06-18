@@ -340,7 +340,7 @@ impl<T> OrderedSkipList<T> {
                         };
                     new_node.links_len[lvl] = 1;
                 } else {
-                    let length = self.link_length(insert_node, Some(new_node_ptr), lvl);
+                    let length = self.link_length(insert_node, Some(new_node_ptr), lvl).unwrap();
                     new_node.links_len[lvl] = (*insert_node).links_len[lvl] - length + 1;
                     (*insert_node).links_len[lvl] = length;
                 }
@@ -828,7 +828,7 @@ impl<T> OrderedSkipList<T> {
                     }
                     // At this point, links[lvl] points to a node which we know will be retained
                     // (or None), so we update all the appropriate links.
-                    (*node).links_len[lvl] = self.link_length(node, (*node).links[lvl], lvl);
+                    (*node).links_len[lvl] = self.link_length(node, (*node).links[lvl], lvl).unwrap();
                     // And finally proceed to the next node.
                     if let Some(next) = (*node).links[lvl] {
                         node = next;
@@ -906,7 +906,7 @@ impl<T> OrderedSkipList<T> {
                     }
                     // At this point, links[lvl] points to a node which we know will be retained
                     // (or None), so we update all the appropriate links.
-                    (*node).links_len[lvl] = self.link_length(node, (*node).links[lvl], lvl);
+                    (*node).links_len[lvl] = self.link_length(node, (*node).links[lvl], lvl).unwrap();
                     // And finally proceed to the next node.
                     if let Some(next) = (*node).links[lvl] {
                         node = next;
@@ -1076,14 +1076,22 @@ impl<T> OrderedSkipList<T> {
                 },
                 Bound::Unbounded => self.get_last()
             };
-            Iter {
-                start: start,
-                end: end,
-                size: self.link_length(
-                    start as *mut SkipNode<T>,
-                    Some(end as *mut SkipNode<T>),
-                    cmp::min((*start).level, (*end).level) + 1),
-                _lifetime: PhantomData,
+            match self.link_length(
+                start as *mut SkipNode<T>,
+                Some(end as *mut SkipNode<T>),
+                cmp::min((*start).level, (*end).level) + 1) {
+                Ok(l) => Iter {
+                    start: start,
+                    end: end,
+                    size: l,
+                    _lifetime: PhantomData,
+                },
+                Err(_) => Iter {
+                    start: start,
+                    end: start,
+                    size: 0,
+                    _lifetime: PhantomData,
+                }
             }
         }
     }
@@ -1114,7 +1122,7 @@ impl<T> OrderedSkipList<T> {
                         self.link_length(
                             node as *mut SkipNode<T>,
                             (*node).links[lvl],
-                            lvl));
+                            lvl).unwrap());
 
                     if lvl == 0 {
                         assert!((*node).next.is_some() == (*node).links[lvl].is_some());
@@ -1149,7 +1157,9 @@ impl<T> OrderedSkipList<T> {
     /// The `lvl` option specifies the level at which we desire to calculate the length and thus
     /// assumes that `lvl-1` is correct.  `lvl=0` is always guaranteed to be correct if all the
     /// `next[0]` links are in order since at level 0, all links lengths are 1.
-    fn link_length(&self, start: *mut SkipNode<T>, end: Option<*mut SkipNode<T>>, lvl: usize) -> usize {
+    ///
+    /// If the end node is not encountered, Err(false) is returned.
+    fn link_length(&self, start: *mut SkipNode<T>, end: Option<*mut SkipNode<T>>, lvl: usize) -> Result<usize, bool> {
         unsafe {
             let mut length = 0;
             let mut node = start;
@@ -1175,12 +1185,13 @@ impl<T> OrderedSkipList<T> {
                     }
                 }
             }
+            // Check that we actually have calculated the length to the end node we want.
             if let Some(end) = end {
                 if node != end {
-                    panic!("An end node was specified but never encountered.  Reported value is incorect.");
+                    return Err(false);
                 }
             }
-            length
+            Ok(length)
         }
     }
 
@@ -1528,7 +1539,11 @@ impl<'a, T> DoubleEndedIterator for Iter<'a, T> {
             }
             if let Some(prev) = (*self.end).prev {
                 let node = self.end;
-                self.size -= 1;
+                if prev as *const SkipNode<T> != self.start {
+                    self.size -= 1;
+                } else {
+                    self.size = 0;
+                }
                 self.end = prev;
                 return (*node).value.as_ref();
             }
@@ -1588,7 +1603,11 @@ impl<T> DoubleEndedIterator for IntoIter<T> {
                 return None;
             }
             if let Some(prev) = (*self.end).prev {
-                self.size -= 1;
+                if prev as *const SkipNode<T> != self.head {
+                    self.size -= 1;
+                } else {
+                    self.size = 0;
+                }
                 self.end = prev;
                 (*self.end).links[0] = None;
                 let node = mem::replace(&mut (*self.end).next, None);
@@ -1746,7 +1765,7 @@ mod tests {
         let sl: OrderedSkipList<_> = (0..size).collect();
 
         for i in 0..size {
-            for j in i..size {
+            for j in 0..size {
                 let mut values = sl.range(Included(&i), Included(&j)).map(|&i| i);
                 let mut expects = range_inclusive(i, j);
 
