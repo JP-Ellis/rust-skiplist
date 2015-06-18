@@ -1,19 +1,23 @@
 language: rust
+rust:
+  # - stable
+  # - beta
+  - nightly
 env:
   global:
     secure: Tjh6yf9DDiwsIOFP57tl5QIaKe2uvkZOMToT13ochZs3cM9DqW5u3oLaAeNtnZiMvnCpEb7vs+n6p526UNdFCNGNrbH+R0d/ioWLvE+VBssewSjveR4kIeKGIahQMzLnjrgID8cRGZ6qrpx1qmPT9Qyp1Drd1dYY6lo6LQdXm8Q=
 script:
-- cargo build --verbose
-- cargo test --verbose
-- cargo doc
+  - cargo build --verbose
+  - cargo test --verbose
+  - cargo doc
 after_success:
-- git clone --branch gh-pages "https://$GH_TOKEN@github.com/${TRAVIS_REPO_SLUG}.git" deploy_docs
-- cd deploy_docs
-- git config user.name "JP-Ellis"
-- git config user.email "coujellis@gmail.com"
-- git config push.default simple
-- rm -rf *
-- mv ../target/doc/* .
-- git add -A .
-- git commit -m "Updated to commit $TRAVIS_COMMIT (Travis build $TRAVIS_BUILD_NUMBER)."
-- git push
+  - git clone --branch gh-pages "https://$GH_TOKEN@github.com/${TRAVIS_REPO_SLUG}.git" deploy_docs
+  - cd deploy_docs
+  - git config user.name "JP-Ellis"
+  - git config user.email "coujellis@gmail.com"
+  - git config push.default simple
+  - rm -rf *
+  - mv ../target/doc/* .
+  - git add -A .
+  - git commit -m "Updated to commit $TRAVIS_COMMIT (Travis build $TRAVIS_BUILD_NUMBER)."
+  - git push
