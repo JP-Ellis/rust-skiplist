@@ -658,7 +658,7 @@ impl<T> SkipList<T> {
     /// # Examples
     ///
     /// ```
-    /// #![feature(collections)]
+    /// #![feature(collections_bound)]
     /// use skiplist::SkipList;
     /// use std::collections::Bound::{Included, Unbounded};
     ///
@@ -717,7 +717,7 @@ impl<T> SkipList<T> {
     /// # Examples
     ///
     /// ```
-    /// #![feature(collections)]
+    /// #![feature(collections_bound)]
     /// use skiplist::SkipList;
     /// use std::collections::Bound::{Included, Unbounded};
     ///
