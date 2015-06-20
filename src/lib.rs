@@ -24,8 +24,9 @@
 //! will cause a segfault, null deref, or some other bad behaviour.**
 
 #![feature(box_syntax)]
-#![feature(collections)]
-#![feature(core)]
+#![feature(collections_bound)]
+#![feature(iter_order)]
+#![feature(range_inclusive)]
 #![feature(test)]
 #![feature(unboxed_closures)]
 

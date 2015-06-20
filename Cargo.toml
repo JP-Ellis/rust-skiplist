@@ -1,7 +1,7 @@
 [package]
 
 name = "skiplist"
-version = "0.2.5"
+version = "0.2.6"
 authors = ["JP-Ellis <coujellis@gmail.com>"]
 
 description = "Skiplist implementation in rust, providing fast insertion and removal.  A normal skiplist is implemented, as well as an ordered skiplist and a skipmap."

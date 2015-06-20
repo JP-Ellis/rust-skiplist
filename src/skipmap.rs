@@ -927,7 +927,7 @@ impl<K, V> SkipMap<K, V> {
     /// # Examples
     ///
     /// ```
-    /// #![feature(collections)]
+    /// #![feature(collections_bound)]
     /// use skiplist::SkipMap;
     /// use std::collections::Bound::{Included, Unbounded};
     ///
