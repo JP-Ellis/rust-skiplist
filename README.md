@@ -15,3 +15,5 @@ There are three kinds of collections defined here:
 Documentation can be found
 [here](https://jp-ellis.github.io/rust-skiplist/skiplist/) and the cargo crate
 can be found [here](https://crates.io/crates/skiplist).
+
+At present, this crate works only on the nightly version of Rust.
