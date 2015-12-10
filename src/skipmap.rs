@@ -1723,7 +1723,6 @@ impl<'a, K, V> DoubleEndedIterator for Values<'a, K, V> {
 #[cfg(test)]
 mod tests {
     use std::collections::Bound::{self, Included, Excluded, Unbounded};
-    use std::iter::range_inclusive;
     use super::SkipMap;
 
     #[test]
@@ -1871,7 +1870,7 @@ mod tests {
         for i in 0..size {
             for j in 0..size {
                 let mut values = sm.range(Included(&i), Included(&j)).map(|(&a, &b)| (a, b));
-                let mut expects = range_inclusive(i, j);
+                let mut expects = i..(j+1);
 
                 for ((k, v), e) in values.by_ref().zip(expects.by_ref()) {
                     assert_eq!(k, e);

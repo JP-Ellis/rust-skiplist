@@ -26,7 +26,6 @@
 #![feature(box_syntax)]
 #![feature(collections_bound)]
 #![feature(iter_order)]
-#![feature(range_inclusive)]
 #![feature(test)]
 #![feature(unboxed_closures)]
 

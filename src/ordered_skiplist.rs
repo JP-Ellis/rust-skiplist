@@ -1625,7 +1625,6 @@ impl<T> DoubleEndedIterator for IntoIter<T> {
 #[cfg(test)]
 mod tests {
     use std::collections::Bound::{self, Included, Excluded, Unbounded};
-    use std::iter::range_inclusive;
     use super::OrderedSkipList;
 
     #[test]
@@ -1767,7 +1766,7 @@ mod tests {
         for i in 0..size {
             for j in 0..size {
                 let mut values = sl.range(Included(&i), Included(&j)).map(|&i| i);
-                let mut expects = range_inclusive(i, j);
+                let mut expects = i..(j+1);
 
                 for (v, e) in values.by_ref().zip(expects.by_ref()) {
                     assert_eq!(v, e);
