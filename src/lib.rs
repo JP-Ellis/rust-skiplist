@@ -23,7 +23,6 @@
 //! **Failure to satisfy these properties can result in unexpected behaviour at best, and at worst
 //! will cause a segfault, null deref, or some other bad behaviour.**
 
-#![feature(box_syntax)]
 #![feature(collections_bound)]
 #![feature(iter_order)]
 #![feature(test)]

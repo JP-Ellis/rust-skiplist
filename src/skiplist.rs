@@ -45,7 +45,7 @@ impl<T> SkipList<T> {
     pub fn new() -> Self {
         let lg = GeometricalLevelGenerator::new(16, 1.0/2.0);
         SkipList {
-            head: box SkipNode::head(lg.total()),
+            head: Box::new(SkipNode::head(lg.total())),
             len: 0,
             level_generator: lg,
         }
@@ -68,7 +68,7 @@ impl<T> SkipList<T> {
         let levels = (capacity as f64).log2().floor() as usize;
         let lg = GeometricalLevelGenerator::new(levels, 1.0/2.0);
         SkipList {
-            head: box SkipNode::head(lg.total()),
+            head: Box::new(SkipNode::head(lg.total())),
             len: 0,
             level_generator: lg,
         }
@@ -99,7 +99,7 @@ impl<T> SkipList<T> {
                         None));
             }
         }
-        let new_head = box SkipNode::head(self.level_generator.total());
+        let new_head = Box::new(SkipNode::head(self.level_generator.total()));
         self.len = 0;
         mem::replace(&mut self.head, new_head);
     }
@@ -163,7 +163,7 @@ impl<T> SkipList<T> {
         unsafe {
             self.len += 1;
 
-            let mut new_node = box SkipNode::new(value, self.level_generator.random());
+            let mut new_node = Box::new(SkipNode::new(value, self.level_generator.random()));
             let new_node_ptr: *mut SkipNode<T> = mem::transmute_copy(&new_node);
 
             // At each level, `node` moves down the list until it is just prior to where the node

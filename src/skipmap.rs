@@ -147,7 +147,7 @@ impl<K, V> SkipMap<K, V> where
     pub fn new() -> Self {
         let lg = GeometricalLevelGenerator::new(16, 1.0/2.0);
         SkipMap {
-            head: box SkipNode::head(lg.total()),
+            head: Box::new(SkipNode::head(lg.total())),
             len: 0,
             level_generator: lg,
         }
@@ -170,7 +170,7 @@ impl<K, V> SkipMap<K, V> where
         let levels = (capacity as f64).log2().floor() as usize;
         let lg = GeometricalLevelGenerator::new(levels, 1.0/2.0);
         SkipMap {
-            head: box SkipNode::head(lg.total()),
+            head: Box::new(SkipNode::head(lg.total())),
             len: 0,
             level_generator: lg,
         }
@@ -249,7 +249,7 @@ impl<K, V> SkipMap<K, V> where
                     &mut (*existing_node).value,
                     Some(value))
             } else {
-                let mut new_node = box SkipNode::new(key, value, self.level_generator.random());
+                let mut new_node = Box::new(SkipNode::new(key, value, self.level_generator.random()));
                 let new_node_ptr: *mut SkipNode<K, V> = mem::transmute_copy(&new_node);
 
                 for (lvl, &prev_node) in prev_nodes.iter().rev().enumerate() {
@@ -312,7 +312,7 @@ impl<K, V> SkipMap<K, V> {
                         None));
             }
         }
-        let new_head = box SkipNode::head(self.level_generator.total());
+        let new_head = Box::new(SkipNode::head(self.level_generator.total()));
         self.len = 0;
         mem::replace(&mut self.head, new_head);
     }
