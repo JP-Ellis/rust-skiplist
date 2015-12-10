@@ -1,5 +1,5 @@
 extern crate rand;
-extern crate test;
+#[cfg(test)] extern crate test;
 
 use std::cmp::{self, Ordering};
 use std::collections::Bound;
@@ -1373,13 +1373,11 @@ impl<A, B> cmp::PartialEq<OrderedSkipList<B>> for OrderedSkipList<A>
         where A: cmp::PartialEq<B> {
     #[inline]
     fn eq(&self, other: &OrderedSkipList<B>) -> bool {
-        self.len() == other.len() &&
-            iter::order::eq(self.iter(), other.iter())
+        self.len() == other.len() && self.iter().eq(other)
     }
     #[inline]
     fn ne(&self, other: &OrderedSkipList<B>) -> bool {
-        self.len != other.len ||
-            iter::order::ne(self.iter(), other.iter())
+        self.len != other.len || self.iter().ne(other)
     }
 }
 
@@ -1389,7 +1387,7 @@ impl<A, B> cmp::PartialOrd<OrderedSkipList<B>> for OrderedSkipList<A>
         where A: cmp::PartialOrd<B> {
     #[inline]
     fn partial_cmp(&self, other: &OrderedSkipList<B>) -> Option<Ordering> {
-        iter::order::partial_cmp(self.iter(), other.iter())
+        self.iter().partial_cmp(other)
     }
 }
 
@@ -1397,7 +1395,7 @@ impl<T> Ord for OrderedSkipList<T>
         where T: cmp::Ord {
     #[inline]
     fn cmp(&self, other: &OrderedSkipList<T>) -> Ordering {
-        iter::order::cmp(self.iter(), other.iter())
+        self.iter().cmp(other)
     }
 }
 

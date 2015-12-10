@@ -1,5 +1,5 @@
 extern crate rand;
-extern crate test;
+#[cfg(test)] extern crate test;
 
 use std::borrow::Borrow;
 use std::cmp::{self, Ordering};
@@ -1282,15 +1282,15 @@ impl<AK, AV, BK, BV> cmp::PartialEq<SkipMap<BK, BV>> for SkipMap<AK, AV> where
     {
     #[inline]
     fn eq(&self, other: &SkipMap<BK, BV>) -> bool {
-        self.len() == other.len() &&
-            iter::order::eq(self.iter().map(|x| x.0), other.iter().map(|x| x.0)) &&
-            iter::order::eq(self.iter().map(|x| x.1), other.iter().map(|x| x.1))
+        self.len() == other.len()
+            && self.iter().map(|x| x.0).eq(other.iter().map(|x| x.0))
+            && self.iter().map(|x| x.1).eq(other.iter().map(|x| x.1))
     }
     #[inline]
     fn ne(&self, other: &SkipMap<BK, BV>) -> bool {
-        self.len() == other.len() ||
-            iter::order::ne(self.iter().map(|x| x.0), other.iter().map(|x| x.0)) ||
-            iter::order::eq(self.iter().map(|x| x.1), other.iter().map(|x| x.1))
+        self.len() == other.len()
+            || self.iter().map(|x| x.0).ne(other.iter().map(|x| x.0))
+            || self.iter().map(|x| x.1).ne(other.iter().map(|x| x.1))
     }
 }
 
@@ -1302,19 +1302,25 @@ impl<AK, AV, BK, BV> cmp::PartialOrd<SkipMap<BK, BV>> for SkipMap<AK, AV> where
     {
     #[inline]
     fn partial_cmp(&self, other: &SkipMap<BK, BV>) -> Option<Ordering> {
-        match iter::order::partial_cmp(self.iter().map(|x| x.0), other.iter().map(|x| x.0)) {
+        match self.iter().map(|x| x.0).partial_cmp(other.iter().map(|x| x.0)) {
             None => None,
             Some(Ordering::Less) => Some(Ordering::Less),
             Some(Ordering::Greater) => Some(Ordering::Greater),
-            Some(Ordering::Equal) => iter::order::partial_cmp(self.iter().map(|x| x.1), other.iter().map(|x| x.1))
+            Some(Ordering::Equal) => self.iter().map(|x| x.1).partial_cmp(other.iter().map(|x| x.1))
         }
+        // match iter::order::partial_cmp(self.iter().map(|x| x.0), other.iter().map(|x| x.0)) {
+        //     None => None,
+        //     Some(Ordering::Less) => Some(Ordering::Less),
+        //     Some(Ordering::Greater) => Some(Ordering::Greater),
+        //     Some(Ordering::Equal) => iter::order::partial_cmp(self.iter().map(|x| x.1), other.iter().map(|x| x.1))
+        // }
     }
 }
 
 impl<K, V> Ord for SkipMap<K, V> where K: cmp::Ord, V: cmp::Ord {
     #[inline]
     fn cmp(&self, other: &SkipMap<K, V>) -> Ordering {
-        iter::order::cmp(self.iter(), other.iter())
+        self.iter().cmp(other)
     }
 }
 

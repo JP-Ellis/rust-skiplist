@@ -1,5 +1,5 @@
 extern crate rand;
-extern crate test;
+#[cfg(test)] extern crate test;
 
 use std::cmp::{self, Ordering};
 use std::collections::Bound;
@@ -1117,13 +1117,11 @@ impl<A, B> cmp::PartialEq<SkipList<B>> for SkipList<A>
         where A: cmp::PartialEq<B> {
     #[inline]
     fn eq(&self, other: &SkipList<B>) -> bool {
-        self.len() == other.len() &&
-            iter::order::eq(self.iter(), other.iter())
+        self.len() == other.len() && self.iter().eq(other)
     }
     #[inline]
     fn ne(&self, other: &SkipList<B>) -> bool {
-        self.len != other.len ||
-            iter::order::ne(self.iter(), other.iter())
+        self.len != other.len || self.iter().eq(other)
     }
 }
 
@@ -1133,7 +1131,7 @@ impl<A, B> cmp::PartialOrd<SkipList<B>> for SkipList<A>
         where A: cmp::PartialOrd<B> {
     #[inline]
     fn partial_cmp(&self, other: &SkipList<B>) -> Option<Ordering> {
-        iter::order::partial_cmp(self.iter(), other.iter())
+        self.iter().partial_cmp(other)
     }
 }
 
@@ -1141,7 +1139,7 @@ impl<T> Ord for SkipList<T>
         where T: cmp::Ord {
     #[inline]
     fn cmp(&self, other: &SkipList<T>) -> Ordering {
-        iter::order::cmp(self.iter(), other.iter())
+        self.iter().cmp(other)
     }
 }
 
@@ -1578,7 +1576,7 @@ mod tests {
         for i in 0..size {
             for j in 0..size {
                 let mut values = sl.range(Included(i), Included(j)).rev().map(|&i| i);
-                let mut expects = i..(j+1).rev();
+                let mut expects = (i..(j+1)).rev();
 
                 for (v, e) in values.by_ref().zip(expects.by_ref()) {
                     assert_eq!(v, e);

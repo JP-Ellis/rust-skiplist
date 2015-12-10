@@ -24,15 +24,13 @@
 //! will cause a segfault, null deref, or some other bad behaviour.**
 
 #![feature(collections_bound)]
-#![feature(iter_order)]
-#![feature(test)]
+#![cfg_attr(test, feature(test))]
 #![feature(unboxed_closures)]
 
 #![allow(dead_code)]
-#![allow(raw_pointer_derive)]
 
 extern crate rand;
-extern crate test;
+#[cfg(test)] extern crate test;
 
 mod level_generator;
 mod skipnode;
