@@ -1,6 +1,7 @@
 Rust Skiplist
 =============
 
+[![crates.io](https://img.shields.io/crates/v/skiplist.svg)](https://crates.io/crates/skiplist)
 [![Build Status](https://travis-ci.org/JP-Ellis/rust-skiplist.svg?branch=master)](https://travis-ci.org/JP-Ellis/rust-skiplist)
 
 A [skiplist](http://en.wikipedia.org/wiki/Skip_list) provides a way of storing
@@ -16,4 +17,5 @@ Documentation can be found
 [here](https://jp-ellis.github.io/rust-skiplist/skiplist/) and the cargo crate
 can be found [here](https://crates.io/crates/skiplist).
 
-At present, this crate works only on the nightly version of Rust.
+The various `range` methods only work on the nightly version of Rust and
+consequently are only enabled with the `unstable` feature.

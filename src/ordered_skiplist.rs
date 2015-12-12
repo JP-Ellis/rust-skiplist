@@ -2,6 +2,7 @@ extern crate rand;
 #[cfg(test)] extern crate test;
 
 use std::cmp::{self, Ordering};
+#[cfg(feature = "unstable")]
 use std::collections::Bound;
 use std::default;
 use std::fmt;
@@ -996,6 +997,7 @@ impl<T> OrderedSkipList<T> {
     /// }
     /// assert_eq!(Some(&4), skiplist.range(Included(&4), Unbounded).next());
     /// ```
+    #[cfg(feature = "unstable")]
     pub fn range(&self, min: Bound<&T>, max: Bound<&T>) -> Iter<T> {
         unsafe {
             // We have to find the start and end nodes.  We use `find_value`; if no node with the

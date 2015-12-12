@@ -23,11 +23,11 @@
 //! **Failure to satisfy these properties can result in unexpected behaviour at best, and at worst
 //! will cause a segfault, null deref, or some other bad behaviour.**
 
-#![feature(collections_bound)]
-#![cfg_attr(test, feature(test))]
-#![feature(unboxed_closures)]
+#![cfg_attr(feature = "unstable", feature(collections_bound))]
+#![cfg_attr(test, feature(test, collections_bound))]
 
 #![allow(dead_code)]
+#![allow(raw_pointer_derive)]
 
 extern crate rand;
 #[cfg(test)] extern crate test;

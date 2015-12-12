@@ -3,6 +3,7 @@ extern crate rand;
 
 use std::borrow::Borrow;
 use std::cmp::{self, Ordering};
+#[cfg(feature = "unstable")]
 use std::collections::Bound;
 use std::default;
 use std::fmt;
@@ -938,6 +939,7 @@ impl<K, V> SkipMap<K, V> {
     /// }
     /// assert_eq!(Some((&4, &4)), skipmap.range(Included(&4), Unbounded).next());
     /// ```
+    #[cfg(feature = "unstable")]
     pub fn range<Q>(&self, min: Bound<&Q>, max: Bound<&Q>) -> Iter<K, V> where
         K: Borrow<Q>,
         Q: Ord
