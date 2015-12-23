@@ -1,8 +1,5 @@
-Rust Skiplist
+[Rust Skiplist](http://www.jpellis.me/projects/rust-skiplist) [![crates.io](https://img.shields.io/crates/v/skiplist.svg)](https://crates.io/crates/skiplist) [![crates.io](https://img.shields.io/crates/d/skiplist.svg)](https://crates.io/crates/skiplist) [![Build Status](https://img.shields.io/travis/JP-Ellis/rust-skiplist/master.svg)](https://travis-ci.org/JP-Ellis/rust-skiplist)
 =============
-
-[![crates.io](https://img.shields.io/crates/v/skiplist.svg)](https://crates.io/crates/skiplist)
-[![Build Status](https://travis-ci.org/JP-Ellis/rust-skiplist.svg?branch=master)](https://travis-ci.org/JP-Ellis/rust-skiplist)
 
 A [skiplist](http://en.wikipedia.org/wiki/Skip_list) provides a way of storing
 data with `log(i)` access, insertion and removal for an element in the `i`th position.
