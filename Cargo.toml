@@ -6,8 +6,8 @@ authors = ["JP-Ellis <coujellis@gmail.com>"]
 
 description = "Skiplist implementation in rust, providing fast insertion and removal.  A normal skiplist is implemented, as well as an ordered skiplist and a skipmap."
 
-documentation = "https://jp-ellis.github.io/rust-skiplist/skiplist/"
-homepage = "https://www.github.com/JP-Ellis/rust-skiplist/"
+documentation = "https://www.jpellis.me/rust-skiplist/skiplist/"
+homepage = "https://www.jpellis.me/projects/rust-skiplist/"
 repository = "https://www.github.com/JP-Ellis/rust-skiplist/"
 
 readme = "README.md"

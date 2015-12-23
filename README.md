@@ -11,7 +11,7 @@ There are three kinds of collections defined here:
 - **SkipMap**  A map in which the keys are ordered.
 
 Documentation can be found
-[here](https://jp-ellis.github.io/rust-skiplist/skiplist/) and the cargo crate
+[here](https://www.jpellis.me/rust-skiplist/skiplist/) and the cargo crate
 can be found [here](https://crates.io/crates/skiplist).
 
 The various `range` methods only work on the nightly version of Rust and
