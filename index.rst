@@ -6,6 +6,7 @@ Rust-Skiplist
 :title: Rust-Skiplist
 :slug: rust-skiplist
 :date: 2015-12-12
+:sort: 5
 :template: page_index
 :share: True
 :github: https://github.com/JP-Ellis/rust-skiplist/
