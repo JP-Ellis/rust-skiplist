@@ -1,0 +1,8 @@
+[submodule "pages"]
+	path = pages
+	url = http://github.com/JP-Ellis/rust-skiplist.git
+	branch = pages
+[submodule "gh-pages"]
+	path = gh-pages
+	url = git@github.com:JP-Ellis/rust-skiplist.git
+	branch = gh-pages
