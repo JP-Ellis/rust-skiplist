@@ -27,7 +27,6 @@
 #![cfg_attr(test, feature(test, collections_bound))]
 
 #![allow(dead_code)]
-#![allow(raw_pointer_derive)]
 
 extern crate rand;
 #[cfg(test)] extern crate test;
