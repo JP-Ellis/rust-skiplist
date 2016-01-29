@@ -1,9 +1,9 @@
 use std::fmt;
 use std::iter;
 
-////////////////////////////////////////////////////////////////////////////////////////////////////
+// /////////////////////////////////////////////////////////////////////////////////////////////////
 // SkipNode
-////////////////////////////////////////////////////////////////////////////////////////////////////
+// /////////////////////////////////////////////////////////////////////////////////////////////////
 
 /// SkipNodes are make up the SkipList.  The SkipList owns the first head-node
 /// (which has no value) and each node has ownership of the next node through
@@ -33,12 +33,12 @@ pub struct SkipNode<V> {
     // `self.level + 1`.  links[0] stores a pointer to the same node as next.
     pub links: Vec<Option<*mut SkipNode<V>>>,
     // The corresponding length of each link
-    pub links_len: Vec<usize>
+    pub links_len: Vec<usize>,
 }
 
-//////////////////////////////////////////////////
+// ///////////////////////////////////////////////
 // Inherent methods
-//////////////////////////////////////////////////
+// ///////////////////////////////////////////////
 
 impl<V> SkipNode<V> {
     /// Create a new head node.
@@ -61,8 +61,8 @@ impl<V> SkipNode<V> {
             level: level,
             next: None,
             prev: None,
-            links: iter::repeat(None).take(level+1).collect(),
-            links_len: iter::repeat(0).take(level+1).collect(),
+            links: iter::repeat(None).take(level + 1).collect(),
+            links_len: iter::repeat(0).take(level + 1).collect(),
         }
     }
 
@@ -86,13 +86,12 @@ impl<V> SkipNode<V> {
     }
 }
 
-//////////////////////////////////////////////////
+// ///////////////////////////////////////////////
 // Trait implementation
-//////////////////////////////////////////////////
+// ///////////////////////////////////////////////
 
-impl<V> fmt::Display for SkipNode<V> where
-        V: fmt::Display,
-    {
+impl<V> fmt::Display for SkipNode<V> where V: fmt::Display
+{
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         if let &Some(ref v) = &self.value {
             write!(f, "{}", v)

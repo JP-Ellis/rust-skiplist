@@ -1,5 +1,6 @@
 extern crate rand;
-#[cfg(test)] extern crate test;
+#[cfg(test)]
+extern crate test;
 
 use std::cmp::{self, Ordering};
 #[cfg(feature = "unstable")]
@@ -15,9 +16,9 @@ use std::ops;
 use level_generator::{GeometricalLevelGenerator, LevelGenerator};
 use skipnode::SkipNode;
 
-////////////////////////////////////////////////////////////////////////////////////////////////////
+// /////////////////////////////////////////////////////////////////////////////////////////////////
 // SkipList
-////////////////////////////////////////////////////////////////////////////////////////////////////
+// /////////////////////////////////////////////////////////////////////////////////////////////////
 
 /// SkipList provides a way of storing elements and provides efficient way to access, insert and
 /// remove nodes.
@@ -28,9 +29,9 @@ pub struct SkipList<T> {
     level_generator: GeometricalLevelGenerator,
 }
 
-//////////////////////////////////////////////////
+// ///////////////////////////////////////////////
 // Inherent methods
-//////////////////////////////////////////////////
+// ///////////////////////////////////////////////
 
 impl<T> SkipList<T> {
     /// Create a new skiplist with the default number of 16 levels.
@@ -44,7 +45,7 @@ impl<T> SkipList<T> {
     /// ```
     #[inline]
     pub fn new() -> Self {
-        let lg = GeometricalLevelGenerator::new(16, 1.0/2.0);
+        let lg = GeometricalLevelGenerator::new(16, 1.0 / 2.0);
         SkipList {
             head: Box::new(SkipNode::head(lg.total())),
             len: 0,
@@ -67,7 +68,7 @@ impl<T> SkipList<T> {
     #[inline]
     pub fn with_capacity(capacity: usize) -> Self {
         let levels = (capacity as f64).log2().floor() as usize;
-        let lg = GeometricalLevelGenerator::new(levels, 1.0/2.0);
+        let lg = GeometricalLevelGenerator::new(levels, 1.0 / 2.0);
         SkipList {
             head: Box::new(SkipNode::head(lg.total())),
             len: 0,
@@ -93,11 +94,7 @@ impl<T> SkipList<T> {
             let node: *mut SkipNode<T> = mem::transmute_copy(&self.head);
 
             while let Some(ref mut next) = (*node).next {
-                mem::replace(
-                    &mut (*node).next,
-                    mem::replace(
-                        &mut next.next,
-                        None));
+                mem::replace(&mut (*node).next, mem::replace(&mut next.next, None));
             }
         }
         let new_head = Box::new(SkipNode::head(self.level_generator.total()));
@@ -180,10 +177,10 @@ impl<T> SkipList<T> {
 
                 // Move insert_node down until `next` is not less than the new node.
                 while let Some(next) = (*node).links[lvl] {
-                     if index_sum + (*node).links_len[lvl] < index {
-                         index_sum += (*node).links_len[lvl];
-                         node = next;
-                         continue;
+                    if index_sum + (*node).links_len[lvl] < index {
+                        index_sum += (*node).links_len[lvl];
+                        node = next;
+                        continue;
                     } else {
                         break;
                     }
@@ -205,12 +202,11 @@ impl<T> SkipList<T> {
             // lengths.
             for (lvl, &node) in insert_nodes.iter().rev().enumerate() {
                 if lvl == 0 {
-                    (*node).links_len[lvl] =
-                        if (*node).is_head() {
-                            0
-                        } else {
-                            1
-                        };
+                    (*node).links_len[lvl] = if (*node).is_head() {
+                        0
+                    } else {
+                        1
+                    };
                     new_node.links_len[lvl] = 1;
                 } else {
                     let length = self.link_length(node, Some(new_node_ptr), lvl).unwrap();
@@ -329,7 +325,7 @@ impl<T> SkipList<T> {
     pub fn back(&self) -> Option<&T> {
         let len = self.len();
         if len > 0 {
-            self.get(len-1)
+            self.get(len - 1)
         } else {
             None
         }
@@ -353,7 +349,7 @@ impl<T> SkipList<T> {
     pub fn back_mut(&mut self) -> Option<&mut T> {
         let len = self.len();
         if len > 0 {
-            self.get_mut(len-1)
+            self.get_mut(len - 1)
         } else {
             None
         }
@@ -377,9 +373,7 @@ impl<T> SkipList<T> {
     pub fn get(&self, index: usize) -> Option<&T> {
         let len = self.len();
         if index < len {
-            unsafe {
-                (*self.get_index(index)).value.as_ref()
-            }
+            unsafe { (*self.get_index(index)).value.as_ref() }
         } else {
             None
         }
@@ -403,9 +397,7 @@ impl<T> SkipList<T> {
     pub fn get_mut(&mut self, index: usize) -> Option<&mut T> {
         let len = self.len();
         if index < len {
-            unsafe {
-                (*(self.get_index(index) as *mut SkipNode<T>)).value.as_mut()
-            }
+            unsafe { (*(self.get_index(index) as *mut SkipNode<T>)).value.as_mut() }
         } else {
             None
         }
@@ -454,7 +446,7 @@ impl<T> SkipList<T> {
     pub fn pop_back(&mut self) -> Option<T> {
         let len = self.len();
         if len > 0 {
-            Some(self.remove(len-1))
+            Some(self.remove(len - 1))
         } else {
             None
         }
@@ -507,11 +499,8 @@ impl<T> SkipList<T> {
                     (*next).prev = (*return_node).prev;
                 }
                 self.len -= 1;
-                mem::replace(
-                    &mut (*(*return_node).prev.unwrap()).next,
-                    mem::replace(
-                        &mut (*return_node).next,
-                        None))
+                mem::replace(&mut (*(*return_node).prev.unwrap()).next,
+                             mem::replace(&mut (*return_node).next, None))
                     .unwrap()
                     .into_inner()
                     .unwrap()
@@ -533,7 +522,9 @@ impl<T> SkipList<T> {
     /// skiplist.extend(0..10);
     /// skiplist.retain(|&x| x%2 == 0);
     /// ```
-    pub fn retain<F>(&mut self, mut f: F) where F: FnMut(&T) -> bool {
+    pub fn retain<F>(&mut self, mut f: F)
+        where F: FnMut(&T) -> bool
+    {
         unsafe {
             let mut removed_nodes = Vec::new();
 
@@ -547,7 +538,7 @@ impl<T> SkipList<T> {
                     // and we repeat until links[lvl] point to a node which will be retained.
                     if let Some(next) = (*node).links[lvl] {
                         if let Some(ref value) = (*next).value {
-                            if ! f(value) {
+                            if !f(value) {
                                 (*node).links[lvl] = (*next).links[lvl];
                                 if lvl == 0 {
                                     removed_nodes.push(next);
@@ -558,7 +549,8 @@ impl<T> SkipList<T> {
                     }
                     // At this point, links[lvl] points to a node which we know will be retained
                     // (or None), so we update all the appropriate links.
-                    (*node).links_len[lvl] = self.link_length(node, (*node).links[lvl], lvl).unwrap();
+                    (*node).links_len[lvl] = self.link_length(node, (*node).links[lvl], lvl)
+                                                 .unwrap();
                     // And finally proceed to the next node.
                     if let Some(next) = (*node).links[lvl] {
                         node = next;
@@ -575,11 +567,7 @@ impl<T> SkipList<T> {
                     (*next).prev = (*node).prev;
                 }
                 if let Some(prev) = (*node).prev {
-                    mem::replace(
-                        &mut (*prev).next,
-                        mem::replace(
-                            &mut (*node).next,
-                            None));
+                    mem::replace(&mut (*prev).next, mem::replace(&mut (*node).next, None));
                 }
             }
         }
@@ -680,32 +668,37 @@ impl<T> SkipList<T> {
             let start = match min {
                 Bound::Included(min) => (*self.get_index(min)).prev.unwrap() as *const SkipNode<T>,
                 Bound::Excluded(min) => self.get_index(min),
-                Bound::Unbounded     => mem::transmute_copy(&self.head),
+                Bound::Unbounded => mem::transmute_copy(&self.head),
             };
             let end = match max {
                 Bound::Included(max) => self.get_index(max),
-                Bound::Excluded(max) => if max == self.len() {
-                    self.get_index(max-1)
-                } else {
-                    (*self.get_index(max)).prev.unwrap() as *const SkipNode<T>
-                },
-                Bound::Unbounded     => self.get_last()
+                Bound::Excluded(max) => {
+                    if max == self.len() {
+                        self.get_index(max - 1)
+                    } else {
+                        (*self.get_index(max)).prev.unwrap() as *const SkipNode<T>
+                    }
+                }
+                Bound::Unbounded => self.get_last(),
             };
-            match self.link_length(
-                start as *mut SkipNode<T>,
-                Some(end as *mut SkipNode<T>),
-                cmp::min((*start).level, (*end).level) + 1) {
-                Ok(l) => Iter {
-                    start: start,
-                    end: end,
-                    size: l,
-                    _lifetime: PhantomData,
-                },
-                Err(_) => Iter {
-                    start: start,
-                    end: start,
-                    size: 0,
-                    _lifetime: PhantomData,
+            match self.link_length(start as *mut SkipNode<T>,
+                                   Some(end as *mut SkipNode<T>),
+                                   cmp::min((*start).level, (*end).level) + 1) {
+                Ok(l) => {
+                    Iter {
+                        start: start,
+                        end: end,
+                        size: l,
+                        _lifetime: PhantomData,
+                    }
+                }
+                Err(_) => {
+                    Iter {
+                        start: start,
+                        end: start,
+                        size: 0,
+                        _lifetime: PhantomData,
+                    }
                 }
             }
         }
@@ -740,42 +733,45 @@ impl<T> SkipList<T> {
             let start = match min {
                 Bound::Included(min) => (*self.get_index(min)).prev.unwrap(),
                 Bound::Excluded(min) => self.get_index(min) as *mut SkipNode<T>,
-                Bound::Unbounded     => mem::transmute_copy(&self.head),
+                Bound::Unbounded => mem::transmute_copy(&self.head),
             };
             let end = match max {
                 Bound::Included(max) => self.get_index(max) as *mut SkipNode<T>,
-                Bound::Excluded(max) => if max == self.len() {
-                    self.get_index(max-1) as *mut SkipNode<T>
-                } else {
-                    (*self.get_index(max)).prev.unwrap()
-                },
-                Bound::Unbounded     => self.get_last() as *mut SkipNode<T>
+                Bound::Excluded(max) => {
+                    if max == self.len() {
+                        self.get_index(max - 1) as *mut SkipNode<T>
+                    } else {
+                        (*self.get_index(max)).prev.unwrap()
+                    }
+                }
+                Bound::Unbounded => self.get_last() as *mut SkipNode<T>,
             };
-            match self.link_length(
-                start as *mut SkipNode<T>,
-                Some(end as *mut SkipNode<T>),
-                cmp::min((*start).level, (*end).level) + 1) {
-                Ok(l) => IterMut {
-                    start: start,
-                    end: end,
-                    size: l,
-                    _lifetime: PhantomData,
-                },
-                Err(_) => IterMut {
-                    start: start,
-                    end: start,
-                    size: 0,
-                    _lifetime: PhantomData,
+            match self.link_length(start as *mut SkipNode<T>,
+                                   Some(end as *mut SkipNode<T>),
+                                   cmp::min((*start).level, (*end).level) + 1) {
+                Ok(l) => {
+                    IterMut {
+                        start: start,
+                        end: end,
+                        size: l,
+                        _lifetime: PhantomData,
+                    }
+                }
+                Err(_) => {
+                    IterMut {
+                        start: start,
+                        end: start,
+                        size: 0,
+                        _lifetime: PhantomData,
+                    }
                 }
             }
         }
     }
-
 }
 
-impl<T> SkipList<T> where
-        T: PartialEq
-    {
+impl<T> SkipList<T> where T: PartialEq
+{
     /// Returns true if the value is contained in the skiplist.
     ///
     /// # Examples
@@ -853,7 +849,8 @@ impl<T> SkipList<T> where
                     }
                     // At this point, links[lvl] points to a node which we know will be retained
                     // (or None), so we update all the appropriate links.
-                    (*node).links_len[lvl] = self.link_length(node, (*node).links[lvl], lvl).unwrap();
+                    (*node).links_len[lvl] = self.link_length(node, (*node).links[lvl], lvl)
+                                                 .unwrap();
                     // And finally proceed to the next node.
                     if let Some(next) = (*node).links[lvl] {
                         node = next;
@@ -870,20 +867,16 @@ impl<T> SkipList<T> where
                     (*next).prev = (*node).prev;
                 }
                 if let Some(prev) = (*node).prev {
-                    mem::replace(
-                        &mut (*prev).next,
-                        mem::replace(
-                            &mut (*node).next,
-                            None));
+                    mem::replace(&mut (*prev).next, mem::replace(&mut (*node).next, None));
                 }
             }
         }
     }
 }
 
-//////////////////////////////////////////////////
+// ///////////////////////////////////////////////
 // Internal methods
-//////////////////////////////////////////////////
+// ///////////////////////////////////////////////
 
 impl<T> SkipList<T> {
     /// Checks the integrity of the skiplist.
@@ -901,12 +894,9 @@ impl<T> SkipList<T> {
                     length_sum += (*node).links_len[lvl];
                     assert_eq!((*node).level + 1, (*node).links.len());
                     assert_eq!((*node).level + 1, (*node).links_len.len());
-                    assert_eq!(
-                        (*node).links_len[lvl],
-                        self.link_length(
-                            node as *mut SkipNode<T>,
-                            (*node).links[lvl],
-                            lvl).unwrap());
+                    assert_eq!((*node).links_len[lvl],
+                               self.link_length(node as *mut SkipNode<T>, (*node).links[lvl], lvl)
+                                   .unwrap());
 
                     if lvl == 0 {
                         assert!((*node).next.is_some() == (*node).links[lvl].is_some());
@@ -943,7 +933,11 @@ impl<T> SkipList<T> {
     /// `next[0]` links are in order since at level 0, all links lengths are 1.
     ///
     /// If the end node is not encountered, Err(false) is returned.
-    fn link_length(&self, start: *mut SkipNode<T>, end: Option<*mut SkipNode<T>>, lvl: usize) -> Result<usize, bool> {
+    fn link_length(&self,
+                   start: *mut SkipNode<T>,
+                   end: Option<*mut SkipNode<T>>,
+                   lvl: usize)
+                   -> Result<usize, bool> {
         unsafe {
             let mut length = 0;
             let mut node = start;
@@ -962,8 +956,8 @@ impl<T> SkipList<T> {
                 }
             } else {
                 while Some(node) != end {
-                    length += (*node).links_len[lvl-1];
-                    match (*node).links[lvl-1] {
+                    length += (*node).links_len[lvl - 1];
+                    match (*node).links[lvl - 1] {
                         Some(ptr) => node = ptr,
                         None => break,
                     }
@@ -1024,13 +1018,15 @@ impl<T> SkipList<T> {
     }
 }
 
-impl<T> SkipList<T>
-        where T: fmt::Debug {
+impl<T> SkipList<T> where T: fmt::Debug
+{
     /// Prints out the internal structure of the skiplist (for debugging purposes).
     fn debug_structure(&self) {
         unsafe {
             let mut node: *const SkipNode<T> = mem::transmute_copy(&self.head);
-            let mut rows: Vec<_> = iter::repeat(String::new()).take(self.level_generator.total()).collect();
+            let mut rows: Vec<_> = iter::repeat(String::new())
+                                       .take(self.level_generator.total())
+                                       .collect();
 
             loop {
                 let value: String;
@@ -1082,12 +1078,12 @@ impl<T> SkipList<T>
     }
 }
 
-//////////////////////////////////////////////////
+// ///////////////////////////////////////////////
 // Trait implementation
-//////////////////////////////////////////////////
+// ///////////////////////////////////////////////
 
-unsafe impl<T: Send> Send for SkipList<T> { }
-unsafe impl<T: Sync> Sync for SkipList<T> { }
+unsafe impl<T: Send> Send for SkipList<T> {}
+unsafe impl<T: Sync> Sync for SkipList<T> {}
 
 impl<T> ops::Drop for SkipList<T> {
     #[inline]
@@ -1096,11 +1092,7 @@ impl<T> ops::Drop for SkipList<T> {
             let node: *mut SkipNode<T> = mem::transmute_copy(&self.head);
 
             while let Some(ref mut next) = (*node).next {
-                mem::replace(
-                    &mut (*node).next,
-                    mem::replace(
-                        &mut next.next,
-                        None));
+                mem::replace(&mut (*node).next, mem::replace(&mut next.next, None));
             }
         }
     }
@@ -1116,8 +1108,8 @@ impl<T: PartialOrd> default::Default for SkipList<T> {
 /// equivalence of other features (such as the ordering function and the node levels).
 /// Furthermore, this uses `T`'s implementation of PartialEq and *does not* use the owning
 /// skiplist's comparison function.
-impl<A, B> cmp::PartialEq<SkipList<B>> for SkipList<A>
-        where A: cmp::PartialEq<B> {
+impl<A, B> cmp::PartialEq<SkipList<B>> for SkipList<A> where A: cmp::PartialEq<B>
+{
     #[inline]
     fn eq(&self, other: &SkipList<B>) -> bool {
         self.len() == other.len() && self.iter().eq(other)
@@ -1128,18 +1120,19 @@ impl<A, B> cmp::PartialEq<SkipList<B>> for SkipList<A>
     }
 }
 
-impl<T> cmp::Eq for SkipList<T> where T: cmp::Eq  { }
+impl<T> cmp::Eq for SkipList<T> where T: cmp::Eq
+{}
 
-impl<A, B> cmp::PartialOrd<SkipList<B>> for SkipList<A>
-        where A: cmp::PartialOrd<B> {
+impl<A, B> cmp::PartialOrd<SkipList<B>> for SkipList<A> where A: cmp::PartialOrd<B>
+{
     #[inline]
     fn partial_cmp(&self, other: &SkipList<B>) -> Option<Ordering> {
         self.iter().partial_cmp(other)
     }
 }
 
-impl<T> Ord for SkipList<T>
-        where T: cmp::Ord {
+impl<T> Ord for SkipList<T> where T: cmp::Ord
+{
     #[inline]
     fn cmp(&self, other: &SkipList<T>) -> Ordering {
         self.iter().cmp(other)
@@ -1148,7 +1141,7 @@ impl<T> Ord for SkipList<T>
 
 impl<T> Extend<T> for SkipList<T> {
     #[inline]
-    fn extend<I: iter::IntoIterator<Item=T>>(&mut self, iterable: I) {
+    fn extend<I: iter::IntoIterator<Item = T>>(&mut self, iterable: I) {
         let iterator = iterable.into_iter();
         for element in iterator {
             self.push_back(element);
@@ -1160,14 +1153,12 @@ impl<T> ops::Index<usize> for SkipList<T> {
     type Output = T;
 
     fn index(&self, index: usize) -> &T {
-        unsafe {
-            (*self.get_index(index)).value.as_ref().unwrap()
-        }
+        unsafe { (*self.get_index(index)).value.as_ref().unwrap() }
     }
 }
 
-impl<T> fmt::Debug for SkipList<T>
-        where T: fmt::Debug {
+impl<T> fmt::Debug for SkipList<T> where T: fmt::Debug
+{
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         try!(write!(f, "["));
 
@@ -1181,8 +1172,8 @@ impl<T> fmt::Debug for SkipList<T>
     }
 }
 
-impl<T> fmt::Display for SkipList<T>
-        where T: fmt::Display {
+impl<T> fmt::Display for SkipList<T> where T: fmt::Display
+{
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         try!(write!(f, "["));
 
@@ -1221,11 +1212,12 @@ impl<'a, T> iter::IntoIterator for &'a mut SkipList<T> {
     }
 }
 
-impl<T> iter::FromIterator<T> for SkipList<T> where
-        T: PartialOrd {
+impl<T> iter::FromIterator<T> for SkipList<T> where T: PartialOrd
+{
     #[inline]
-    fn from_iter<I>(iter: I) -> SkipList<T> where
-            I: iter::IntoIterator<Item=T> {
+    fn from_iter<I>(iter: I) -> SkipList<T>
+        where I: iter::IntoIterator<Item = T>
+    {
         let mut skiplist = SkipList::new();
         skiplist.extend(iter);
         skiplist
@@ -1241,9 +1233,9 @@ impl<T: Hash> Hash for SkipList<T> {
     }
 }
 
-//////////////////////////////////////////////////
+// ///////////////////////////////////////////////
 // Extra structs
-//////////////////////////////////////////////////
+// ///////////////////////////////////////////////
 
 pub struct Iter<'a, T: 'a> {
     start: *const SkipNode<T>,
@@ -1350,7 +1342,7 @@ pub struct IntoIter<T> {
     skiplist: SkipList<T>,
     head: *mut SkipNode<T>,
     end: *mut SkipNode<T>,
-    size: usize
+    size: usize,
 }
 
 impl<T> Iterator for IntoIter<T> {
@@ -1372,12 +1364,8 @@ impl<T> Iterator for IntoIter<T> {
                 }
                 self.skiplist.len -= 1;
                 self.size -= 1;
-                let popped_node =
-                    mem::replace(
-                        &mut (*self.head).next,
-                        mem::replace(
-                            &mut (*next).next,
-                            None));
+                let popped_node = mem::replace(&mut (*self.head).next,
+                                               mem::replace(&mut (*next).next, None));
                 popped_node.expect("Should have a node").value
             } else {
                 None
@@ -1412,9 +1400,9 @@ impl<T> DoubleEndedIterator for IntoIter<T> {
     }
 }
 
-////////////////////////////////////////////////////////////////////////////////////////////////////
+// /////////////////////////////////////////////////////////////////////////////////////////////////
 // Tests and Benchmarks
-////////////////////////////////////////////////////////////////////////////////////////////////////
+// /////////////////////////////////////////////////////////////////////////////////////////////////
 
 #[cfg(test)]
 mod tests {
@@ -1423,13 +1411,20 @@ mod tests {
 
     #[test]
     fn basic_small() {
-        let mut sl: SkipList<i64> = SkipList::new();        sl.check();
-        sl.insert(1, 0);                                    sl.check();
-        assert_eq!(sl.remove(0), 1);                        sl.check();
-        sl.insert(1, 0);                                    sl.check();
-        sl.insert(2, 1);                                    sl.check();
-        assert_eq!(sl.remove(0), 1);                        sl.check();
-        assert_eq!(sl.remove(0), 2);                        sl.check();
+        let mut sl: SkipList<i64> = SkipList::new();
+        sl.check();
+        sl.insert(1, 0);
+        sl.check();
+        assert_eq!(sl.remove(0), 1);
+        sl.check();
+        sl.insert(1, 0);
+        sl.check();
+        sl.insert(2, 1);
+        sl.check();
+        assert_eq!(sl.remove(0), 1);
+        sl.check();
+        assert_eq!(sl.remove(0), 2);
+        sl.check();
     }
 
     #[test]
@@ -1463,7 +1458,8 @@ mod tests {
         let sl: SkipList<_> = (0..size).collect();
 
         fn test<T>(size: usize, mut iter: T)
-                where T: Iterator<Item=usize> {
+            where T: Iterator<Item = usize>
+        {
             for i in 0..size {
                 assert_eq!(iter.size_hint(), (size - i, Some(size - i)));
                 assert_eq!(iter.next().unwrap(), i);
@@ -1483,7 +1479,8 @@ mod tests {
         let sl: SkipList<_> = (0..size).collect();
 
         fn test<T>(size: usize, mut iter: T)
-                where T: Iterator<Item=usize> {
+            where T: Iterator<Item = usize>
+        {
             for i in 0..size {
                 assert_eq!(iter.size_hint(), (size - i, Some(size - i)));
                 assert_eq!(iter.next().unwrap(), size - i - 1);
@@ -1503,7 +1500,8 @@ mod tests {
         let sl: SkipList<_> = (0..size).collect();
 
         fn test<T>(size: usize, mut iter: T)
-                where T: Iterator<Item=usize> + DoubleEndedIterator {
+            where T: Iterator<Item = usize> + DoubleEndedIterator
+        {
             for i in 0..size / 4 {
                 assert_eq!(iter.size_hint(), (size - i * 2, Some(size - i * 2)));
                 assert_eq!(iter.next().unwrap(), i);
@@ -1566,7 +1564,7 @@ mod tests {
         for i in 0..size {
             for j in 0..size {
                 let mut values = sl.range(Included(i), Included(j)).map(|&i| i);
-                let mut expects = i..(j+1);
+                let mut expects = i..(j + 1);
 
                 for (v, e) in values.by_ref().zip(expects.by_ref()) {
                     assert_eq!(v, e);
@@ -1579,7 +1577,7 @@ mod tests {
         for i in 0..size {
             for j in 0..size {
                 let mut values = sl.range(Included(i), Included(j)).rev().map(|&i| i);
-                let mut expects = (i..(j+1)).rev();
+                let mut expects = (i..(j + 1)).rev();
 
                 for (v, e) in values.by_ref().zip(expects.by_ref()) {
                     assert_eq!(v, e);
@@ -1608,7 +1606,7 @@ mod tests {
         let mut sl: SkipList<usize> = SkipList::new();
         for i in 0..size {
             for _ in 0..repeats {
-                sl.insert(i, i*repeats);
+                sl.insert(i, i * repeats);
             }
         }
         {
@@ -1635,7 +1633,7 @@ mod tests {
         let mut sl: SkipList<usize> = SkipList::new();
         for i in 0..size {
             for _ in 0..repeats {
-                sl.insert(i, i*repeats);
+                sl.insert(i, i * repeats);
             }
         }
         {
@@ -1646,15 +1644,15 @@ mod tests {
                 }
             }
         }
-        sl.retain(|&x| x%5 == 0);
+        sl.retain(|&x| x % 5 == 0);
         sl.check();
-        assert_eq!(sl.len(), repeats * size/5);
+        assert_eq!(sl.len(), repeats * size / 5);
 
         {
             let mut iter = sl.iter();
-            for i in 0..size/5 {
+            for i in 0..size / 5 {
                 for _ in 0..repeats {
-                    assert_eq!(iter.next(), Some(&(i*5)));
+                    assert_eq!(iter.next(), Some(&(i * 5)));
                 }
             }
         }
@@ -1667,10 +1665,10 @@ mod tests {
     fn pop() {
         let size = 1000;
         let mut sl: SkipList<_> = (0..size).collect();
-        for i in 0..size/2 {
+        for i in 0..size / 2 {
             assert_eq!(sl.pop_front(), Some(i));
-            assert_eq!(sl.pop_back(), Some(size-i-1));
-            assert_eq!(sl.len(), size - 2*(i+1));
+            assert_eq!(sl.pop_back(), Some(size - i - 1));
+            assert_eq!(sl.len(), size - 2 * (i + 1));
             sl.check();
         }
         assert!(sl.is_empty());

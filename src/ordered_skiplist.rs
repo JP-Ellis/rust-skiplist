@@ -1,5 +1,6 @@
 extern crate rand;
-#[cfg(test)] extern crate test;
+#[cfg(test)]
+extern crate test;
 
 use std::cmp::{self, Ordering};
 #[cfg(feature = "unstable")]
@@ -15,9 +16,9 @@ use std::ops;
 use level_generator::{GeometricalLevelGenerator, LevelGenerator};
 use skipnode::SkipNode;
 
-////////////////////////////////////////////////////////////////////////////////////////////////////
+// /////////////////////////////////////////////////////////////////////////////////////////////////
 // OrderedSkipList
-////////////////////////////////////////////////////////////////////////////////////////////////////
+// /////////////////////////////////////////////////////////////////////////////////////////////////
 
 /// The ordered skiplist provides a way of storing elements such that they are always
 /// sorted and at the same time provides efficient way to access, insert and remove nodes.
@@ -46,12 +47,12 @@ pub struct OrderedSkipList<T> {
     compare: Box<Fn(&T, &T) -> Ordering>,
 }
 
-//////////////////////////////////////////////////
+// ///////////////////////////////////////////////
 // Inherent methods
-//////////////////////////////////////////////////
+// ///////////////////////////////////////////////
 
-impl<T> OrderedSkipList<T> where
-        T: cmp::PartialOrd {
+impl<T> OrderedSkipList<T> where T: cmp::PartialOrd
+{
     /// Create a new skiplist with the default default comparison function of `|&a, &b|
     /// a.cmp(b).unwrap()` and the default number of 16 levels.  As a result, any element which
     /// cannot be ordered will cause insertion to panic.
@@ -73,12 +74,14 @@ impl<T> OrderedSkipList<T> where
     /// ```
     #[inline]
     pub fn new() -> Self {
-        let lg = GeometricalLevelGenerator::new(16, 1.0/2.0);
+        let lg = GeometricalLevelGenerator::new(16, 1.0 / 2.0);
         OrderedSkipList {
             head: Box::new(SkipNode::head(lg.total())),
             len: 0,
             level_generator: lg,
-            compare: (Box::new(|a: &T, b: &T| a.partial_cmp(b).expect("Element cannot be ordered."))) as Box<Fn(&T, &T) -> Ordering>
+            compare: (Box::new(|a: &T, b: &T| {
+                a.partial_cmp(b).expect("Element cannot be ordered.")
+            })) as Box<Fn(&T, &T) -> Ordering>,
         }
     }
 
@@ -105,12 +108,14 @@ impl<T> OrderedSkipList<T> where
     #[inline]
     pub fn with_capacity(capacity: usize) -> Self {
         let levels = (capacity as f64).log2().floor() as usize;
-        let lg = GeometricalLevelGenerator::new(levels, 1.0/2.0);
+        let lg = GeometricalLevelGenerator::new(levels, 1.0 / 2.0);
         OrderedSkipList {
             head: Box::new(SkipNode::head(lg.total())),
             len: 0,
             level_generator: lg,
-            compare: (Box::new(|a: &T, b: &T| a.partial_cmp(b).expect("Element cannot be ordered."))) as Box<Fn(&T, &T) -> Ordering>
+            compare: (Box::new(|a: &T, b: &T| {
+                a.partial_cmp(b).expect("Element cannot be ordered.")
+            })) as Box<Fn(&T, &T) -> Ordering>,
         }
     }
 }
@@ -150,9 +155,10 @@ impl<T> OrderedSkipList<T> {
     ///     })};
     /// ```
     #[inline]
-    pub unsafe fn with_comp<F>(f: F) -> Self where
-            F: 'static + Fn(&T, &T) -> Ordering {
-        let lg = GeometricalLevelGenerator::new(16, 1.0/2.0);
+    pub unsafe fn with_comp<F>(f: F) -> Self
+        where F: 'static + Fn(&T, &T) -> Ordering
+    {
+        let lg = GeometricalLevelGenerator::new(16, 1.0 / 2.0);
         OrderedSkipList {
             head: Box::new(SkipNode::head(lg.total())),
             len: 0,
@@ -195,8 +201,9 @@ impl<T> OrderedSkipList<T> {
     /// skiplist.insert(10);
     /// unsafe { skiplist.sort_by(|a: &i64, b: &i64| a.cmp(b)) } // Panics; order would change.
     /// ```
-    pub unsafe fn sort_by<F>(&mut self, f: F) where
-            F: 'static + Fn(&T, &T) -> Ordering {
+    pub unsafe fn sort_by<F>(&mut self, f: F)
+        where F: 'static + Fn(&T, &T) -> Ordering
+    {
         let mut node: *mut SkipNode<T> = mem::transmute_copy(&mut self.head);
 
         while let Some(next) = (*node).links[0] {
@@ -229,11 +236,7 @@ impl<T> OrderedSkipList<T> {
             let node: *mut SkipNode<T> = mem::transmute_copy(&self.head);
 
             while let Some(ref mut next) = (*node).next {
-                mem::replace(
-                    &mut (*node).next,
-                    mem::replace(
-                        &mut next.next,
-                        None));
+                mem::replace(&mut (*node).next, mem::replace(&mut next.next, None));
             }
         }
         let new_head = Box::new(SkipNode::head(self.level_generator.total()));
@@ -333,12 +336,11 @@ impl<T> OrderedSkipList<T> {
             // lengths.
             for (lvl, &insert_node) in insert_nodes.iter().rev().enumerate() {
                 if lvl == 0 {
-                    (*insert_node).links_len[lvl] =
-                        if (*insert_node).is_head() {
-                            0
-                        } else {
-                            1
-                        };
+                    (*insert_node).links_len[lvl] = if (*insert_node).is_head() {
+                        0
+                    } else {
+                        1
+                    };
                     new_node.links_len[lvl] = 1;
                 } else {
                     let length = self.link_length(insert_node, Some(new_node_ptr), lvl).unwrap();
@@ -402,7 +404,7 @@ impl<T> OrderedSkipList<T> {
     pub fn back(&self) -> Option<&T> {
         let len = self.len();
         if len > 0 {
-            Some(&self[len-1])
+            Some(&self[len - 1])
         } else {
             None
         }
@@ -475,7 +477,7 @@ impl<T> OrderedSkipList<T> {
     pub fn pop_back(&mut self) -> Option<T> {
         let len = self.len();
         if len > 0 {
-            Some(self.remove_index(&(len-1)))
+            Some(self.remove_index(&(len - 1)))
         } else {
             None
         }
@@ -507,13 +509,13 @@ impl<T> OrderedSkipList<T> {
                             Ordering::Less => {
                                 node = next;
                                 continue;
-                            },
+                            }
                             Ordering::Equal => {
                                 return true;
-                            },
+                            }
                             Ordering::Greater => {
                                 break;
-                            },
+                            }
                         }
                     }
                 }
@@ -548,7 +550,8 @@ impl<T> OrderedSkipList<T> {
         unsafe {
             let mut node: *mut SkipNode<T> = mem::transmute_copy(&mut self.head);
             let mut return_node: Option<*mut SkipNode<T>> = None;
-            let mut prev_nodes: Vec<*mut SkipNode<T>> = Vec::with_capacity(self.level_generator.total());
+            let mut prev_nodes: Vec<*mut SkipNode<T>> = Vec::with_capacity(self.level_generator
+                                                                               .total());
 
             // We don't know if the value we're looking for is even inside this list until we get
             // to the lowest level.  For this reason, we store where the returned node would be in
@@ -574,16 +577,16 @@ impl<T> OrderedSkipList<T> {
                                 Ordering::Less => {
                                     node = next;
                                     continue;
-                                },
+                                }
                                 Ordering::Equal => {
                                     return_node = Some(next);
                                     prev_nodes.push(node);
                                     break;
-                                },
+                                }
                                 Ordering::Greater => {
                                     prev_nodes.push(node);
                                     break;
-                                },
+                                }
                             }
                         }
                     }
@@ -611,11 +614,8 @@ impl<T> OrderedSkipList<T> {
                     (*next_node).prev = (*return_node).prev;
                 }
                 self.len -= 1;
-                mem::replace(
-                    &mut (*(*return_node).prev.unwrap()).next,
-                    mem::replace(
-                        &mut (*return_node).next,
-                        None))
+                mem::replace(&mut (*(*return_node).prev.unwrap()).next,
+                             mem::replace(&mut (*return_node).next, None))
                     .unwrap()
                     .into_inner()
             } else {
@@ -659,7 +659,8 @@ impl<T> OrderedSkipList<T> {
         unsafe {
             let mut node: *mut SkipNode<T> = mem::transmute_copy(&mut self.head);
             let mut return_node: Option<*mut SkipNode<T>> = None;
-            let mut prev_nodes: Vec<*mut SkipNode<T>> = Vec::with_capacity(self.level_generator.total());
+            let mut prev_nodes: Vec<*mut SkipNode<T>> = Vec::with_capacity(self.level_generator
+                                                                               .total());
 
             let mut lvl = self.level_generator.total();
             while lvl > 0 {
@@ -681,10 +682,11 @@ impl<T> OrderedSkipList<T> {
                                 Ordering::Less => {
                                     node = next;
                                     continue;
-                                },
+                                }
                                 Ordering::Equal => {
                                     if let Some(ref prev_value) = (*(*next).prev.unwrap()).value {
-                                        if (self.compare)(prev_value, next_value) == Ordering::Equal {
+                                        if (self.compare)(prev_value, next_value) ==
+                                           Ordering::Equal {
                                             prev_nodes.push(node);
                                             break;
                                         }
@@ -692,11 +694,11 @@ impl<T> OrderedSkipList<T> {
                                     return_node = Some(next);
                                     prev_nodes.push(node);
                                     break;
-                                },
+                                }
                                 Ordering::Greater => {
                                     prev_nodes.push(node);
                                     break;
-                                },
+                                }
                             }
                         }
                     }
@@ -720,11 +722,10 @@ impl<T> OrderedSkipList<T> {
                     (*next_node).prev = (*return_node).prev;
                 }
                 self.len -= 1;
-                mem::replace(
-                    &mut (*(*return_node).prev.unwrap()).next,
-                    mem::replace(
-                        &mut (*return_node).next,
-                        None)).expect("Popped node shouldn't be None.").into_inner()
+                mem::replace(&mut (*(*return_node).prev.unwrap()).next,
+                             mem::replace(&mut (*return_node).next, None))
+                    .expect("Popped node shouldn't be None.")
+                    .into_inner()
             } else {
                 None
             }
@@ -778,11 +779,8 @@ impl<T> OrderedSkipList<T> {
                     (*next).prev = (*return_node).prev;
                 }
                 self.len -= 1;
-                mem::replace(
-                    &mut (*(*return_node).prev.unwrap()).next,
-                    mem::replace(
-                        &mut (*return_node).next,
-                        None))
+                mem::replace(&mut (*(*return_node).prev.unwrap()).next,
+                             mem::replace(&mut (*return_node).next, None))
                     .unwrap()
                     .into_inner()
                     .unwrap()
@@ -804,7 +802,9 @@ impl<T> OrderedSkipList<T> {
     /// skiplist.extend(0..10);
     /// skiplist.retain(|&x| x%2 == 0);
     /// ```
-    pub fn retain<F>(&mut self, mut f: F) where F: FnMut(&T) -> bool {
+    pub fn retain<F>(&mut self, mut f: F)
+        where F: FnMut(&T) -> bool
+    {
         unsafe {
             let mut removed_nodes = Vec::new();
 
@@ -818,7 +818,7 @@ impl<T> OrderedSkipList<T> {
                     // and we repeat until links[lvl] point to a node which will be retained.
                     if let Some(next) = (*node).links[lvl] {
                         if let Some(ref value) = (*next).value {
-                            if ! f(value) {
+                            if !f(value) {
                                 (*node).links[lvl] = (*next).links[lvl];
                                 if lvl == 0 {
                                     removed_nodes.push(next);
@@ -829,7 +829,8 @@ impl<T> OrderedSkipList<T> {
                     }
                     // At this point, links[lvl] points to a node which we know will be retained
                     // (or None), so we update all the appropriate links.
-                    (*node).links_len[lvl] = self.link_length(node, (*node).links[lvl], lvl).unwrap();
+                    (*node).links_len[lvl] = self.link_length(node, (*node).links[lvl], lvl)
+                                                 .unwrap();
                     // And finally proceed to the next node.
                     if let Some(next) = (*node).links[lvl] {
                         node = next;
@@ -846,11 +847,7 @@ impl<T> OrderedSkipList<T> {
                     (*next).prev = (*node).prev;
                 }
                 if let Some(prev) = (*node).prev {
-                    mem::replace(
-                        &mut (*prev).next,
-                        mem::replace(
-                            &mut (*node).next,
-                            None));
+                    mem::replace(&mut (*prev).next, mem::replace(&mut (*node).next, None));
                 }
             }
         }
@@ -907,7 +904,8 @@ impl<T> OrderedSkipList<T> {
                     }
                     // At this point, links[lvl] points to a node which we know will be retained
                     // (or None), so we update all the appropriate links.
-                    (*node).links_len[lvl] = self.link_length(node, (*node).links[lvl], lvl).unwrap();
+                    (*node).links_len[lvl] = self.link_length(node, (*node).links[lvl], lvl)
+                                                 .unwrap();
                     // And finally proceed to the next node.
                     if let Some(next) = (*node).links[lvl] {
                         node = next;
@@ -924,11 +922,7 @@ impl<T> OrderedSkipList<T> {
                     (*next).prev = (*node).prev;
                 }
                 if let Some(prev) = (*node).prev {
-                    mem::replace(
-                        &mut (*prev).next,
-                        mem::replace(
-                            &mut (*node).next,
-                            None));
+                    mem::replace(&mut (*prev).next, mem::replace(&mut (*node).next, None));
                 }
             }
         }
@@ -1022,7 +1016,7 @@ impl<T> OrderedSkipList<T> {
                         }
                     }
                     node
-                },
+                }
                 Bound::Excluded(min) => {
                     let mut node = self.find_value(min);
                     while let Some(next) = (*node).links[0] {
@@ -1035,10 +1029,8 @@ impl<T> OrderedSkipList<T> {
                         break;
                     }
                     node
-                },
-                Bound::Unbounded => {
-                    mem::transmute_copy(&self.head)
-                },
+                }
+                Bound::Unbounded => mem::transmute_copy(&self.head),
             };
             let end = match max {
                 Bound::Included(max) => {
@@ -1057,7 +1049,7 @@ impl<T> OrderedSkipList<T> {
                         }
                     }
                     node
-                },
+                }
                 Bound::Excluded(max) => {
                     let mut node = self.find_value(max);
                     if let Some(ref value) = (*node).value {
@@ -1075,33 +1067,36 @@ impl<T> OrderedSkipList<T> {
                         }
                     }
                     node
-                },
-                Bound::Unbounded => self.get_last()
+                }
+                Bound::Unbounded => self.get_last(),
             };
-            match self.link_length(
-                start as *mut SkipNode<T>,
-                Some(end as *mut SkipNode<T>),
-                cmp::min((*start).level, (*end).level) + 1) {
-                Ok(l) => Iter {
-                    start: start,
-                    end: end,
-                    size: l,
-                    _lifetime: PhantomData,
-                },
-                Err(_) => Iter {
-                    start: start,
-                    end: start,
-                    size: 0,
-                    _lifetime: PhantomData,
+            match self.link_length(start as *mut SkipNode<T>,
+                                   Some(end as *mut SkipNode<T>),
+                                   cmp::min((*start).level, (*end).level) + 1) {
+                Ok(l) => {
+                    Iter {
+                        start: start,
+                        end: end,
+                        size: l,
+                        _lifetime: PhantomData,
+                    }
+                }
+                Err(_) => {
+                    Iter {
+                        start: start,
+                        end: start,
+                        size: 0,
+                        _lifetime: PhantomData,
+                    }
                 }
             }
         }
     }
 }
 
-//////////////////////////////////////////////////
+// ///////////////////////////////////////////////
 // Internal methods
-//////////////////////////////////////////////////
+// ///////////////////////////////////////////////
 
 impl<T> OrderedSkipList<T> {
     /// Checks the integrity of the skiplist.
@@ -1119,12 +1114,9 @@ impl<T> OrderedSkipList<T> {
                     length_sum += (*node).links_len[lvl];
                     assert_eq!((*node).level + 1, (*node).links.len());
                     assert_eq!((*node).level + 1, (*node).links_len.len());
-                    assert_eq!(
-                        (*node).links_len[lvl],
-                        self.link_length(
-                            node as *mut SkipNode<T>,
-                            (*node).links[lvl],
-                            lvl).unwrap());
+                    assert_eq!((*node).links_len[lvl],
+                               self.link_length(node as *mut SkipNode<T>, (*node).links[lvl], lvl)
+                                   .unwrap());
 
                     if lvl == 0 {
                         assert!((*node).next.is_some() == (*node).links[lvl].is_some());
@@ -1161,7 +1153,11 @@ impl<T> OrderedSkipList<T> {
     /// `next[0]` links are in order since at level 0, all links lengths are 1.
     ///
     /// If the end node is not encountered, Err(false) is returned.
-    fn link_length(&self, start: *mut SkipNode<T>, end: Option<*mut SkipNode<T>>, lvl: usize) -> Result<usize, bool> {
+    fn link_length(&self,
+                   start: *mut SkipNode<T>,
+                   end: Option<*mut SkipNode<T>>,
+                   lvl: usize)
+                   -> Result<usize, bool> {
         unsafe {
             let mut length = 0;
             let mut node = start;
@@ -1180,8 +1176,8 @@ impl<T> OrderedSkipList<T> {
                 }
             } else {
                 while Some(node) != end {
-                    length += (*node).links_len[lvl-1];
-                    match (*node).links[lvl-1] {
+                    length += (*node).links_len[lvl - 1];
+                    match (*node).links[lvl - 1] {
                         Some(ptr) => node = ptr,
                         None => break,
                     }
@@ -1237,7 +1233,7 @@ impl<T> OrderedSkipList<T> {
                             Ordering::Equal => {
                                 node = next;
                                 return node;
-                            },
+                            }
                             Ordering::Greater => break,
                         }
                     } else {
@@ -1279,13 +1275,15 @@ impl<T> OrderedSkipList<T> {
     }
 }
 
-impl<T> OrderedSkipList<T>
-        where T: fmt::Debug {
+impl<T> OrderedSkipList<T> where T: fmt::Debug
+{
     /// Prints out the internal structure of the skiplist (for debugging purposes).
     fn debug_structure(&self) {
         unsafe {
             let mut node: *const SkipNode<T> = mem::transmute_copy(&self.head);
-            let mut rows: Vec<_> = iter::repeat(String::new()).take(self.level_generator.total()).collect();
+            let mut rows: Vec<_> = iter::repeat(String::new())
+                                       .take(self.level_generator.total())
+                                       .collect();
 
             loop {
                 let value: String;
@@ -1337,12 +1335,12 @@ impl<T> OrderedSkipList<T>
     }
 }
 
-//////////////////////////////////////////////////
+// ///////////////////////////////////////////////
 // Trait implementation
-//////////////////////////////////////////////////
+// ///////////////////////////////////////////////
 
-unsafe impl<T: Send> Send for OrderedSkipList<T> { }
-unsafe impl<T: Sync> Sync for OrderedSkipList<T> { }
+unsafe impl<T: Send> Send for OrderedSkipList<T> {}
+unsafe impl<T: Sync> Sync for OrderedSkipList<T> {}
 
 impl<T> ops::Drop for OrderedSkipList<T> {
     #[inline]
@@ -1351,11 +1349,7 @@ impl<T> ops::Drop for OrderedSkipList<T> {
             let node: *mut SkipNode<T> = mem::transmute_copy(&self.head);
 
             while let Some(ref mut next) = (*node).next {
-                mem::replace(
-                    &mut (*node).next,
-                    mem::replace(
-                        &mut next.next,
-                        None));
+                mem::replace(&mut (*node).next, mem::replace(&mut next.next, None));
             }
         }
     }
@@ -1371,8 +1365,8 @@ impl<T: PartialOrd> default::Default for OrderedSkipList<T> {
 /// equivalence of other features (such as the ordering function and the node levels).
 /// Furthermore, this uses `T`'s implementation of PartialEq and *does not* use the owning
 /// skiplist's comparison function.
-impl<A, B> cmp::PartialEq<OrderedSkipList<B>> for OrderedSkipList<A>
-        where A: cmp::PartialEq<B> {
+impl<A, B> cmp::PartialEq<OrderedSkipList<B>> for OrderedSkipList<A> where A: cmp::PartialEq<B>
+{
     #[inline]
     fn eq(&self, other: &OrderedSkipList<B>) -> bool {
         self.len() == other.len() && self.iter().eq(other)
@@ -1383,18 +1377,19 @@ impl<A, B> cmp::PartialEq<OrderedSkipList<B>> for OrderedSkipList<A>
     }
 }
 
-impl<T> cmp::Eq for OrderedSkipList<T> where T: cmp::Eq  { }
+impl<T> cmp::Eq for OrderedSkipList<T> where T: cmp::Eq
+{}
 
-impl<A, B> cmp::PartialOrd<OrderedSkipList<B>> for OrderedSkipList<A>
-        where A: cmp::PartialOrd<B> {
+impl<A, B> cmp::PartialOrd<OrderedSkipList<B>> for OrderedSkipList<A> where A: cmp::PartialOrd<B>
+{
     #[inline]
     fn partial_cmp(&self, other: &OrderedSkipList<B>) -> Option<Ordering> {
         self.iter().partial_cmp(other)
     }
 }
 
-impl<T> Ord for OrderedSkipList<T>
-        where T: cmp::Ord {
+impl<T> Ord for OrderedSkipList<T> where T: cmp::Ord
+{
     #[inline]
     fn cmp(&self, other: &OrderedSkipList<T>) -> Ordering {
         self.iter().cmp(other)
@@ -1403,7 +1398,7 @@ impl<T> Ord for OrderedSkipList<T>
 
 impl<T> Extend<T> for OrderedSkipList<T> {
     #[inline]
-    fn extend<I: iter::IntoIterator<Item=T>>(&mut self, iterable: I) {
+    fn extend<I: iter::IntoIterator<Item = T>>(&mut self, iterable: I) {
         let iterator = iterable.into_iter();
         for element in iterator {
             self.insert(element);
@@ -1415,14 +1410,12 @@ impl<T> ops::Index<usize> for OrderedSkipList<T> {
     type Output = T;
 
     fn index(&self, index: usize) -> &T {
-        unsafe {
-            (*self.get_index(index)).value.as_ref().unwrap()
-        }
+        unsafe { (*self.get_index(index)).value.as_ref().unwrap() }
     }
 }
 
-impl<T> fmt::Debug for OrderedSkipList<T>
-        where T: fmt::Debug {
+impl<T> fmt::Debug for OrderedSkipList<T> where T: fmt::Debug
+{
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         try!(write!(f, "["));
 
@@ -1436,8 +1429,8 @@ impl<T> fmt::Debug for OrderedSkipList<T>
     }
 }
 
-impl<T> fmt::Display for OrderedSkipList<T>
-        where T: fmt::Display {
+impl<T> fmt::Display for OrderedSkipList<T> where T: fmt::Display
+{
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         try!(write!(f, "["));
 
@@ -1476,11 +1469,12 @@ impl<'a, T> iter::IntoIterator for &'a mut OrderedSkipList<T> {
     }
 }
 
-impl<T> iter::FromIterator<T> for OrderedSkipList<T> where
-        T: PartialOrd {
+impl<T> iter::FromIterator<T> for OrderedSkipList<T> where T: PartialOrd
+{
     #[inline]
-    fn from_iter<I>(iter: I) -> OrderedSkipList<T> where
-            I: iter::IntoIterator<Item=T> {
+    fn from_iter<I>(iter: I) -> OrderedSkipList<T>
+        where I: iter::IntoIterator<Item = T>
+    {
         let mut skiplist = OrderedSkipList::new();
         skiplist.extend(iter);
         skiplist
@@ -1496,9 +1490,9 @@ impl<T: Hash> Hash for OrderedSkipList<T> {
     }
 }
 
-//////////////////////////////////////////////////
+// ///////////////////////////////////////////////
 // Extra structs
-//////////////////////////////////////////////////
+// ///////////////////////////////////////////////
 
 pub struct Iter<'a, T: 'a> {
     start: *const SkipNode<T>,
@@ -1556,7 +1550,7 @@ pub struct IntoIter<T> {
     skiplist: OrderedSkipList<T>,
     head: *mut SkipNode<T>,
     end: *mut SkipNode<T>,
-    size: usize
+    size: usize,
 }
 
 impl<T> Iterator for IntoIter<T> {
@@ -1578,12 +1572,8 @@ impl<T> Iterator for IntoIter<T> {
                 }
                 self.skiplist.len -= 1;
                 self.size -= 1;
-                let popped_node =
-                    mem::replace(
-                        &mut (*self.head).next,
-                        mem::replace(
-                            &mut (*next).next,
-                            None));
+                let popped_node = mem::replace(&mut (*self.head).next,
+                                               mem::replace(&mut (*next).next, None));
                 popped_node.expect("Should have a node").value
             } else {
                 None
@@ -1618,9 +1608,9 @@ impl<T> DoubleEndedIterator for IntoIter<T> {
     }
 }
 
-////////////////////////////////////////////////////////////////////////////////////////////////////
+// /////////////////////////////////////////////////////////////////////////////////////////////////
 // Tests and Benchmarks
-////////////////////////////////////////////////////////////////////////////////////////////////////
+// /////////////////////////////////////////////////////////////////////////////////////////////////
 
 #[cfg(test)]
 mod tests {
@@ -1629,15 +1619,24 @@ mod tests {
 
     #[test]
     fn basic_small() {
-        let mut sl: OrderedSkipList<i64> = OrderedSkipList::new();        sl.check();
-        assert_eq!(sl.remove(&1), None);                    sl.check();
-        sl.insert(1);                                       sl.check();
-        assert_eq!(sl.remove(&1), Some(1));                 sl.check();
-        sl.insert(1);                                       sl.check();
-        sl.insert(2);                                       sl.check();
-        assert_eq!(sl.remove(&1), Some(1));                 sl.check();
-        assert_eq!(sl.remove(&2), Some(2));                 sl.check();
-        assert_eq!(sl.remove(&1), None);                    sl.check();
+        let mut sl: OrderedSkipList<i64> = OrderedSkipList::new();
+        sl.check();
+        assert_eq!(sl.remove(&1), None);
+        sl.check();
+        sl.insert(1);
+        sl.check();
+        assert_eq!(sl.remove(&1), Some(1));
+        sl.check();
+        sl.insert(1);
+        sl.check();
+        sl.insert(2);
+        sl.check();
+        assert_eq!(sl.remove(&1), Some(1));
+        sl.check();
+        assert_eq!(sl.remove(&2), Some(2));
+        sl.check();
+        assert_eq!(sl.remove(&1), None);
+        sl.check();
     }
 
     #[test]
@@ -1666,7 +1665,8 @@ mod tests {
         let sl: OrderedSkipList<_> = (0..size).collect();
 
         fn test<T>(size: usize, mut iter: T)
-                where T: Iterator<Item=usize> {
+            where T: Iterator<Item = usize>
+        {
             for i in 0..size {
                 assert_eq!(iter.size_hint(), (size - i, Some(size - i)));
                 assert_eq!(iter.next().unwrap(), i);
@@ -1685,7 +1685,8 @@ mod tests {
         let sl: OrderedSkipList<_> = (0..size).collect();
 
         fn test<T>(size: usize, mut iter: T)
-                where T: Iterator<Item=usize> {
+            where T: Iterator<Item = usize>
+        {
             for i in 0..size {
                 assert_eq!(iter.size_hint(), (size - i, Some(size - i)));
                 assert_eq!(iter.next().unwrap(), size - i - 1);
@@ -1704,7 +1705,8 @@ mod tests {
         let sl: OrderedSkipList<_> = (0..size).collect();
 
         fn test<T>(size: usize, mut iter: T)
-                where T: Iterator<Item=usize> + DoubleEndedIterator {
+            where T: Iterator<Item = usize> + DoubleEndedIterator
+        {
             for i in 0..size / 4 {
                 assert_eq!(iter.size_hint(), (size - i * 2, Some(size - i * 2)));
                 assert_eq!(iter.next().unwrap(), i);
@@ -1766,7 +1768,7 @@ mod tests {
         for i in 0..size {
             for j in 0..size {
                 let mut values = sl.range(Included(&i), Included(&j)).map(|&i| i);
-                let mut expects = i..(j+1);
+                let mut expects = i..(j + 1);
 
                 for (v, e) in values.by_ref().zip(expects.by_ref()) {
                     assert_eq!(v, e);
@@ -1828,15 +1830,15 @@ mod tests {
                 }
             }
         }
-        sl.retain(|&x| x%5 == 0);
+        sl.retain(|&x| x % 5 == 0);
         sl.check();
-        assert_eq!(sl.len(), repeats * size/5);
+        assert_eq!(sl.len(), repeats * size / 5);
 
         {
             let mut iter = sl.iter();
-            for i in 0..size/5 {
+            for i in 0..size / 5 {
                 for _ in 0..repeats {
-                    assert_eq!(iter.next(), Some(&(i*5)));
+                    assert_eq!(iter.next(), Some(&(i * 5)));
                 }
             }
         }
@@ -1852,13 +1854,13 @@ mod tests {
         for i in 0..size {
             let mut sl: OrderedSkipList<_> = (0..size).collect();
             assert_eq!(sl.remove_index(&i), i);
-            assert_eq!(sl.len(), size-1);
+            assert_eq!(sl.len(), size - 1);
         }
 
         let mut sl: OrderedSkipList<_> = (0..size).collect();
         for i in 0..size {
             assert_eq!(sl.remove_index(&0), i);
-            assert_eq!(sl.len(), size-i-1);
+            assert_eq!(sl.len(), size - i - 1);
             sl.check();
         }
         assert!(sl.is_empty());
@@ -1868,10 +1870,10 @@ mod tests {
     fn pop() {
         let size = 1000;
         let mut sl: OrderedSkipList<_> = (0..size).collect();
-        for i in 0..size/2 {
+        for i in 0..size / 2 {
             assert_eq!(sl.pop_front(), Some(i));
-            assert_eq!(sl.pop_back(), Some(size-i-1));
-            assert_eq!(sl.len(), size - 2*(i+1));
+            assert_eq!(sl.pop_back(), Some(size - i - 1));
+            assert_eq!(sl.len(), size - 2 * (i + 1));
             sl.check();
         }
         assert!(sl.is_empty());

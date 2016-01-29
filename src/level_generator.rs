@@ -30,9 +30,9 @@ extern crate rand;
 
 use rand::distributions::{self, Sample};
 
-////////////////////////////////////////////////////////////////////////////////////////////////////
+// /////////////////////////////////////////////////////////////////////////////////////////////////
 // Level Generator
-////////////////////////////////////////////////////////////////////////////////////////////////////
+// /////////////////////////////////////////////////////////////////////////////////////////////////
 
 /// Upon the insertion of a new node in the list, the node is replicated to high levels with a
 /// certain probability as determined by a `LevelGenerator`.
@@ -58,7 +58,7 @@ pub struct GeometricalLevelGenerator {
     total: usize,
     p: f64,
     unit_range: distributions::Range<f64>,
-    rng: rand::XorShiftRng      // Fast generator
+    rng: rand::XorShiftRng, // Fast generator
 }
 
 impl GeometricalLevelGenerator {
@@ -80,7 +80,7 @@ impl GeometricalLevelGenerator {
             total: total,
             p: p,
             unit_range: distributions::Range::new(0.0f64, 1.0),
-            rng: rand::XorShiftRng::new_unseeded()
+            rng: rand::XorShiftRng::new_unseeded(),
         }
     }
 }
