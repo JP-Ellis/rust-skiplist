@@ -23,14 +23,9 @@
 //! **Failure to satisfy these properties can result in unexpected behaviour at best, and at worst
 //! will cause a segfault, null deref, or some other bad behaviour.**
 
-#![cfg_attr(feature = "unstable", feature(collections_bound))]
-#![cfg_attr(test, feature(test, collections_bound))]
-
 #![allow(dead_code)]
 
 extern crate rand;
-#[cfg(test)] extern crate test;
-
 mod level_generator;
 mod skipnode;
 pub mod ordered_skiplist;

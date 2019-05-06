@@ -1,10 +1,5 @@
-extern crate rand;
-#[cfg(test)]
-extern crate test;
-
 use std::borrow::Borrow;
 use std::cmp::{self, Ordering};
-#[cfg(feature = "unstable")]
 use std::collections::Bound;
 use std::default;
 use std::fmt;
@@ -927,7 +922,6 @@ impl<K, V> SkipMap<K, V> {
     /// # Examples
     ///
     /// ```
-    /// #![feature(collections_bound)]
     /// use skiplist::SkipMap;
     /// use std::collections::Bound::{Included, Unbounded};
     ///
@@ -938,7 +932,6 @@ impl<K, V> SkipMap<K, V> {
     /// }
     /// assert_eq!(Some((&4, &4)), skipmap.range(Included(&4), Unbounded).next());
     /// ```
-    #[cfg(feature = "unstable")]
     pub fn range<Q>(&self, min: Bound<&Q>, max: Bound<&Q>) -> Iter<K, V>
         where K: Borrow<Q>,
               Q: Ord
@@ -1946,89 +1939,4 @@ mod tests {
     }
 }
 
-#[cfg(test)]
-mod bench {
-    extern crate rand;
 
-    use super::*;
-
-    use rand::{weak_rng, Rng};
-    use test::{Bencher, black_box};
-
-    #[bench]
-    fn index(b: &mut Bencher) {
-        let size = 100_000;
-        let sm: SkipMap<_, _> = (0..size).map(|x| (x, x)).collect();
-
-        b.iter(|| {
-            for i in 0..size {
-                assert_eq!(sm[i], i);
-            }
-        });
-    }
-
-    fn bench_insert(b: &mut Bencher, base: usize, inserts: usize) {
-        let mut sm: SkipMap<u32, u32> = SkipMap::with_capacity(base + inserts);
-        let mut rng = weak_rng();
-
-        for _ in 0..base {
-            sm.insert(rng.gen(), rng.gen());
-        }
-
-        b.iter(|| {
-            for _ in 0..inserts {
-                sm.insert(rng.gen(), rng.gen());
-            }
-        });
-    }
-
-    #[bench]
-    pub fn insert_0_20(b: &mut Bencher) {
-        bench_insert(b, 0, 20);
-    }
-
-    #[bench]
-    pub fn insert_0_1000(b: &mut Bencher) {
-        bench_insert(b, 0, 1_000);
-    }
-
-    #[bench]
-    pub fn insert_0_100000(b: &mut Bencher) {
-        bench_insert(b, 0, 100_000);
-    }
-
-    #[bench]
-    pub fn insert_100000_20(b: &mut Bencher) {
-        bench_insert(b, 100_000, 20);
-    }
-
-    fn bench_iter(b: &mut Bencher, size: usize) {
-        let mut sm: SkipMap<usize, usize> = SkipMap::with_capacity(size);
-        let mut rng = weak_rng();
-
-        for _ in 0..size {
-            sm.insert(rng.gen(), rng.gen());
-        }
-
-        b.iter(|| {
-            for entry in &sm {
-                black_box(entry);
-            }
-        });
-    }
-
-    #[bench]
-    pub fn iter_20(b: &mut Bencher) {
-        bench_iter(b, 20);
-    }
-
-    #[bench]
-    pub fn iter_1000(b: &mut Bencher) {
-        bench_iter(b, 1000);
-    }
-
-    #[bench]
-    pub fn iter_100000(b: &mut Bencher) {
-        bench_iter(b, 100000);
-    }
-}
