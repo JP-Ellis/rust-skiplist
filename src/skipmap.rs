@@ -9,7 +9,7 @@ use std::marker::PhantomData;
 use std::mem;
 use std::ops;
 
-use level_generator::{GeometricalLevelGenerator, LevelGenerator};
+use crate::level_generator::{GeometricalLevelGenerator, LevelGenerator};
 
 // /////////////////////////////////////////////////////////////////////////////////////////////////
 // SkipNode
@@ -1351,13 +1351,13 @@ impl<K, V> fmt::Debug for SkipMap<K, V>
           V: fmt::Debug
 {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        try!(write!(f, "["));
+        r#try!(write!(f, "["));
 
         for (i, (k, v)) in self.iter().enumerate() {
             if i != 0 {
-                try!(write!(f, ", "));
+                r#try!(write!(f, ", "));
             }
-            try!(write!(f, "({:?}, {:?})", k, v));
+            r#try!(write!(f, "({:?}, {:?})", k, v));
         }
         write!(f, "]")
     }
@@ -1368,13 +1368,13 @@ impl<K, V> fmt::Display for SkipMap<K, V>
           V: fmt::Display
 {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        try!(write!(f, "["));
+        r#try!(write!(f, "["));
 
         for (i, (k, v)) in self.iter().enumerate() {
             if i != 0 {
-                try!(write!(f, ", "));
+                r#try!(write!(f, ", "));
             }
-            try!(write!(f, "({}, {})", k, v));
+            r#try!(write!(f, "({}, {})", k, v));
         }
         write!(f, "]")
     }

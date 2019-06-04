@@ -8,8 +8,8 @@ use std::marker::PhantomData;
 use std::mem;
 use std::ops;
 
-use level_generator::{GeometricalLevelGenerator, LevelGenerator};
-use skipnode::SkipNode;
+use crate::level_generator::{GeometricalLevelGenerator, LevelGenerator};
+use crate::skipnode::SkipNode;
 
 // /////////////////////////////////////////////////////////////////////////////////////////////////
 // SkipList
@@ -1151,13 +1151,13 @@ impl<T> ops::Index<usize> for SkipList<T> {
 impl<T> fmt::Debug for SkipList<T> where T: fmt::Debug
 {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        try!(write!(f, "["));
+        r#try!(write!(f, "["));
 
         for (i, entry) in self.iter().enumerate() {
             if i != 0 {
-                try!(write!(f, ", "));
+                r#try!(write!(f, ", "));
             }
-            try!(write!(f, "{:?}", entry));
+            r#try!(write!(f, "{:?}", entry));
         }
         write!(f, "]")
     }
@@ -1166,13 +1166,13 @@ impl<T> fmt::Debug for SkipList<T> where T: fmt::Debug
 impl<T> fmt::Display for SkipList<T> where T: fmt::Display
 {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        try!(write!(f, "["));
+        r#try!(write!(f, "["));
 
         for (i, entry) in self.iter().enumerate() {
             if i != 0 {
-                try!(write!(f, ", "));
+                r#try!(write!(f, ", "));
             }
-            try!(write!(f, "{}", entry));
+            r#try!(write!(f, "{}", entry));
         }
         write!(f, "]")
     }

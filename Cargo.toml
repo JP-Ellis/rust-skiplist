@@ -15,6 +15,7 @@ readme = "README.md"
 keywords = ["collection", "skiplist", "sorted"]
 
 license = "MIT"
+edition = "2018"
 
 [dependencies]
 rand = "0.4"
