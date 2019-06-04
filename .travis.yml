@@ -1,15 +1,15 @@
 language: rust
 rust:
-  # - stable
+   - stable
   # - beta
-  - nightly
+  # - nightly
 env:
   global:
     secure: Tjh6yf9DDiwsIOFP57tl5QIaKe2uvkZOMToT13ochZs3cM9DqW5u3oLaAeNtnZiMvnCpEb7vs+n6p526UNdFCNGNrbH+R0d/ioWLvE+VBssewSjveR4kIeKGIahQMzLnjrgID8cRGZ6qrpx1qmPT9Qyp1Drd1dYY6lo6LQdXm8Q=
 script:
-  - cargo build --verbose --features unstable
-  - cargo test --verbose --features unstable
-  - cargo doc --features unstable
+  - cargo build --verbose
+  - cargo test --verbose
+  - cargo doc
 after_success:
   - git clone --branch gh-pages "https://$GH_TOKEN@github.com/${TRAVIS_REPO_SLUG}.git" deploy_docs
   - cd deploy_docs

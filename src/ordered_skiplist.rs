@@ -1,9 +1,4 @@
-extern crate rand;
-#[cfg(test)]
-extern crate test;
-
 use std::cmp::{self, Ordering};
-#[cfg(feature = "unstable")]
 use std::collections::Bound;
 use std::default;
 use std::fmt;
@@ -980,7 +975,6 @@ impl<T> OrderedSkipList<T> {
     /// # Examples
     ///
     /// ```
-    /// #![feature(collections_bound)]
     /// use skiplist::OrderedSkipList;
     /// use std::collections::Bound::{Included, Unbounded};
     ///
@@ -991,7 +985,6 @@ impl<T> OrderedSkipList<T> {
     /// }
     /// assert_eq!(Some(&4), skiplist.range(Included(&4), Unbounded).next());
     /// ```
-    #[cfg(feature = "unstable")]
     pub fn range(&self, min: Bound<&T>, max: Bound<&T>) -> Iter<T> {
         unsafe {
             // We have to find the start and end nodes.  We use `find_value`; if no node with the
@@ -1880,89 +1873,4 @@ mod tests {
     }
 }
 
-#[cfg(test)]
-mod bench {
-    extern crate rand;
 
-    use super::*;
-
-    use rand::{weak_rng, Rng};
-    use test::{Bencher, black_box};
-
-    #[bench]
-    fn index(b: &mut Bencher) {
-        let size = 100_000;
-        let sl: OrderedSkipList<_> = (0..size).collect();
-
-        b.iter(|| {
-            for i in 0..size {
-                assert_eq!(sl[i], i);
-            }
-        });
-    }
-
-    fn bench_insert(b: &mut Bencher, base: usize, inserts: usize) {
-        let mut sl: OrderedSkipList<u32> = OrderedSkipList::with_capacity(base + inserts);
-        let mut rng = weak_rng();
-
-        for _ in 0..base {
-            sl.insert(rng.gen());
-        }
-
-        b.iter(|| {
-            for _ in 0..inserts {
-                sl.insert(rng.gen());
-            }
-        });
-    }
-
-    #[bench]
-    pub fn insert_0_20(b: &mut Bencher) {
-        bench_insert(b, 0, 20);
-    }
-
-    #[bench]
-    pub fn insert_0_1000(b: &mut Bencher) {
-        bench_insert(b, 0, 1_000);
-    }
-
-    #[bench]
-    pub fn insert_0_100000(b: &mut Bencher) {
-        bench_insert(b, 0, 100_000);
-    }
-
-    #[bench]
-    pub fn insert_100000_20(b: &mut Bencher) {
-        bench_insert(b, 100_000, 20);
-    }
-
-    fn bench_iter(b: &mut Bencher, size: usize) {
-        let mut sl: OrderedSkipList<usize> = OrderedSkipList::with_capacity(size);
-        let mut rng = weak_rng();
-
-        for _ in 0..size {
-            sl.insert(rng.gen());
-        }
-
-        b.iter(|| {
-            for entry in &sl {
-                black_box(entry);
-            }
-        });
-    }
-
-    #[bench]
-    pub fn iter_20(b: &mut Bencher) {
-        bench_iter(b, 20);
-    }
-
-    #[bench]
-    pub fn iter_1000(b: &mut Bencher) {
-        bench_iter(b, 1000);
-    }
-
-    #[bench]
-    pub fn iter_100000(b: &mut Bencher) {
-        bench_iter(b, 100000);
-    }
-}

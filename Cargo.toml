@@ -16,10 +16,12 @@ keywords = ["collection", "skiplist", "sorted"]
 
 license = "MIT"
 
-[features]
-
-unstable = []
-
 [dependencies]
+rand = "0.4"
 
-rand = "^0.3.12"
+[dev-dependencies]
+criterion = "0.2"
+
+[[bench]]
+name = "main"
+harness = false
