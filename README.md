@@ -14,5 +14,6 @@ Documentation can be found
 [here](http://www.jpellis.me/rust-skiplist/skiplist/) and the cargo crate
 can be found [here](https://crates.io/crates/skiplist).
 
-The various `range` methods only work on the nightly version of Rust and
-consequently are only enabled with the `unstable` feature.
+
+The various `range` methods work on the stable version of Rust and
+the unstable feature is removed.

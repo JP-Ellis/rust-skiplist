@@ -26,8 +26,6 @@
 //! state.  As a result, the `IndexMut` traits, `iter_mut`, and `get_mut` methods and traits are
 //! not implemented.
 
-extern crate rand;
-
 use rand::distributions::{self, Sample};
 
 // /////////////////////////////////////////////////////////////////////////////////////////////////

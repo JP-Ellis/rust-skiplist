@@ -15,11 +15,14 @@ readme = "README.md"
 keywords = ["collection", "skiplist", "sorted"]
 
 license = "MIT"
-
-[features]
-
-unstable = []
+edition = "2018"
 
 [dependencies]
+rand = "0.4"
 
-rand = "^0.3.12"
+[dev-dependencies]
+criterion = "0.2"
+
+[[bench]]
+name = "main"
+harness = false

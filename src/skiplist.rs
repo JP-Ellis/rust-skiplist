@@ -1,9 +1,4 @@
-extern crate rand;
-#[cfg(test)]
-extern crate test;
-
 use std::cmp::{self, Ordering};
-#[cfg(feature = "unstable")]
 use std::collections::Bound;
 use std::default;
 use std::fmt;
@@ -13,8 +8,8 @@ use std::marker::PhantomData;
 use std::mem;
 use std::ops;
 
-use level_generator::{GeometricalLevelGenerator, LevelGenerator};
-use skipnode::SkipNode;
+use crate::level_generator::{GeometricalLevelGenerator, LevelGenerator};
+use crate::skipnode::SkipNode;
 
 // /////////////////////////////////////////////////////////////////////////////////////////////////
 // SkipList
@@ -647,7 +642,6 @@ impl<T> SkipList<T> {
     /// # Examples
     ///
     /// ```
-    /// #![feature(collections_bound)]
     /// use skiplist::SkipList;
     /// use std::collections::Bound::{Included, Unbounded};
     ///
@@ -658,7 +652,6 @@ impl<T> SkipList<T> {
     /// }
     /// assert_eq!(Some(&4), skiplist.range(Included(4), Unbounded).next());
     /// ```
-    #[cfg(feature = "unstable")]
     pub fn range(&self, min: Bound<usize>, max: Bound<usize>) -> Iter<T> {
         unsafe {
             // We have to find the start and end nodes.  We use `find_value`; if no node with the
@@ -712,7 +705,6 @@ impl<T> SkipList<T> {
     /// # Examples
     ///
     /// ```
-    /// #![feature(collections_bound)]
     /// use skiplist::SkipList;
     /// use std::collections::Bound::{Included, Unbounded};
     ///
@@ -723,7 +715,6 @@ impl<T> SkipList<T> {
     /// }
     /// assert_eq!(Some(&mut 4), skiplist.range_mut(Included(4), Unbounded).next());
     /// ```
-    #[cfg(feature = "unstable")]
     pub fn range_mut(&mut self, min: Bound<usize>, max: Bound<usize>) -> IterMut<T> {
         unsafe {
             // We have to find the start and end nodes.  We use `find_value`; if no node with the
@@ -1160,13 +1151,13 @@ impl<T> ops::Index<usize> for SkipList<T> {
 impl<T> fmt::Debug for SkipList<T> where T: fmt::Debug
 {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        try!(write!(f, "["));
+        r#try!(write!(f, "["));
 
         for (i, entry) in self.iter().enumerate() {
             if i != 0 {
-                try!(write!(f, ", "));
+                r#try!(write!(f, ", "));
             }
-            try!(write!(f, "{:?}", entry));
+            r#try!(write!(f, "{:?}", entry));
         }
         write!(f, "]")
     }
@@ -1175,13 +1166,13 @@ impl<T> fmt::Debug for SkipList<T> where T: fmt::Debug
 impl<T> fmt::Display for SkipList<T> where T: fmt::Display
 {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        try!(write!(f, "["));
+        r#try!(write!(f, "["));
 
         for (i, entry) in self.iter().enumerate() {
             if i != 0 {
-                try!(write!(f, ", "));
+                r#try!(write!(f, ", "));
             }
-            try!(write!(f, "{}", entry));
+            r#try!(write!(f, "{}", entry));
         }
         write!(f, "]")
     }
@@ -1675,124 +1666,4 @@ mod tests {
     }
 }
 
-#[cfg(test)]
-mod bench {
-    extern crate rand;
 
-    use super::*;
-
-    use rand::{weak_rng, Rng};
-    use test::{Bencher, black_box};
-
-    #[bench]
-    fn index(b: &mut Bencher) {
-        let size = 100_000;
-        let sl: SkipList<_> = (0..size).collect();
-
-        b.iter(|| {
-            for i in 0..size {
-                assert_eq!(sl[i], i);
-            }
-        });
-    }
-
-    fn bench_push_front(b: &mut Bencher, base: usize, inserts: usize) {
-        let mut sl: SkipList<u32> = SkipList::with_capacity(base + inserts);
-        let mut rng = weak_rng();
-
-        for _ in 0..base {
-            sl.push_front(rng.gen());
-        }
-
-        b.iter(|| {
-            for _ in 0..inserts {
-                sl.push_front(rng.gen());
-            }
-        });
-    }
-
-    fn bench_push_back(b: &mut Bencher, base: usize, inserts: usize) {
-        let mut sl: SkipList<u32> = SkipList::with_capacity(base + inserts);
-        let mut rng = weak_rng();
-
-        for _ in 0..base {
-            sl.push_back(rng.gen());
-        }
-
-        b.iter(|| {
-            for _ in 0..inserts {
-                sl.push_back(rng.gen());
-            }
-        });
-    }
-
-    #[bench]
-    pub fn push_front_0_20(b: &mut Bencher) {
-        bench_push_front(b, 0, 20);
-    }
-
-    #[bench]
-    pub fn push_front_0_1000(b: &mut Bencher) {
-        bench_push_front(b, 0, 1_000);
-    }
-
-    #[bench]
-    pub fn push_front_0_100000(b: &mut Bencher) {
-        bench_push_front(b, 0, 100_000);
-    }
-
-    #[bench]
-    pub fn push_front_100000_20(b: &mut Bencher) {
-        bench_push_front(b, 100_000, 20);
-    }
-
-    #[bench]
-    pub fn push_back_0_20(b: &mut Bencher) {
-        bench_push_back(b, 0, 20);
-    }
-
-    #[bench]
-    pub fn push_back_0_1000(b: &mut Bencher) {
-        bench_push_back(b, 0, 1_000);
-    }
-
-    #[bench]
-    pub fn push_back_0_100000(b: &mut Bencher) {
-        bench_push_back(b, 0, 100_000);
-    }
-
-    #[bench]
-    pub fn push_back_100000_20(b: &mut Bencher) {
-        bench_push_back(b, 100_000, 20);
-    }
-
-    fn bench_iter(b: &mut Bencher, size: usize) {
-        let mut sl: SkipList<usize> = SkipList::with_capacity(size);
-        let mut rng = weak_rng();
-
-        for _ in 0..size {
-            sl.push_back(rng.gen());
-        }
-
-        b.iter(|| {
-            for entry in &sl {
-                black_box(entry);
-            }
-        });
-    }
-
-    #[bench]
-    pub fn iter_20(b: &mut Bencher) {
-        bench_iter(b, 20);
-    }
-
-    #[bench]
-    pub fn iter_1000(b: &mut Bencher) {
-        bench_iter(b, 1000);
-    }
-
-    #[bench]
-    pub fn iter_100000(b: &mut Bencher) {
-        bench_iter(b, 100000);
-    }
-}
