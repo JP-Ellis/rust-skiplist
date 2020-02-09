@@ -1,11 +1,10 @@
-use criterion::Criterion;
 use criterion::black_box;
 use criterion::Bencher;
+use criterion::Criterion;
 
 use rand::{weak_rng, Rng};
 
 use skiplist::SkipMap;
-
 
 fn bench_insert(b: &mut Bencher, base: usize, inserts: usize) {
     let mut sm: SkipMap<u32, u32> = SkipMap::with_capacity(base + inserts);
@@ -21,7 +20,6 @@ fn bench_insert(b: &mut Bencher, base: usize, inserts: usize) {
         }
     });
 }
-
 
 fn bench_iter(b: &mut Bencher, size: usize) {
     let mut sm: SkipMap<usize, usize> = SkipMap::with_capacity(size);
@@ -46,7 +44,6 @@ pub fn skipmap_benchmark(c: &mut Criterion) {
             for i in 0..size {
                 assert_eq!(sm[i], i)
             }
-
         })
     });
 
@@ -62,7 +59,7 @@ pub fn skipmap_benchmark(c: &mut Criterion) {
         bench_insert(b, 0, 1_00_000);
     });
     c.bench_function("insert_100000_20", |b| {
-        bench_insert(b,  1_00_000, 20);
+        bench_insert(b, 1_00_000, 20);
     });
     c.bench_function("iter_20", |b| {
         bench_iter(b, 20);

@@ -1,6 +1,6 @@
-use criterion::Criterion;
 use criterion::black_box;
 use criterion::Bencher;
+use criterion::Criterion;
 
 use rand::{weak_rng, Rng};
 
@@ -44,7 +44,6 @@ pub fn ordered_skiplist_benchmark(c: &mut Criterion) {
             for i in 0..size {
                 assert_eq!(sl[i], i)
             }
-
         })
     });
 
@@ -60,7 +59,7 @@ pub fn ordered_skiplist_benchmark(c: &mut Criterion) {
         bench_insert(b, 0, 1_00_000);
     });
     c.bench_function("insert_100000_20", |b| {
-        bench_insert(b,  1_00_000, 20);
+        bench_insert(b, 1_00_000, 20);
     });
     c.bench_function("iter_20", |b| {
         bench_iter(b, 20);

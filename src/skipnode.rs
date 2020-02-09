@@ -90,7 +90,9 @@ impl<V> SkipNode<V> {
 // Trait implementation
 // ///////////////////////////////////////////////
 
-impl<V> fmt::Display for SkipNode<V> where V: fmt::Display
+impl<V> fmt::Display for SkipNode<V>
+where
+    V: fmt::Display,
 {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         if let &Some(ref v) = &self.value {

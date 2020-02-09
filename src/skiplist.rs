@@ -197,11 +197,7 @@ impl<T> SkipList<T> {
             // lengths.
             for (lvl, &node) in insert_nodes.iter().rev().enumerate() {
                 if lvl == 0 {
-                    (*node).links_len[lvl] = if (*node).is_head() {
-                        0
-                    } else {
-                        1
-                    };
+                    (*node).links_len[lvl] = if (*node).is_head() { 0 } else { 1 };
                     new_node.links_len[lvl] = 1;
                 } else {
                     let length = self.link_length(node, Some(new_node_ptr), lvl).unwrap();
@@ -254,7 +250,6 @@ impl<T> SkipList<T> {
         let len = self.len();
         self.insert(value, len);
     }
-
 
     /// Provides a reference to the front element, or `None` if the skiplist is empty.
     ///
@@ -392,7 +387,11 @@ impl<T> SkipList<T> {
     pub fn get_mut(&mut self, index: usize) -> Option<&mut T> {
         let len = self.len();
         if index < len {
-            unsafe { (*(self.get_index(index) as *mut SkipNode<T>)).value.as_mut() }
+            unsafe {
+                (*(self.get_index(index) as *mut SkipNode<T>))
+                    .value
+                    .as_mut()
+            }
         } else {
             None
         }
@@ -494,11 +493,13 @@ impl<T> SkipList<T> {
                     (*next).prev = (*return_node).prev;
                 }
                 self.len -= 1;
-                mem::replace(&mut (*(*return_node).prev.unwrap()).next,
-                             mem::replace(&mut (*return_node).next, None))
-                    .unwrap()
-                    .into_inner()
-                    .unwrap()
+                mem::replace(
+                    &mut (*(*return_node).prev.unwrap()).next,
+                    mem::replace(&mut (*return_node).next, None),
+                )
+                .unwrap()
+                .into_inner()
+                .unwrap()
             }
         }
     }
@@ -518,7 +519,8 @@ impl<T> SkipList<T> {
     /// skiplist.retain(|&x| x%2 == 0);
     /// ```
     pub fn retain<F>(&mut self, mut f: F)
-        where F: FnMut(&T) -> bool
+    where
+        F: FnMut(&T) -> bool,
     {
         unsafe {
             let mut removed_nodes = Vec::new();
@@ -544,8 +546,8 @@ impl<T> SkipList<T> {
                     }
                     // At this point, links[lvl] points to a node which we know will be retained
                     // (or None), so we update all the appropriate links.
-                    (*node).links_len[lvl] = self.link_length(node, (*node).links[lvl], lvl)
-                                                 .unwrap();
+                    (*node).links_len[lvl] =
+                        self.link_length(node, (*node).links[lvl], lvl).unwrap();
                     // And finally proceed to the next node.
                     if let Some(next) = (*node).links[lvl] {
                         node = next;
@@ -674,25 +676,23 @@ impl<T> SkipList<T> {
                 }
                 Bound::Unbounded => self.get_last(),
             };
-            match self.link_length(start as *mut SkipNode<T>,
-                                   Some(end as *mut SkipNode<T>),
-                                   cmp::min((*start).level, (*end).level) + 1) {
-                Ok(l) => {
-                    Iter {
-                        start: start,
-                        end: end,
-                        size: l,
-                        _lifetime: PhantomData,
-                    }
-                }
-                Err(_) => {
-                    Iter {
-                        start: start,
-                        end: start,
-                        size: 0,
-                        _lifetime: PhantomData,
-                    }
-                }
+            match self.link_length(
+                start as *mut SkipNode<T>,
+                Some(end as *mut SkipNode<T>),
+                cmp::min((*start).level, (*end).level) + 1,
+            ) {
+                Ok(l) => Iter {
+                    start: start,
+                    end: end,
+                    size: l,
+                    _lifetime: PhantomData,
+                },
+                Err(_) => Iter {
+                    start: start,
+                    end: start,
+                    size: 0,
+                    _lifetime: PhantomData,
+                },
             }
         }
     }
@@ -737,31 +737,31 @@ impl<T> SkipList<T> {
                 }
                 Bound::Unbounded => self.get_last() as *mut SkipNode<T>,
             };
-            match self.link_length(start as *mut SkipNode<T>,
-                                   Some(end as *mut SkipNode<T>),
-                                   cmp::min((*start).level, (*end).level) + 1) {
-                Ok(l) => {
-                    IterMut {
-                        start: start,
-                        end: end,
-                        size: l,
-                        _lifetime: PhantomData,
-                    }
-                }
-                Err(_) => {
-                    IterMut {
-                        start: start,
-                        end: start,
-                        size: 0,
-                        _lifetime: PhantomData,
-                    }
-                }
+            match self.link_length(
+                start as *mut SkipNode<T>,
+                Some(end as *mut SkipNode<T>),
+                cmp::min((*start).level, (*end).level) + 1,
+            ) {
+                Ok(l) => IterMut {
+                    start: start,
+                    end: end,
+                    size: l,
+                    _lifetime: PhantomData,
+                },
+                Err(_) => IterMut {
+                    start: start,
+                    end: start,
+                    size: 0,
+                    _lifetime: PhantomData,
+                },
             }
         }
     }
 }
 
-impl<T> SkipList<T> where T: PartialEq
+impl<T> SkipList<T>
+where
+    T: PartialEq,
 {
     /// Returns true if the value is contained in the skiplist.
     ///
@@ -840,8 +840,8 @@ impl<T> SkipList<T> where T: PartialEq
                     }
                     // At this point, links[lvl] points to a node which we know will be retained
                     // (or None), so we update all the appropriate links.
-                    (*node).links_len[lvl] = self.link_length(node, (*node).links[lvl], lvl)
-                                                 .unwrap();
+                    (*node).links_len[lvl] =
+                        self.link_length(node, (*node).links[lvl], lvl).unwrap();
                     // And finally proceed to the next node.
                     if let Some(next) = (*node).links[lvl] {
                         node = next;
@@ -885,9 +885,11 @@ impl<T> SkipList<T> {
                     length_sum += (*node).links_len[lvl];
                     assert_eq!((*node).level + 1, (*node).links.len());
                     assert_eq!((*node).level + 1, (*node).links_len.len());
-                    assert_eq!((*node).links_len[lvl],
-                               self.link_length(node as *mut SkipNode<T>, (*node).links[lvl], lvl)
-                                   .unwrap());
+                    assert_eq!(
+                        (*node).links_len[lvl],
+                        self.link_length(node as *mut SkipNode<T>, (*node).links[lvl], lvl)
+                            .unwrap()
+                    );
 
                     if lvl == 0 {
                         assert!((*node).next.is_some() == (*node).links[lvl].is_some());
@@ -924,11 +926,12 @@ impl<T> SkipList<T> {
     /// `next[0]` links are in order since at level 0, all links lengths are 1.
     ///
     /// If the end node is not encountered, Err(false) is returned.
-    fn link_length(&self,
-                   start: *mut SkipNode<T>,
-                   end: Option<*mut SkipNode<T>>,
-                   lvl: usize)
-                   -> Result<usize, bool> {
+    fn link_length(
+        &self,
+        start: *mut SkipNode<T>,
+        end: Option<*mut SkipNode<T>>,
+        lvl: usize,
+    ) -> Result<usize, bool> {
         unsafe {
             let mut length = 0;
             let mut node = start;
@@ -1009,15 +1012,17 @@ impl<T> SkipList<T> {
     }
 }
 
-impl<T> SkipList<T> where T: fmt::Debug
+impl<T> SkipList<T>
+where
+    T: fmt::Debug,
 {
     /// Prints out the internal structure of the skiplist (for debugging purposes).
     fn debug_structure(&self) {
         unsafe {
             let mut node: *const SkipNode<T> = mem::transmute_copy(&self.head);
             let mut rows: Vec<_> = iter::repeat(String::new())
-                                       .take(self.level_generator.total())
-                                       .collect();
+                .take(self.level_generator.total())
+                .collect();
 
             loop {
                 let value: String;
@@ -1099,7 +1104,9 @@ impl<T: PartialOrd> default::Default for SkipList<T> {
 /// equivalence of other features (such as the ordering function and the node levels).
 /// Furthermore, this uses `T`'s implementation of PartialEq and *does not* use the owning
 /// skiplist's comparison function.
-impl<A, B> cmp::PartialEq<SkipList<B>> for SkipList<A> where A: cmp::PartialEq<B>
+impl<A, B> cmp::PartialEq<SkipList<B>> for SkipList<A>
+where
+    A: cmp::PartialEq<B>,
 {
     #[inline]
     fn eq(&self, other: &SkipList<B>) -> bool {
@@ -1111,10 +1118,11 @@ impl<A, B> cmp::PartialEq<SkipList<B>> for SkipList<A> where A: cmp::PartialEq<B
     }
 }
 
-impl<T> cmp::Eq for SkipList<T> where T: cmp::Eq
-{}
+impl<T> cmp::Eq for SkipList<T> where T: cmp::Eq {}
 
-impl<A, B> cmp::PartialOrd<SkipList<B>> for SkipList<A> where A: cmp::PartialOrd<B>
+impl<A, B> cmp::PartialOrd<SkipList<B>> for SkipList<A>
+where
+    A: cmp::PartialOrd<B>,
 {
     #[inline]
     fn partial_cmp(&self, other: &SkipList<B>) -> Option<Ordering> {
@@ -1122,7 +1130,9 @@ impl<A, B> cmp::PartialOrd<SkipList<B>> for SkipList<A> where A: cmp::PartialOrd
     }
 }
 
-impl<T> Ord for SkipList<T> where T: cmp::Ord
+impl<T> Ord for SkipList<T>
+where
+    T: cmp::Ord,
 {
     #[inline]
     fn cmp(&self, other: &SkipList<T>) -> Ordering {
@@ -1148,7 +1158,9 @@ impl<T> ops::Index<usize> for SkipList<T> {
     }
 }
 
-impl<T> fmt::Debug for SkipList<T> where T: fmt::Debug
+impl<T> fmt::Debug for SkipList<T>
+where
+    T: fmt::Debug,
 {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         r#try!(write!(f, "["));
@@ -1163,7 +1175,9 @@ impl<T> fmt::Debug for SkipList<T> where T: fmt::Debug
     }
 }
 
-impl<T> fmt::Display for SkipList<T> where T: fmt::Display
+impl<T> fmt::Display for SkipList<T>
+where
+    T: fmt::Display,
 {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         r#try!(write!(f, "["));
@@ -1203,11 +1217,14 @@ impl<'a, T> iter::IntoIterator for &'a mut SkipList<T> {
     }
 }
 
-impl<T> iter::FromIterator<T> for SkipList<T> where T: PartialOrd
+impl<T> iter::FromIterator<T> for SkipList<T>
+where
+    T: PartialOrd,
 {
     #[inline]
     fn from_iter<I>(iter: I) -> SkipList<T>
-        where I: iter::IntoIterator<Item = T>
+    where
+        I: iter::IntoIterator<Item = T>,
     {
         let mut skiplist = SkipList::new();
         skiplist.extend(iter);
@@ -1355,8 +1372,10 @@ impl<T> Iterator for IntoIter<T> {
                 }
                 self.skiplist.len -= 1;
                 self.size -= 1;
-                let popped_node = mem::replace(&mut (*self.head).next,
-                                               mem::replace(&mut (*next).next, None));
+                let popped_node = mem::replace(
+                    &mut (*self.head).next,
+                    mem::replace(&mut (*next).next, None),
+                );
                 popped_node.expect("Should have a node").value
             } else {
                 None
@@ -1397,8 +1416,8 @@ impl<T> DoubleEndedIterator for IntoIter<T> {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::Bound::{self, Included, Excluded, Unbounded};
     use super::SkipList;
+    use std::collections::Bound::{self, Excluded, Included, Unbounded};
 
     #[test]
     fn basic_small() {
@@ -1449,7 +1468,8 @@ mod tests {
         let sl: SkipList<_> = (0..size).collect();
 
         fn test<T>(size: usize, mut iter: T)
-            where T: Iterator<Item = usize>
+        where
+            T: Iterator<Item = usize>,
         {
             for i in 0..size {
                 assert_eq!(iter.size_hint(), (size - i, Some(size - i)));
@@ -1470,7 +1490,8 @@ mod tests {
         let sl: SkipList<_> = (0..size).collect();
 
         fn test<T>(size: usize, mut iter: T)
-            where T: Iterator<Item = usize>
+        where
+            T: Iterator<Item = usize>,
         {
             for i in 0..size {
                 assert_eq!(iter.size_hint(), (size - i, Some(size - i)));
@@ -1491,7 +1512,8 @@ mod tests {
         let sl: SkipList<_> = (0..size).collect();
 
         fn test<T>(size: usize, mut iter: T)
-            where T: Iterator<Item = usize> + DoubleEndedIterator
+        where
+            T: Iterator<Item = usize> + DoubleEndedIterator,
         {
             for i in 0..size / 4 {
                 assert_eq!(iter.size_hint(), (size - i * 2, Some(size - i * 2)));
@@ -1665,5 +1687,3 @@ mod tests {
         assert!(sl.is_empty());
     }
 }
-
-

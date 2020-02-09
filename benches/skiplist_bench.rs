@@ -1,13 +1,10 @@
-
-use criterion::Criterion;
 use criterion::black_box;
 use criterion::Bencher;
+use criterion::Criterion;
 
 use rand::{weak_rng, Rng};
 
 use skiplist::SkipList;
-
-
 
 fn bench_push_front(b: &mut Bencher, base: usize, inserts: usize) {
     let mut sl: SkipList<u32> = SkipList::with_capacity(base + inserts);
@@ -62,7 +59,6 @@ pub fn skiplist_benchmark(c: &mut Criterion) {
             for i in 0..size {
                 assert_eq!(sl[i], i)
             }
-
         })
     });
 
@@ -88,7 +84,7 @@ pub fn skiplist_benchmark(c: &mut Criterion) {
         bench_push_back(b, 0, 100_000);
     });
     c.bench_function("push_back_100000_20", |b| {
-        bench_push_back(b,  100_000, 20);
+        bench_push_back(b, 100_000, 20);
     });
     c.bench_function("iter_20", |b| {
         bench_iter(b, 20);
