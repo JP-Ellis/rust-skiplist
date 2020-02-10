@@ -80,3 +80,31 @@ impl LevelGenerator for GeometricalLevelGenerator {
         self.total
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::GeometricalLevelGenerator;
+
+    #[test]
+    #[should_panic]
+    fn invalid_total() {
+        GeometricalLevelGenerator::new(0, 0.5);
+    }
+
+    #[test]
+    #[should_panic]
+    fn invalid_p_0() {
+        GeometricalLevelGenerator::new(1, 0.0);
+    }
+
+    #[test]
+    #[should_panic]
+    fn invalid_p_1() {
+        GeometricalLevelGenerator::new(1, 1.0);
+    }
+
+    #[test]
+    fn new() {
+        GeometricalLevelGenerator::new(1, 0.5);
+    }
+}

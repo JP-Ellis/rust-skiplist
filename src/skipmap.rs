@@ -83,7 +83,7 @@ impl<K, V> SkipNode<K, V> {
     #[allow(dead_code)]
     fn is_tail(&self) -> bool {
         self.next.is_none()
-    }
+}
 }
 
 // ///////////////////////////////////////////////
@@ -360,7 +360,7 @@ impl<K, V> SkipMap<K, V> {
     /// use skiplist::SkipMap;
     ///
     /// let mut skipmap = SkipMap::new();
-    /// assert_eq!(skipmap.front(), None);
+    /// assert!(skipmap.front().is_none());
     ///
     /// skipmap.insert(1, "Hello");
     /// skipmap.insert(2, "World");
@@ -393,7 +393,7 @@ impl<K, V> SkipMap<K, V> {
     /// use skiplist::SkipMap;
     ///
     /// let mut skipmap = SkipMap::new();
-    /// assert_eq!(skipmap.front(), None);
+    /// assert!(skipmap.front().is_none());
     ///
     /// skipmap.insert(1, "Hello");
     /// skipmap.insert(2, "World");
@@ -423,7 +423,7 @@ impl<K, V> SkipMap<K, V> {
     /// use skiplist::SkipMap;
     ///
     /// let mut skipmap = SkipMap::new();
-    /// assert_eq!(skipmap.back(), None);
+    /// assert!(skipmap.back().is_none());
     ///
     /// skipmap.insert(1, "Hello");
     /// skipmap.insert(2, "World");
@@ -457,7 +457,7 @@ impl<K, V> SkipMap<K, V> {
     /// use skiplist::SkipMap;
     ///
     /// let mut skipmap = SkipMap::new();
-    /// assert_eq!(skipmap.back(), None);
+    /// assert!(skipmap.back().is_none());
     ///
     /// skipmap.insert(1, "Hello");
     /// skipmap.insert(2, "World");
@@ -488,10 +488,10 @@ impl<K, V> SkipMap<K, V> {
     /// use skiplist::SkipMap;
     ///
     /// let mut skipmap = SkipMap::new();
-    /// assert_eq!(skipmap.get(&0), None);
+    /// assert!(skipmap.get(&0).is_none());
     /// skipmap.extend((0..10).map(|x| (x, x)));
     /// assert_eq!(skipmap.get(&0), Some(&0));
-    /// assert_eq!(skipmap.get(&10), None);
+    /// assert!(skipmap.get(&10).is_none());
     /// ```
     #[inline]
     pub fn get<Q: ?Sized>(&self, key: &Q) -> Option<&V>
@@ -533,10 +533,10 @@ impl<K, V> SkipMap<K, V> {
     /// use skiplist::SkipMap;
     ///
     /// let mut skipmap = SkipMap::new();
-    /// assert_eq!(skipmap.get(&0), None);
+    /// assert!(skipmap.get(&0).is_none());
     /// skipmap.extend((0..10).map(|x| (x, x)));
     /// assert_eq!(skipmap.get_mut(&0), Some(&mut 0));
-    /// assert_eq!(skipmap.get_mut(&10), None);
+    /// assert!(skipmap.get_mut(&10).is_none());
     ///
     /// match skipmap.get_mut(&0) {
     ///     Some(x) => *x = 100,
@@ -587,7 +587,7 @@ impl<K, V> SkipMap<K, V> {
     ///
     /// assert_eq!(skipmap.pop_front(), Some((1, "Hello")));
     /// assert_eq!(skipmap.pop_front(), Some((2, "World")));
-    /// assert_eq!(skipmap.pop_front(), None);
+    /// assert!(skipmap.pop_front().is_none());
     /// ```
     #[inline]
     pub fn pop_front(&mut self) -> Option<(K, V)> {
@@ -612,7 +612,7 @@ impl<K, V> SkipMap<K, V> {
     ///
     /// assert_eq!(skipmap.pop_back(), Some((2, "World")));
     /// assert_eq!(skipmap.pop_back(), Some((1, "Hello")));
-    /// assert_eq!(skipmap.pop_back(), None);
+    /// assert!(skipmap.pop_back().is_none());
     /// ```
     #[inline]
     pub fn pop_back(&mut self) -> Option<(K, V)> {
@@ -680,7 +680,7 @@ impl<K, V> SkipMap<K, V> {
     /// let mut skipmap = SkipMap::new();
     /// skipmap.extend((0..10).map(|x| (x, x)));
     /// assert_eq!(skipmap.remove(&4), Some(4)); // Removes the last one
-    /// assert_eq!(skipmap.remove(&4), None);    // No more '4' left
+    /// assert!(skipmap.remove(&4).is_none());    // No more '4' left
     /// ```
     pub fn remove<Q: ?Sized>(&mut self, key: &Q) -> Option<V>
     where
@@ -1800,31 +1800,31 @@ mod tests {
     fn basic_small() {
         let mut sm: SkipMap<i64, i64> = SkipMap::new();
         sm.check();
-        assert_eq!(sm.remove(&1), None);
+        assert!(sm.remove(&1).is_none());
         sm.check();
-        assert_eq!(sm.insert(1, 0), None);
+        assert!(sm.insert(1, 0).is_none());
         sm.check();
         assert_eq!(sm.insert(1, 5), Some(0));
         sm.check();
         assert_eq!(sm.remove(&1), Some(5));
         sm.check();
-        assert_eq!(sm.insert(1, 10), None);
+        assert!(sm.insert(1, 10).is_none());
         sm.check();
-        assert_eq!(sm.insert(2, 20), None);
+        assert!(sm.insert(2, 20).is_none());
         sm.check();
         assert_eq!(sm.remove(&1), Some(10));
         sm.check();
         assert_eq!(sm.remove(&2), Some(20));
         sm.check();
-        assert_eq!(sm.remove(&1), None);
+        assert!(sm.remove(&1).is_none());
         sm.check();
     }
 
     #[test]
     fn basic_large() {
-        let mut sm = SkipMap::new();
         let size = 10_000;
-        assert_eq!(sm.len(), 0);
+        let mut sm = SkipMap::with_capacity(size);
+        assert!(sm.is_empty());
 
         for i in 0..size {
             sm.insert(i, i * 10);
@@ -1837,6 +1837,32 @@ mod tests {
             assert_eq!(sm.len(), size - i - 1);
         }
         sm.check();
+    }
+
+    #[test]
+    fn insert_existing() {
+        let size = 100;
+        let mut sm = SkipMap::new();
+
+        for i in 0..size {
+            assert!(sm.insert(i, format!("{}", i)).is_none());
+        }
+
+        for i in 0..size {
+            assert_eq!(sm.insert(i, format!("{}", i)), Some(format!("{}", i)));
+        }
+        for i in (0..size).rev() {
+            assert_eq!(sm.insert(i, format!("{}", i)), Some(format!("{}", i)));
+        }
+    }
+
+    #[test]
+    fn clear() {
+        let mut sm: SkipMap<_, _> = (0..100).map(|x| (x, x)).collect();
+        assert_eq!(sm.len(), 100);
+        sm.clear();
+        sm.check();
+        assert!(sm.is_empty());
     }
 
     #[test]
@@ -1854,7 +1880,7 @@ mod tests {
                 assert_eq!(iter.next().unwrap(), (i, i));
             }
             assert_eq!(iter.size_hint(), (0, Some(0)));
-            assert_eq!(iter.next(), None);
+            assert!(iter.next().is_none());
         }
         test(size, sm.iter().map(|(&a, &b)| (a, b)));
         test(size, sm.iter_mut().map(|(&a, &mut b)| (a, b)));
@@ -1876,7 +1902,7 @@ mod tests {
                 assert_eq!(iter.next().unwrap(), (size - i - 1, size - i - 1));
             }
             assert_eq!(iter.size_hint(), (0, Some(0)));
-            assert_eq!(iter.next(), None);
+            assert!(iter.next().is_none());
         }
         test(size, sm.iter().rev().map(|(&a, &b)| (a, b)));
         test(size, sm.iter_mut().rev().map(|(&a, &mut b)| (a, b)));
@@ -1886,7 +1912,6 @@ mod tests {
     #[test]
     fn iter_mixed() {
         let size = 1000;
-
         let sm: SkipMap<_, _> = (0..size).map(|x| (x, x)).collect();
 
         fn test<T>(size: usize, mut iter: T)
@@ -1903,11 +1928,35 @@ mod tests {
                 assert_eq!(iter.next().unwrap(), (i, i));
             }
             assert_eq!(iter.size_hint(), (0, Some(0)));
-            assert_eq!(iter.next(), None);
+            assert!(iter.next().is_none());
         }
         test(size, sm.iter().map(|(&a, &b)| (a, b)));
         test(size, sm.iter_mut().map(|(&a, &mut b)| (a, b)));
         test(size, sm.into_iter());
+    }
+
+    #[test]
+    fn iter_key_val() {
+        let size = 1000;
+        let sm: SkipMap<_, _> = (0..size).map(|x| (x, 2 * x)).collect();
+
+        let mut keys = sm.keys();
+        for i in 0..size / 2 {
+            assert_eq!(keys.next(), Some(&i));
+        }
+        for i in 0..size / 2 {
+            assert_eq!(keys.next_back(), Some(&(size - i - 1)))
+        }
+        assert!(keys.next().is_none());
+
+        let mut vals = sm.values();
+        for i in 0..size / 2 {
+            assert_eq!(vals.next(), Some(&(2 * i)));
+        }
+        for i in 0..size / 2 {
+            assert_eq!(vals.next_back(), Some(&(2 * (size - i) - 2)))
+        }
+        assert!(vals.next().is_none());
     }
 
     #[test]
@@ -1930,23 +1979,38 @@ mod tests {
         let size = 1000;
         let sm: SkipMap<_, _> = (0..size).map(|x| (x, x)).collect();
 
-        fn test(sm: &SkipMap<u32, u32>, size: u32, min: Bound<&u32>, max: Bound<&u32>) {
-            let mut values = sm.range(min, max).map(|(&a, &b)| (a, b));
-            let mut expects = 0..size;
+        fn test(sm: &SkipMap<usize, usize>, min: Bound<&usize>, max: Bound<&usize>) {
+            let mut values = sm.range(min, max);
+            #[allow(clippy::range_plus_one)]
+            let mut expects = match (min, max) {
+                (Excluded(&a), Excluded(&b)) => (a + 1)..b,
+                (Included(&a), Excluded(&b)) => a..b,
+                (Unbounded, Excluded(&b)) => 0..b,
+                (Excluded(&a), Included(&b)) => (a + 1)..(b + 1),
+                (Included(&a), Included(&b)) => a..(b + 1),
+                (Unbounded, Included(&b)) => 0..(b + 1),
+                (Excluded(&a), Unbounded) => (a + 1)..1000,
+                (Included(&a), Unbounded) => a..1000,
+                (Unbounded, Unbounded) => 0..1000,
+            };
 
-            for ((k, v), e) in values.by_ref().zip(expects.by_ref()) {
+            for ((&k, &v), e) in values.by_ref().zip(expects.by_ref()) {
                 assert_eq!(k, e);
                 assert_eq!(v, e);
             }
-            assert_eq!(values.next(), None);
-            assert_eq!(expects.next(), None);
+            assert!(values.next().is_none());
+            assert!(expects.next().is_none());
         }
-        test(&sm, size, Included(&0), Excluded(&size));
-        test(&sm, size, Unbounded, Excluded(&size));
-        test(&sm, size, Included(&0), Included(&(size - 1)));
-        test(&sm, size, Unbounded, Included(&(size - 1)));
-        test(&sm, size, Included(&0), Unbounded);
-        test(&sm, size, Unbounded, Unbounded);
+
+        test(&sm, Excluded(&200), Excluded(&800));
+        test(&sm, Included(&200), Excluded(&800));
+        test(&sm, Unbounded, Excluded(&800));
+        test(&sm, Excluded(&200), Included(&800));
+        test(&sm, Included(&200), Included(&800));
+        test(&sm, Unbounded, Included(&800));
+        test(&sm, Excluded(&200), Unbounded);
+        test(&sm, Included(&200), Unbounded);
+        test(&sm, Unbounded, Unbounded);
     }
 
     #[test]
@@ -1963,23 +2027,46 @@ mod tests {
                     assert_eq!(k, e);
                     assert_eq!(v, e);
                 }
-                assert_eq!(values.next(), None);
-                assert_eq!(expects.next(), None);
+                assert!(values.next().is_none());
+                assert!(expects.next().is_none());
             }
         }
 
         // let mut values = sm.range(Included(&10), Included(&5)).map(|(&a, &b)| (a, b));
-        // assert_eq!(values.next(), None);
+        // assert!(values.next().is_none());
     }
 
     #[test]
-    fn index() {
+    fn index_pop() {
         let size = 1000;
-        let sm: SkipMap<_, _> = (0..size).map(|x| (x, x)).collect();
-
+        let mut sm: SkipMap<_, _> = (0..size).map(|x| (x, 2 * x)).collect();
+        assert_eq!(sm.front(), Some((&0, &0)));
+        assert_eq!(sm.front_mut(), Some((&0, &mut 0)));
+        assert_eq!(sm.back(), Some((&(size - 1), &(2 * size - 2))));
+        assert_eq!(sm.back_mut(), Some((&(size - 1), &mut (2 * size - 2))));
         for i in 0..size {
-            assert_eq!(sm[i], i);
+            assert_eq!(sm[i], 2 * i);
+            assert_eq!(sm.get(&i), Some(&(2 * i)));
+            assert_eq!(sm.get_mut(&i), Some(&mut (2 * i)));
         }
+
+        let mut sm: SkipMap<_, _> = (0..size).map(|x| (x, 2 * x)).collect();
+        for i in 0..size {
+            assert_eq!(sm.pop_front(), Some((i, 2 * i)));
+            assert_eq!(sm.len(), size - i - 1);
+        }
+        assert!(sm.pop_front().is_none());
+        assert!(sm.front().is_none());
+        assert!(sm.is_empty());
+
+        let mut sm: SkipMap<_, _> = (0..size).map(|x| (x, 2 * x)).collect();
+        for i in 0..size {
+            assert_eq!(sm.pop_back(), Some((size - i - 1, 2 * (size - i - 1))));
+            assert_eq!(sm.len(), size - i - 1);
+        }
+        assert!(sm.pop_back().is_none());
+        assert!(sm.back().is_none());
+        assert!(sm.is_empty());
     }
 
     #[test]
@@ -2002,15 +2089,50 @@ mod tests {
     }
 
     #[test]
-    fn pop() {
-        let size = 1000;
-        let mut sm: SkipMap<_, _> = (0..size).map(|x| (x, x)).collect();
-        for i in 0..size / 2 {
-            assert_eq!(sm.pop_front(), Some((i, i)));
-            assert_eq!(sm.pop_back(), Some((size - i - 1, size - i - 1)));
-            assert_eq!(sm.len(), size - 2 * (i + 1));
-            sm.check();
+    fn contains() {
+        let (min, max) = (25, 75);
+        let sm: SkipMap<_, _> = (min..max).map(|x| (x, x)).collect();
+
+        for i in 0..100 {
+            println!("i = {} (contained: {})", i, sm.contains_key(&i));
+            if i < min || i >= max {
+                assert!(!sm.contains_key(&i));
+            } else {
+                assert!(sm.contains_key(&i));
+            }
         }
-        assert!(sm.is_empty());
+    }
+
+    #[test]
+    fn debug_display() {
+        let sl: SkipMap<_, _> = (0..10).map(|x| (x, x)).collect();
+        sl.debug_structure();
+        println!("{:?}", sl);
+        println!("{}", sl);
+    }
+
+    #[test]
+    fn equality() {
+        let a: SkipMap<i64, i64> = (0..100).map(|x| (x, x)).collect();
+        let b: SkipMap<i64, i64> = (0..100).map(|x| (x, x)).collect();
+        let c: SkipMap<i64, i64> = (0..10).map(|x| (x, x)).collect();
+        let d: SkipMap<i64, i64> = (100..200).map(|x| (x, x)).collect();
+        let e: SkipMap<i64, i64> = (0..100).chain(0..1).map(|x| (x, x)).collect();
+
+        assert_eq!(a, a);
+        assert_eq!(a, b);
+        assert_ne!(a, c);
+        assert_ne!(a, d);
+        assert_eq!(a, e);
+        assert_eq!(b, b);
+        assert_ne!(b, c);
+        assert_ne!(b, d);
+        assert_eq!(b, e);
+        assert_eq!(c, c);
+        assert_ne!(c, d);
+        assert_ne!(c, e);
+        assert_eq!(d, d);
+        assert_ne!(d, e);
+        assert_eq!(e, e);
     }
 }

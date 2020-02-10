@@ -382,7 +382,7 @@ impl<T> OrderedSkipList<T> {
     /// use skiplist::OrderedSkipList;
     ///
     /// let mut skiplist = OrderedSkipList::new();
-    /// assert_eq!(skiplist.front(), None);
+    /// assert!(skiplist.front().is_none());
     ///
     /// skiplist.insert(1);
     /// skiplist.insert(2);
@@ -406,7 +406,7 @@ impl<T> OrderedSkipList<T> {
     /// use skiplist::OrderedSkipList;
     ///
     /// let mut skiplist = OrderedSkipList::new();
-    /// assert_eq!(skiplist.back(), None);
+    /// assert!(skiplist.back().is_none());
     ///
     /// skiplist.insert(1);
     /// skiplist.insert(2);
@@ -431,10 +431,10 @@ impl<T> OrderedSkipList<T> {
     /// use skiplist::OrderedSkipList;
     ///
     /// let mut skiplist = OrderedSkipList::new();
-    /// assert_eq!(skiplist.get(0), None);
+    /// assert!(skiplist.get(0).is_none());
     /// skiplist.extend(0..10);
     /// assert_eq!(skiplist.get(0), Some(&0));
-    /// assert_eq!(skiplist.get(10), None);
+    /// assert!(skiplist.get(10).is_none());
     /// ```
     #[inline]
     pub fn get(&self, index: usize) -> Option<&T> {
@@ -460,7 +460,7 @@ impl<T> OrderedSkipList<T> {
     ///
     /// assert_eq!(skiplist.pop_front(), Some(1));
     /// assert_eq!(skiplist.pop_front(), Some(2));
-    /// assert_eq!(skiplist.pop_front(), None);
+    /// assert!(skiplist.pop_front().is_none());
     /// ```
     #[inline]
     pub fn pop_front(&mut self) -> Option<T> {
@@ -485,7 +485,7 @@ impl<T> OrderedSkipList<T> {
     ///
     /// assert_eq!(skiplist.pop_back(), Some(2));
     /// assert_eq!(skiplist.pop_back(), Some(1));
-    /// assert_eq!(skiplist.pop_back(), None);
+    /// assert!(skiplist.pop_back().is_none());
     /// ```
     #[inline]
     pub fn pop_back(&mut self) -> Option<T> {
@@ -556,7 +556,7 @@ impl<T> OrderedSkipList<T> {
     /// let mut skiplist = OrderedSkipList::new();
     /// skiplist.extend(0..10);
     /// assert_eq!(skiplist.remove(&4), Some(4)); // Removes the last one
-    /// assert_eq!(skiplist.remove(&4), None); // No more '4' left
+    /// assert!(skiplist.remove(&4).is_none()); // No more '4' left
     /// ```
     pub fn remove(&mut self, value: &T) -> Option<T> {
         if self.len == 0 {
@@ -661,14 +661,14 @@ impl<T> OrderedSkipList<T> {
     /// for _ in 0..10 {
     ///     skiplist.extend(0..10);
     /// }
-    /// assert_eq!(skiplist.remove(&15), None);
+    /// assert!(skiplist.remove(&15).is_none());
     /// for _ in 0..9 {
     ///     for i in 0..10 {
     ///         skiplist.remove_first(&i);
     ///     }
     /// }
     /// assert_eq!(skiplist.remove_first(&4), Some(4)); // Removes the last one
-    /// assert_eq!(skiplist.remove_first(&4), None); // No more '4' left
+    /// assert!(skiplist.remove_first(&4).is_none()); // No more '4' left
     /// ```
     pub fn remove_first(&mut self, value: &T) -> Option<T> {
         if self.len == 0 {
@@ -1673,13 +1673,16 @@ impl<T> DoubleEndedIterator for IntoIter<T> {
 #[cfg(test)]
 mod tests {
     use super::OrderedSkipList;
-    use std::ops::Bound::{self, Excluded, Included, Unbounded};
+    use std::{
+        cmp::Ordering,
+        ops::Bound::{self, Excluded, Included, Unbounded},
+    };
 
     #[test]
     fn basic_small() {
         let mut sl: OrderedSkipList<i64> = OrderedSkipList::new();
         sl.check();
-        assert_eq!(sl.remove(&1), None);
+        assert!(sl.remove(&1).is_none());
         sl.check();
         sl.insert(1);
         sl.check();
@@ -1693,15 +1696,15 @@ mod tests {
         sl.check();
         assert_eq!(sl.remove(&2), Some(2));
         sl.check();
-        assert_eq!(sl.remove(&1), None);
+        assert!(sl.remove(&1).is_none());
         sl.check();
     }
 
     #[test]
     fn basic_large() {
-        let mut sl = OrderedSkipList::new();
         let size = 10_000;
-        assert_eq!(sl.len(), 0);
+        let mut sl = OrderedSkipList::with_capacity(size);
+        assert!(sl.is_empty());
 
         for i in 0..size {
             sl.insert(i);
@@ -1731,7 +1734,7 @@ mod tests {
                 assert_eq!(iter.next().unwrap(), i);
             }
             assert_eq!(iter.size_hint(), (0, Some(0)));
-            assert_eq!(iter.next(), None);
+            assert!(iter.next().is_none());
         }
         test(size, sl.iter().copied());
         test(size, sl.into_iter());
@@ -1752,7 +1755,7 @@ mod tests {
                 assert_eq!(iter.next().unwrap(), size - i - 1);
             }
             assert_eq!(iter.size_hint(), (0, Some(0)));
-            assert_eq!(iter.next(), None);
+            assert!(iter.next().is_none());
         }
         test(size, sl.iter().rev().copied());
         test(size, sl.into_iter().rev());
@@ -1778,16 +1781,128 @@ mod tests {
                 assert_eq!(iter.next().unwrap(), i);
             }
             assert_eq!(iter.size_hint(), (0, Some(0)));
-            assert_eq!(iter.next(), None);
+            assert!(iter.next().is_none());
         }
         test(size, sl.iter().copied());
         test(size, sl.into_iter());
     }
 
     #[test]
+    fn with_comp() {
+        let mut sl = unsafe {
+            OrderedSkipList::with_comp(|a: &u64, b: &u64| {
+                if a % 2 == b % 2 {
+                    a.cmp(b)
+                } else if a % 2 == 0 {
+                    Ordering::Less
+                } else {
+                    Ordering::Greater
+                }
+            })
+        };
+
+        for i in 0..100 {
+            sl.insert(i);
+        }
+        sl.check();
+
+        let expect = (0..100)
+            .filter(|i| i % 2 == 0)
+            .chain((0..100).filter(|i| i % 2 == 1));
+
+        for (&v, e) in sl.iter().zip(expect) {
+            assert_eq!(v, e);
+        }
+    }
+
+    #[test]
+    fn sort_by() {
+        // Change sort_by when empty
+        let mut sl = OrderedSkipList::new();
+        unsafe {
+            sl.sort_by(|a: &u64, b: &u64| {
+                if a % 2 == b % 2 {
+                    a.cmp(b)
+                } else if a % 2 == 0 {
+                    Ordering::Less
+                } else {
+                    Ordering::Greater
+                }
+            });
+        };
+
+        for i in 0..100 {
+            sl.insert(i);
+        }
+        sl.check();
+
+        let expect = (0..100)
+            .filter(|i| i % 2 == 0)
+            .chain((0..100).filter(|i| i % 2 == 1));
+
+        for (&v, e) in sl.iter().zip(expect) {
+            assert_eq!(v, e);
+        }
+
+        // Change sort_by in non-empty (but valid) skiplist
+        let mut sl = OrderedSkipList::new();
+        sl.insert(0);
+        sl.insert(2);
+        sl.insert(5);
+        sl.insert(7);
+        unsafe {
+            sl.sort_by(|a: &u64, b: &u64| {
+                if a % 2 == b % 2 {
+                    a.cmp(b)
+                } else if a % 2 == 0 {
+                    Ordering::Less
+                } else {
+                    Ordering::Greater
+                }
+            });
+        };
+        sl.check();
+        sl.insert(4);
+        sl.insert(6);
+        sl.insert(3);
+
+        for (v, e) in sl.iter().zip(&[0, 2, 4, 6, 3, 5, 7]) {
+            assert_eq!(v, e);
+        }
+    }
+
+    #[test]
+    #[should_panic]
+    fn sort_by_panic() {
+        let mut sl = OrderedSkipList::new();
+        sl.insert(0);
+        sl.insert(1);
+        sl.insert(2);
+        unsafe {
+            sl.sort_by(|a: &u64, b: &u64| {
+                if a % 2 == b % 2 {
+                    a.cmp(b)
+                } else if a % 2 == 0 {
+                    Ordering::Less
+                } else {
+                    Ordering::Greater
+                }
+            });
+        };
+    }
+
+    #[test]
+    fn clear() {
+        let mut sl: OrderedSkipList<i64> = (0..100).collect();
+        assert_eq!(sl.len(), 100);
+        sl.clear();
+        sl.check();
+        assert!(sl.is_empty());
+    }
+
+    #[test]
     fn range_small() {
         let size = 5;
-
         let sl: OrderedSkipList<_> = (0..size).collect();
 
         let mut j = 0;
@@ -1803,22 +1918,37 @@ mod tests {
         let size = 1000;
         let sl: OrderedSkipList<_> = (0..size).collect();
 
-        fn test(sl: &OrderedSkipList<u32>, size: u32, min: Bound<&u32>, max: Bound<&u32>) {
+        fn test(sl: &OrderedSkipList<u32>, min: Bound<&u32>, max: Bound<&u32>) {
             let mut values = sl.range(min, max);
-            let mut expects = 0..size;
+            #[allow(clippy::range_plus_one)]
+            let mut expects = match (min, max) {
+                (Excluded(&a), Excluded(&b)) => (a + 1)..b,
+                (Included(&a), Excluded(&b)) => a..b,
+                (Unbounded, Excluded(&b)) => 0..b,
+                (Excluded(&a), Included(&b)) => (a + 1)..(b + 1),
+                (Included(&a), Included(&b)) => a..(b + 1),
+                (Unbounded, Included(&b)) => 0..(b + 1),
+                (Excluded(&a), Unbounded) => (a + 1)..1000,
+                (Included(&a), Unbounded) => a..1000,
+                (Unbounded, Unbounded) => 0..1000,
+            };
 
             for (&v, e) in values.by_ref().zip(expects.by_ref()) {
                 assert_eq!(v, e);
             }
-            assert_eq!(values.next(), None);
-            assert_eq!(expects.next(), None);
+            assert!(values.next().is_none());
+            assert!(expects.next().is_none());
         }
-        test(&sl, size, Included(&0), Excluded(&size));
-        test(&sl, size, Unbounded, Excluded(&size));
-        test(&sl, size, Included(&0), Included(&(size - 1)));
-        test(&sl, size, Unbounded, Included(&(size - 1)));
-        test(&sl, size, Included(&0), Unbounded);
-        test(&sl, size, Unbounded, Unbounded);
+
+        test(&sl, Excluded(&200), Excluded(&800));
+        test(&sl, Included(&200), Excluded(&800));
+        test(&sl, Unbounded, Excluded(&800));
+        test(&sl, Excluded(&200), Included(&800));
+        test(&sl, Included(&200), Included(&800));
+        test(&sl, Unbounded, Included(&800));
+        test(&sl, Excluded(&200), Unbounded);
+        test(&sl, Included(&200), Unbounded);
+        test(&sl, Unbounded, Unbounded);
     }
 
     #[test]
@@ -1834,19 +1964,85 @@ mod tests {
                 for (&v, e) in values.by_ref().zip(expects.by_ref()) {
                     assert_eq!(v, e);
                 }
-                assert_eq!(values.next(), None);
-                assert_eq!(expects.next(), None);
+                assert!(values.next().is_none());
+                assert!(expects.next().is_none());
             }
         }
     }
 
     #[test]
-    fn index() {
+    fn index_pop() {
         let size = 1000;
         let sl: OrderedSkipList<_> = (0..size).collect();
-
+        assert_eq!(sl.front(), Some(&0));
+        assert_eq!(sl.back(), Some(&(size - 1)));
         for i in 0..size {
             assert_eq!(sl[i], i);
+            assert_eq!(sl.get(i), Some(&i));
+        }
+
+        let mut sl: OrderedSkipList<_> = (0..size).collect();
+        for i in 0..size {
+            assert_eq!(sl.pop_front(), Some(i));
+            assert_eq!(sl.len(), size - i - 1);
+        }
+        assert!(sl.pop_front().is_none());
+        assert!(sl.front().is_none());
+        assert!(sl.is_empty());
+
+        let mut sl: OrderedSkipList<_> = (0..size).collect();
+        for i in 0..size {
+            assert_eq!(sl.pop_back(), Some(size - i - 1));
+            assert_eq!(sl.len(), size - i - 1);
+        }
+        assert!(sl.pop_back().is_none());
+        assert!(sl.back().is_none());
+        assert!(sl.is_empty());
+    }
+
+    #[test]
+    fn contains() {
+        let (min, max) = (25, 75);
+        let sl: OrderedSkipList<_> = (min..max).collect();
+
+        for i in 0..100 {
+            if i < min || i >= max {
+                assert!(!sl.contains(&i));
+            } else {
+                assert!(sl.contains(&i));
+            }
+        }
+    }
+
+    #[test]
+    fn remove() {
+        let size = 100;
+        let repeats = 5;
+        let mut sl = OrderedSkipList::new();
+
+        for _ in 0..repeats {
+            sl.extend(0..size);
+        }
+
+        for _ in 0..repeats {
+            for i in 0..size {
+                assert_eq!(sl.remove(&i), Some(i));
+            }
+        }
+        for i in 0..size {
+            assert!(sl.remove(&i).is_none());
+        }
+
+        for _ in 0..repeats {
+            sl.extend(0..size);
+        }
+        for _ in 0..repeats {
+            for i in 0..size {
+                assert_eq!(sl.remove_first(&i), Some(i));
+            }
+        }
+        for i in 0..size {
+            assert!(sl.remove_first(&i).is_none());
         }
     }
 
@@ -1938,5 +2134,38 @@ mod tests {
             sl.check();
         }
         assert!(sl.is_empty());
+    }
+
+    #[test]
+    fn debug_display() {
+        let sl: OrderedSkipList<_> = (0..10).collect();
+        sl.debug_structure();
+        println!("{:?}", sl);
+        println!("{}", sl);
+    }
+
+    #[test]
+    fn equality() {
+        let a: OrderedSkipList<i64> = (0..100).collect();
+        let b: OrderedSkipList<i64> = (0..100).collect();
+        let c: OrderedSkipList<i64> = (0..10).collect();
+        let d: OrderedSkipList<i64> = (100..200).collect();
+        let e: OrderedSkipList<i64> = (0..100).chain(0..1).collect();
+
+        assert_eq!(a, a);
+        assert_eq!(a, b);
+        assert_ne!(a, c);
+        assert_ne!(a, d);
+        assert_ne!(a, e);
+        assert_eq!(b, b);
+        assert_ne!(b, c);
+        assert_ne!(b, d);
+        assert_ne!(b, e);
+        assert_eq!(c, c);
+        assert_ne!(c, d);
+        assert_ne!(c, e);
+        assert_eq!(d, d);
+        assert_ne!(d, e);
+        assert_eq!(e, e);
     }
 }

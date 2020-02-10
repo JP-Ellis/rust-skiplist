@@ -263,7 +263,7 @@ impl<T> SkipList<T> {
     /// use skiplist::SkipList;
     ///
     /// let mut skiplist = SkipList::new();
-    /// assert_eq!(skiplist.front(), None);
+    /// assert!(skiplist.front().is_none());
     ///
     /// skiplist.push_back(1);
     /// skiplist.push_back(2);
@@ -287,7 +287,7 @@ impl<T> SkipList<T> {
     /// use skiplist::SkipList;
     ///
     /// let mut skiplist = SkipList::new();
-    /// assert_eq!(skiplist.front(), None);
+    /// assert!(skiplist.front().is_none());
     ///
     /// skiplist.push_back(1);
     /// skiplist.push_back(2);
@@ -311,7 +311,7 @@ impl<T> SkipList<T> {
     /// use skiplist::SkipList;
     ///
     /// let mut skiplist = SkipList::new();
-    /// assert_eq!(skiplist.back(), None);
+    /// assert!(skiplist.back().is_none());
     ///
     /// skiplist.push_back(1);
     /// skiplist.push_back(2);
@@ -336,7 +336,7 @@ impl<T> SkipList<T> {
     /// use skiplist::SkipList;
     ///
     /// let mut skiplist = SkipList::new();
-    /// assert_eq!(skiplist.back(), None);
+    /// assert!(skiplist.back().is_none());
     ///
     /// skiplist.push_back(1);
     /// skiplist.push_back(2);
@@ -361,10 +361,10 @@ impl<T> SkipList<T> {
     /// use skiplist::SkipList;
     ///
     /// let mut skiplist = SkipList::new();
-    /// assert_eq!(skiplist.get(0), None);
+    /// assert!(skiplist.get(0).is_none());
     /// skiplist.extend(0..10);
     /// assert_eq!(skiplist.get(0), Some(&0));
-    /// assert_eq!(skiplist.get(10), None);
+    /// assert!(skiplist.get(10).is_none());
     /// ```
     #[inline]
     pub fn get(&self, index: usize) -> Option<&T> {
@@ -385,10 +385,10 @@ impl<T> SkipList<T> {
     /// use skiplist::SkipList;
     ///
     /// let mut skiplist = SkipList::new();
-    /// assert_eq!(skiplist.get_mut(0), None);
+    /// assert!(skiplist.get_mut(0).is_none());
     /// skiplist.extend(0..10);
     /// assert_eq!(skiplist.get_mut(0), Some(&mut 0));
-    /// assert_eq!(skiplist.get_mut(10), None);
+    /// assert!(skiplist.get_mut(10).is_none());
     /// ```
     #[inline]
     pub fn get_mut(&mut self, index: usize) -> Option<&mut T> {
@@ -418,7 +418,7 @@ impl<T> SkipList<T> {
     ///
     /// assert_eq!(skiplist.pop_front(), Some(1));
     /// assert_eq!(skiplist.pop_front(), Some(2));
-    /// assert_eq!(skiplist.pop_front(), None);
+    /// assert!(skiplist.pop_front().is_none());
     /// ```
     #[inline]
     pub fn pop_front(&mut self) -> Option<T> {
@@ -443,7 +443,7 @@ impl<T> SkipList<T> {
     ///
     /// assert_eq!(skiplist.pop_back(), Some(2));
     /// assert_eq!(skiplist.pop_back(), Some(1));
-    /// assert_eq!(skiplist.pop_back(), None);
+    /// assert!(skiplist.pop_back().is_none());
     /// ```
     #[inline]
     pub fn pop_back(&mut self) -> Option<T> {
@@ -800,7 +800,8 @@ where
                 node = next;
             }
         }
-        false
+        // Check the last node
+        node.value.as_ref() == Some(value)
     }
 
     /// Removes all consecutive repeated elements in the skiplist.
@@ -1463,9 +1464,9 @@ mod tests {
 
     #[test]
     fn basic_large() {
-        let mut sl = SkipList::new();
         let size = 500;
-        assert_eq!(sl.len(), 0);
+        let mut sl = SkipList::with_capacity(500);
+        assert!(sl.is_empty());
 
         for i in 0..size {
             sl.insert(i, i);
@@ -1486,6 +1487,15 @@ mod tests {
     }
 
     #[test]
+    fn clear() {
+        let mut sl: SkipList<i64> = (0..100).collect();
+        assert_eq!(sl.len(), 100);
+        sl.clear();
+        sl.check();
+        assert!(sl.is_empty());
+    }
+
+    #[test]
     fn iter() {
         let size = 10000;
 
@@ -1500,7 +1510,7 @@ mod tests {
                 assert_eq!(iter.next().unwrap(), i);
             }
             assert_eq!(iter.size_hint(), (0, Some(0)));
-            assert_eq!(iter.next(), None);
+            assert!(iter.next().is_none());
         }
         test(size, sl.iter().copied());
         #[allow(clippy::map_clone)]
@@ -1523,7 +1533,7 @@ mod tests {
                 assert_eq!(iter.next().unwrap(), size - i - 1);
             }
             assert_eq!(iter.size_hint(), (0, Some(0)));
-            assert_eq!(iter.next(), None);
+            assert!(iter.next().is_none());
         }
         test(size, sl.iter().rev().copied());
         #[allow(clippy::map_clone)]
@@ -1551,7 +1561,7 @@ mod tests {
                 assert_eq!(iter.next().unwrap(), i);
             }
             assert_eq!(iter.size_hint(), (0, Some(0)));
-            assert_eq!(iter.next(), None);
+            assert!(iter.next().is_none());
         }
         test(size, sl.iter().copied());
         #[allow(clippy::map_clone)]
@@ -1578,22 +1588,75 @@ mod tests {
         let size = 1000;
         let sl: SkipList<_> = (0..size).collect();
 
-        fn test(sl: &SkipList<usize>, size: usize, min: Bound<usize>, max: Bound<usize>) {
-            let mut values = sl.range(min, max).copied();
-            let mut expects = 0..size;
+        fn test(sl: &SkipList<usize>, min: Bound<usize>, max: Bound<usize>) {
+            let mut values = sl.range(min, max);
+            #[allow(clippy::range_plus_one)]
+            let mut expects = match (min, max) {
+                (Excluded(a), Excluded(b)) => (a + 1)..b,
+                (Included(a), Excluded(b)) => a..b,
+                (Unbounded, Excluded(b)) => 0..b,
+                (Excluded(a), Included(b)) => (a + 1)..(b + 1),
+                (Included(a), Included(b)) => a..(b + 1),
+                (Unbounded, Included(b)) => 0..(b + 1),
+                (Excluded(a), Unbounded) => (a + 1)..1000,
+                (Included(a), Unbounded) => a..1000,
+                (Unbounded, Unbounded) => 0..1000,
+            };
 
-            for (v, e) in values.by_ref().zip(expects.by_ref()) {
+            for (&v, e) in values.by_ref().zip(expects.by_ref()) {
                 assert_eq!(v, e);
             }
-            assert_eq!(values.next(), None);
-            assert_eq!(expects.next(), None);
+            assert!(values.next().is_none());
+            assert!(expects.next().is_none());
         }
-        test(&sl, size, Included(0), Excluded(size));
-        test(&sl, size, Unbounded, Excluded(size));
-        test(&sl, size, Included(0), Included(size - 1));
-        test(&sl, size, Unbounded, Included(size - 1));
-        test(&sl, size, Included(0), Unbounded);
-        test(&sl, size, Unbounded, Unbounded);
+
+        test(&sl, Excluded(200), Excluded(800));
+        test(&sl, Included(200), Excluded(800));
+        test(&sl, Unbounded, Excluded(800));
+        test(&sl, Excluded(200), Included(800));
+        test(&sl, Included(200), Included(800));
+        test(&sl, Unbounded, Included(800));
+        test(&sl, Excluded(200), Unbounded);
+        test(&sl, Included(200), Unbounded);
+        test(&sl, Unbounded, Unbounded);
+    }
+
+    #[test]
+    fn range_mut_1000() {
+        let size = 1000;
+        let mut sl: SkipList<_> = (0..size).collect();
+
+        fn test(sl: &mut SkipList<usize>, min: Bound<usize>, max: Bound<usize>) {
+            let mut values = sl.range(min, max);
+            #[allow(clippy::range_plus_one)]
+            let mut expects = match (min, max) {
+                (Excluded(a), Excluded(b)) => (a + 1)..b,
+                (Included(a), Excluded(b)) => a..b,
+                (Unbounded, Excluded(b)) => 0..b,
+                (Excluded(a), Included(b)) => (a + 1)..(b + 1),
+                (Included(a), Included(b)) => a..(b + 1),
+                (Unbounded, Included(b)) => 0..(b + 1),
+                (Excluded(a), Unbounded) => (a + 1)..1000,
+                (Included(a), Unbounded) => a..1000,
+                (Unbounded, Unbounded) => 0..1000,
+            };
+
+            for (&v, e) in values.by_ref().zip(expects.by_ref()) {
+                assert_eq!(v, e);
+            }
+            assert!(values.next().is_none());
+            assert!(expects.next().is_none());
+        }
+
+        test(&mut sl, Excluded(200), Excluded(800));
+        test(&mut sl, Included(200), Excluded(800));
+        test(&mut sl, Unbounded, Excluded(800));
+        test(&mut sl, Excluded(200), Included(800));
+        test(&mut sl, Included(200), Included(800));
+        test(&mut sl, Unbounded, Included(800));
+        test(&mut sl, Excluded(200), Unbounded);
+        test(&mut sl, Included(200), Unbounded);
+        test(&mut sl, Unbounded, Unbounded);
     }
 
     #[test]
@@ -1609,8 +1672,8 @@ mod tests {
                 for (&v, e) in values.by_ref().zip(expects.by_ref()) {
                     assert_eq!(v, e);
                 }
-                assert_eq!(values.next(), None);
-                assert_eq!(expects.next(), None);
+                assert!(values.next().is_none());
+                assert!(expects.next().is_none());
             }
         }
 
@@ -1622,19 +1685,71 @@ mod tests {
                 for (&v, e) in values.by_ref().zip(expects.by_ref()) {
                     assert_eq!(v, e);
                 }
-                assert_eq!(values.next(), None);
-                assert_eq!(expects.next(), None);
+                assert!(values.next().is_none());
+                assert!(expects.next().is_none());
             }
         }
     }
 
     #[test]
-    fn index() {
+    fn index_pop() {
         let size = 1000;
-        let sl: SkipList<_> = (0..size).collect();
+        let mut sl: SkipList<_> = (0..size).collect();
+        assert_eq!(sl.front(), Some(&0));
+        assert_eq!(sl.front_mut(), Some(&mut 0));
+        assert_eq!(sl.back(), Some(&(size - 1)));
+        assert_eq!(sl.back_mut(), Some(&mut (size - 1)));
+        for mut i in 0..size {
+            assert_eq!(sl[i], i);
+            assert_eq!(sl.get(i), Some(&i));
+            assert_eq!(sl.get_mut(i), Some(&mut i))
+        }
+
+        let mut sl: SkipList<_> = (0..size).collect();
+        for i in 0..size {
+            assert_eq!(sl.pop_front(), Some(i));
+            assert_eq!(sl.len(), size - i - 1);
+        }
+        assert!(sl.pop_front().is_none());
+        assert!(sl.front().is_none());
+        assert!(sl.is_empty());
+
+        let mut sl: SkipList<_> = (0..size).collect();
+        for i in 0..size {
+            assert_eq!(sl.pop_back(), Some(size - i - 1));
+            assert_eq!(sl.len(), size - i - 1);
+        }
+        assert!(sl.pop_back().is_none());
+        assert!(sl.back().is_none());
+        assert!(sl.is_empty());
+    }
+
+    #[test]
+    fn contains() {
+        let (min, max) = (25, 75);
+        let sl: SkipList<_> = (min..max).collect();
+
+        for i in 0..100 {
+            if i < min || i >= max {
+                assert!(!sl.contains(&i));
+            } else {
+                assert!(sl.contains(&i));
+            }
+        }
+    }
+
+    #[test]
+    fn inplace_mut() {
+        let size = 1000;
+        let mut sl: SkipList<_> = (0..size).collect();
 
         for i in 0..size {
-            assert_eq!(sl[i], i);
+            let v = sl.get_mut(i).unwrap();
+            *v *= 2;
+        }
+
+        for i in 0..size {
+            assert_eq!(sl.get(i), Some(&(2 * i)));
         }
     }
 
@@ -1702,15 +1817,35 @@ mod tests {
     }
 
     #[test]
-    fn pop() {
-        let size = 1000;
-        let mut sl: SkipList<_> = (0..size).collect();
-        for i in 0..size / 2 {
-            assert_eq!(sl.pop_front(), Some(i));
-            assert_eq!(sl.pop_back(), Some(size - i - 1));
-            assert_eq!(sl.len(), size - 2 * (i + 1));
-            sl.check();
-        }
-        assert!(sl.is_empty());
+    fn debug_display() {
+        let sl: SkipList<_> = (0..10).collect();
+        sl.debug_structure();
+        println!("{:?}", sl);
+        println!("{}", sl);
+    }
+
+    #[test]
+    fn equality() {
+        let a: SkipList<i64> = (0..100).collect();
+        let b: SkipList<i64> = (0..100).collect();
+        let c: SkipList<i64> = (0..10).collect();
+        let d: SkipList<i64> = (100..200).collect();
+        let e: SkipList<i64> = (0..100).chain(0..1).collect();
+
+        assert_eq!(a, a);
+        assert_eq!(a, b);
+        assert_ne!(a, c);
+        assert_ne!(a, d);
+        assert_ne!(a, e);
+        assert_eq!(b, b);
+        assert_ne!(b, c);
+        assert_ne!(b, d);
+        assert_ne!(b, e);
+        assert_eq!(c, c);
+        assert_ne!(c, d);
+        assert_ne!(c, e);
+        assert_eq!(d, d);
+        assert_ne!(d, e);
+        assert_eq!(e, e);
     }
 }
