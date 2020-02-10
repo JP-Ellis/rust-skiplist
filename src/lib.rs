@@ -45,7 +45,7 @@
 // 1 being the one above level 0, etc.
 
 extern crate rand;
-mod level_generator;
+pub mod level_generator;
 pub mod ordered_skiplist;
 pub mod skiplist;
 pub mod skipmap;

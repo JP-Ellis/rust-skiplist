@@ -1,15 +1,12 @@
-use std::cmp::{self, Ordering};
-use std::collections::Bound;
-use std::default;
-use std::fmt;
-use std::hash::{self, Hash};
-use std::iter;
-use std::marker::PhantomData;
-use std::mem;
-use std::ops;
+use std::{
+    cmp, cmp::Ordering, default, fmt, hash, hash::Hash, iter, marker::PhantomData, mem, ops,
+    ops::Bound,
+};
 
-use crate::level_generator::{GeometricalLevelGenerator, LevelGenerator};
-use crate::skipnode::SkipNode;
+use crate::{
+    level_generator::{GeometricalLevelGenerator, LevelGenerator},
+    skipnode::SkipNode,
+};
 
 // ////////////////////////////////////////////////////////////////////////////
 // SkipList
@@ -63,7 +60,7 @@ impl<T> SkipList<T> {
     /// ```
     #[inline]
     pub fn with_capacity(capacity: usize) -> Self {
-        let levels = (capacity as f64).log2().floor() as usize;
+        let levels = cmp::max(1, (capacity as f64).log2().floor() as usize);
         let lg = GeometricalLevelGenerator::new(levels, 1.0 / 2.0);
         SkipList {
             head: Box::new(SkipNode::head(lg.total())),
