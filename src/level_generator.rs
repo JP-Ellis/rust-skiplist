@@ -75,8 +75,8 @@ impl GeometricalLevelGenerator {
             panic!("p must be in (0, 1).");
         }
         GeometricalLevelGenerator {
-            total: total,
-            p: p,
+            total,
+            p,
             unit_range: distributions::Range::new(0.0f64, 1.0),
             rng: rand::XorShiftRng::new_unseeded(),
         }

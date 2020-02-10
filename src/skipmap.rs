@@ -60,7 +60,7 @@ impl<K, V> SkipNode<K, V> {
         SkipNode {
             key: Some(key),
             value: Some(value),
-            level: level,
+            level,
             next: None,
             prev: None,
             links: iter::repeat(None).take(level + 1).collect(),
@@ -83,6 +83,7 @@ impl<K, V> SkipNode<K, V> {
     }
 
     /// Returns `true` is the node is a tail-node.
+    #[allow(dead_code)]
     fn is_tail(&self) -> bool {
         self.next.is_none()
     }
@@ -191,7 +192,7 @@ where
     /// ```
     pub fn insert(&mut self, key: K, value: V) -> Option<V> {
         unsafe {
-            let mut node: *mut SkipNode<K, V> = mem::transmute_copy(&mut self.head);
+            let mut node: *mut SkipNode<K, V> = mem::transmute_copy(&self.head);
             let mut existing_node: Option<*mut SkipNode<K, V>> = None;
             let mut prev_nodes: Vec<*mut SkipNode<K, V>> =
                 Vec::with_capacity(self.level_generator.total());
@@ -584,7 +585,7 @@ impl<K, V> SkipMap<K, V> {
         if self.is_empty() {
             None
         } else {
-            Some(self.remove_index(&0))
+            Some(self.remove_index(0))
         }
     }
 
@@ -607,7 +608,7 @@ impl<K, V> SkipMap<K, V> {
     pub fn pop_back(&mut self) -> Option<(K, V)> {
         let len = self.len();
         if len > 0 {
-            Some(self.remove_index(&(len - 1)))
+            Some(self.remove_index(len - 1))
         } else {
             None
         }
@@ -681,7 +682,7 @@ impl<K, V> SkipMap<K, V> {
         }
 
         unsafe {
-            let mut node: *mut SkipNode<K, V> = mem::transmute_copy(&mut self.head);
+            let mut node: *mut SkipNode<K, V> = mem::transmute_copy(&self.head);
             let mut return_node: Option<*mut SkipNode<K, V>> = None;
             let mut prev_nodes: Vec<*mut SkipNode<K, V>> =
                 Vec::with_capacity(self.level_generator.total());
@@ -776,12 +777,12 @@ impl<K, V> SkipMap<K, V> {
     ///
     /// let mut skipmap = SkipMap::new();
     /// skipmap.extend((0..10).map(|x| (x, x)));
-    /// assert_eq!(skipmap.remove_index(&4), (4, 4));
-    /// assert_eq!(skipmap.remove_index(&4), (5, 5));
+    /// assert_eq!(skipmap.remove_index(4), (4, 4));
+    /// assert_eq!(skipmap.remove_index(4), (5, 5));
     /// ```
-    pub fn remove_index(&mut self, index: &usize) -> (K, V) {
+    pub fn remove_index(&mut self, index: usize) -> (K, V) {
         unsafe {
-            if index >= &self.len() {
+            if index >= self.len() {
                 panic!("Index out of bounds.");
             } else {
                 let mut node: *mut SkipNode<K, V> = mem::transmute_copy(&self.head);
@@ -790,12 +791,12 @@ impl<K, V> SkipMap<K, V> {
                 let mut lvl = self.level_generator.total();
                 while lvl > 0 {
                     lvl -= 1;
-                    while &(index_sum + (*node).links_len[lvl]) < index {
+                    while index_sum + (*node).links_len[lvl] < index {
                         index_sum += (*node).links_len[lvl];
                         node = (*node).links[lvl].unwrap();
                     }
                     // At this point, node has a reference to the either desired index or beyond it.
-                    if &(index_sum + (*node).links_len[lvl]) == index {
+                    if index_sum + (*node).links_len[lvl] == index {
                         if let Some(next) = (*node).links[lvl] {
                             return_node = next;
                             (*node).links[lvl] = (*next).links[lvl];
@@ -834,9 +835,10 @@ impl<K, V> SkipMap<K, V> {
     ///     println!("Key {}, Value: {}", k, v);
     /// }
     /// ```
-    pub fn into_iter(mut self) -> IntoIter<K, V> {
+    #[allow(clippy::should_implement_trait)]
+    pub fn into_iter(self) -> IntoIter<K, V> {
         IntoIter {
-            head: unsafe { mem::transmute_copy(&mut self.head) },
+            head: unsafe { mem::transmute_copy(&self.head) },
             end: self.get_last() as *mut SkipNode<K, V>,
             size: self.len(),
             skipmap: self,
@@ -991,15 +993,15 @@ impl<K, V> SkipMap<K, V> {
                 cmp::min((*start).level, (*end).level) + 1,
             ) {
                 Err(_) => Iter {
-                    start: start,
+                    start,
                     end: start,
                     size: 0,
                     _lifetime_k: PhantomData,
                     _lifetime_v: PhantomData,
                 },
                 Ok(l) => Iter {
-                    start: start,
-                    end: end,
+                    start,
+                    end,
                     size: l,
                     _lifetime_k: PhantomData,
                     _lifetime_v: PhantomData,
@@ -1015,6 +1017,7 @@ impl<K, V> SkipMap<K, V> {
 
 impl<K, V> SkipMap<K, V> {
     /// Checks the integrity of the skipmap.
+    #[allow(dead_code)]
     fn check(&self) {
         unsafe {
             let mut node: *const SkipNode<K, V> = mem::transmute_copy(&self.head);
@@ -1151,7 +1154,7 @@ impl<K, V> SkipMap<K, V> {
                 // We parse down the list until we get to a greater value; at that point, we move
                 // to the next level down
                 while let Some(next) = (*node).links[lvl] {
-                    if let &Some(ref next_key) = &(*next).key {
+                    if let Some(ref next_key) = (*next).key {
                         match next_key.borrow().cmp(key) {
                             Ordering::Less => node = next,
                             Ordering::Equal => return next,
@@ -1201,6 +1204,7 @@ where
     V: fmt::Debug,
 {
     /// Prints out the internal structure of the skipmap (for debugging purposes).
+    #[allow(dead_code)]
     fn debug_structure(&self) {
         unsafe {
             let mut node: *const SkipNode<K, V> = mem::transmute_copy(&self.head);
@@ -1209,12 +1213,11 @@ where
                 .collect();
 
             loop {
-                let value: String;
-                if let (&Some(ref k), &Some(ref v)) = (&(*node).key, &(*node).value) {
-                    value = format!("> ({:?}, {:?})", k, v);
+                let value = if let (&Some(ref k), &Some(ref v)) = (&(*node).key, &(*node).value) {
+                    format!("> ({:?}, {:?})", k, v)
                 } else {
-                    value = format!("> ()");
-                }
+                    "> ()".to_string()
+                };
 
                 let max_str_len = format!("{} -{}-", value, (*node).links_len[(*node).level]).len();
 
@@ -1222,12 +1225,11 @@ where
                 while lvl > 0 {
                     lvl -= 1;
 
-                    let mut value_len: String;
-                    if lvl <= (*node).level {
-                        value_len = format!("{} -{}-", value, (*node).links_len[lvl]);
+                    let mut value_len = if lvl <= (*node).level {
+                        format!("{} -{}-", value, (*node).links_len[lvl])
                     } else {
-                        value_len = format!("{} -", value);
-                    }
+                        format!("{} -", value)
+                    };
                     for _ in 0..(max_str_len - value_len.len()) {
                         value_len.push('-');
                     }
@@ -1296,14 +1298,19 @@ where
     #[inline]
     fn eq(&self, other: &SkipMap<BK, BV>) -> bool {
         self.len() == other.len()
-            && self.iter().map(|x| x.0).eq(other.iter().map(|x| x.0))
-            && self.iter().map(|x| x.1).eq(other.iter().map(|x| x.1))
+            && self
+                .iter()
+                .zip(other.iter())
+                .all(|(x, y)| x.0 == y.0 && x.1 == y.1)
     }
+    #[allow(clippy::partialeq_ne_impl)]
     #[inline]
     fn ne(&self, other: &SkipMap<BK, BV>) -> bool {
-        self.len() == other.len()
-            || self.iter().map(|x| x.0).ne(other.iter().map(|x| x.0))
-            || self.iter().map(|x| x.1).ne(other.iter().map(|x| x.1))
+        self.len() != other.len()
+            || self
+                .iter()
+                .zip(other.iter())
+                .any(|(x, y)| x.0 != y.0 || x.1 != y.1)
     }
 }
 
@@ -1392,13 +1399,13 @@ where
     V: fmt::Debug,
 {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        r#try!(write!(f, "["));
+        write!(f, "[")?;
 
         for (i, (k, v)) in self.iter().enumerate() {
             if i != 0 {
-                r#try!(write!(f, ", "));
+                write!(f, ", ")?;
             }
-            r#try!(write!(f, "({:?}, {:?})", k, v));
+            write!(f, "({:?}, {:?})", k, v)?;
         }
         write!(f, "]")
     }
@@ -1410,13 +1417,13 @@ where
     V: fmt::Display,
 {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        r#try!(write!(f, "["));
+        write!(f, "[")?;
 
         for (i, (k, v)) in self.iter().enumerate() {
             if i != 0 {
-                r#try!(write!(f, ", "));
+                write!(f, ", ")?;
             }
-            r#try!(write!(f, "({}, {})", k, v));
+            write!(f, "({}, {})", k, v)?;
         }
         write!(f, "]")
     }
@@ -1937,7 +1944,7 @@ mod tests {
         for i in 0..size {
             for j in 0..size {
                 let mut values = sm.range(Included(&i), Included(&j)).map(|(&a, &b)| (a, b));
-                let mut expects = i..(j + 1);
+                let mut expects = i..=j;
 
                 for ((k, v), e) in values.by_ref().zip(expects.by_ref()) {
                     assert_eq!(k, e);
@@ -1968,13 +1975,13 @@ mod tests {
 
         for i in 0..size {
             let mut sm: SkipMap<_, _> = (0..size).map(|x| (x, x)).collect();
-            assert_eq!(sm.remove_index(&i), (i, i));
+            assert_eq!(sm.remove_index(i), (i, i));
             assert_eq!(sm.len(), size - 1);
         }
 
         let mut sm: SkipMap<_, _> = (0..size).map(|x| (x, x)).collect();
         for i in 0..size {
-            assert_eq!(sm.remove_index(&0), (i, i));
+            assert_eq!(sm.remove_index(0), (i, i));
             assert_eq!(sm.len(), size - i - 1);
             sm.check();
         }

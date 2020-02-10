@@ -162,7 +162,7 @@ impl<T> SkipList<T> {
             // At each level, `node` moves down the list until it is just prior to where the node
             // will be inserted.  As this is parsed top-down, the link lengths can't yet be
             // adjusted and the insert nodes are stored in `insert_nodes`.
-            let mut node: *mut SkipNode<T> = mem::transmute_copy(&mut self.head);
+            let mut node: *mut SkipNode<T> = mem::transmute_copy(&self.head);
             let mut insert_nodes: Vec<*mut SkipNode<T>> = Vec::with_capacity(new_node.level);
 
             let mut index_sum = 0;
@@ -529,7 +529,7 @@ impl<T> SkipList<T> {
             // allows for link lengths to be adjusted on lvl 0 as appropriate and then calculated
             // on subsequent levels.
             for lvl in 0..self.level_generator.total() {
-                let mut node: *mut SkipNode<T> = mem::transmute_copy(&mut self.head);
+                let mut node: *mut SkipNode<T> = mem::transmute_copy(&self.head);
                 loop {
                     // If next will be removed, we update links[lvl] to be that node's links[lvl],
                     // and we repeat until links[lvl] point to a node which will be retained.
@@ -583,9 +583,10 @@ impl<T> SkipList<T> {
     ///     println!("Value: {}", i);
     /// }
     /// ```
-    pub fn into_iter(mut self) -> IntoIter<T> {
+    #[allow(clippy::should_implement_trait)]
+    pub fn into_iter(self) -> IntoIter<T> {
         IntoIter {
-            head: unsafe { mem::transmute_copy(&mut self.head) },
+            head: unsafe { mem::transmute_copy(&self.head) },
             end: self.get_last() as *mut SkipNode<T>,
             size: self.len(),
             skiplist: self,
@@ -682,13 +683,13 @@ impl<T> SkipList<T> {
                 cmp::min((*start).level, (*end).level) + 1,
             ) {
                 Ok(l) => Iter {
-                    start: start,
-                    end: end,
+                    start,
+                    end,
                     size: l,
                     _lifetime: PhantomData,
                 },
                 Err(_) => Iter {
-                    start: start,
+                    start,
                     end: start,
                     size: 0,
                     _lifetime: PhantomData,
@@ -743,13 +744,13 @@ impl<T> SkipList<T> {
                 cmp::min((*start).level, (*end).level) + 1,
             ) {
                 Ok(l) => IterMut {
-                    start: start,
-                    end: end,
+                    start,
+                    end,
                     size: l,
                     _lifetime: PhantomData,
                 },
                 Err(_) => IterMut {
-                    start: start,
+                    start,
                     end: start,
                     size: 0,
                     _lifetime: PhantomData,
@@ -811,7 +812,7 @@ where
             // allows for link lengths to be adjusted on lvl 0 as appropriate and then calculated
             // on subsequent levels.
             for lvl in 0..self.level_generator.total() {
-                let mut node: *mut SkipNode<T> = mem::transmute_copy(&mut self.head);
+                let mut node: *mut SkipNode<T> = mem::transmute_copy(&self.head);
                 loop {
                     // If next will be removed, we update links[lvl] to be that node's links[lvl],
                     // and we repeat until links[lvl] point to a node which will be retained.
@@ -871,6 +872,7 @@ where
 
 impl<T> SkipList<T> {
     /// Checks the integrity of the skiplist.
+    #[allow(dead_code)]
     fn check(&self) {
         unsafe {
             let mut node: *const SkipNode<T> = mem::transmute_copy(&self.head);
@@ -1017,6 +1019,7 @@ where
     T: fmt::Debug,
 {
     /// Prints out the internal structure of the skiplist (for debugging purposes).
+    #[allow(dead_code)]
     fn debug_structure(&self) {
         unsafe {
             let mut node: *const SkipNode<T> = mem::transmute_copy(&self.head);
@@ -1025,12 +1028,11 @@ where
                 .collect();
 
             loop {
-                let value: String;
-                if let &Some(ref v) = &(*node).value {
-                    value = format!("> [{:?}]", v);
+                let value = if let Some(ref v) = (*node).value {
+                    format!("> [{:?}]", v)
                 } else {
-                    value = format!("> []");
-                }
+                    "> []".to_string()
+                };
 
                 let max_str_len = format!("{} -{}-", value, (*node).links_len[(*node).level]).len();
 
@@ -1038,12 +1040,11 @@ where
                 while lvl > 0 {
                     lvl -= 1;
 
-                    let mut value_len: String;
-                    if lvl <= (*node).level {
-                        value_len = format!("{} -{}-", value, (*node).links_len[lvl]);
+                    let mut value_len = if lvl <= (*node).level {
+                        format!("{} -{}-", value, (*node).links_len[lvl])
                     } else {
-                        value_len = format!("{} -", value);
-                    }
+                        format!("{} -", value)
+                    };
                     for _ in 0..(max_str_len - value_len.len()) {
                         value_len.push('-');
                     }
@@ -1112,9 +1113,10 @@ where
     fn eq(&self, other: &SkipList<B>) -> bool {
         self.len() == other.len() && self.iter().eq(other)
     }
+    #[allow(clippy::partialeq_ne_impl)]
     #[inline]
     fn ne(&self, other: &SkipList<B>) -> bool {
-        self.len != other.len || self.iter().eq(other)
+        self.len != other.len || self.iter().ne(other)
     }
 }
 
@@ -1163,13 +1165,13 @@ where
     T: fmt::Debug,
 {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        r#try!(write!(f, "["));
+        write!(f, "[")?;
 
         for (i, entry) in self.iter().enumerate() {
             if i != 0 {
-                r#try!(write!(f, ", "));
+                write!(f, ", ")?;
             }
-            r#try!(write!(f, "{:?}", entry));
+            write!(f, "{:?}", entry)?;
         }
         write!(f, "]")
     }
@@ -1180,13 +1182,13 @@ where
     T: fmt::Display,
 {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        r#try!(write!(f, "["));
+        write!(f, "[")?;
 
         for (i, entry) in self.iter().enumerate() {
             if i != 0 {
-                r#try!(write!(f, ", "));
+                write!(f, ", ")?;
             }
-            r#try!(write!(f, "{}", entry));
+            write!(f, "{}", entry)?;
         }
         write!(f, "]")
     }
@@ -1478,7 +1480,8 @@ mod tests {
             assert_eq!(iter.size_hint(), (0, Some(0)));
             assert_eq!(iter.next(), None);
         }
-        test(size, sl.iter().map(|&i| i));
+        test(size, sl.iter().copied());
+        #[allow(clippy::map_clone)]
         test(size, sl.iter_mut().map(|&mut i| i));
         test(size, sl.into_iter());
     }
@@ -1500,7 +1503,8 @@ mod tests {
             assert_eq!(iter.size_hint(), (0, Some(0)));
             assert_eq!(iter.next(), None);
         }
-        test(size, sl.iter().rev().map(|&i| i));
+        test(size, sl.iter().rev().copied());
+        #[allow(clippy::map_clone)]
         test(size, sl.iter_mut().rev().map(|&mut i| i));
         test(size, sl.into_iter().rev());
     }
@@ -1527,7 +1531,8 @@ mod tests {
             assert_eq!(iter.size_hint(), (0, Some(0)));
             assert_eq!(iter.next(), None);
         }
-        test(size, sl.iter().map(|&i| i));
+        test(size, sl.iter().copied());
+        #[allow(clippy::map_clone)]
         test(size, sl.iter_mut().map(|&mut i| i));
         test(size, sl.into_iter());
     }
@@ -1552,7 +1557,7 @@ mod tests {
         let sl: SkipList<_> = (0..size).collect();
 
         fn test(sl: &SkipList<usize>, size: usize, min: Bound<usize>, max: Bound<usize>) {
-            let mut values = sl.range(min, max).map(|&i| i);
+            let mut values = sl.range(min, max).copied();
             let mut expects = 0..size;
 
             for (v, e) in values.by_ref().zip(expects.by_ref()) {
@@ -1576,10 +1581,10 @@ mod tests {
 
         for i in 0..size {
             for j in 0..size {
-                let mut values = sl.range(Included(i), Included(j)).map(|&i| i);
-                let mut expects = i..(j + 1);
+                let mut values = sl.range(Included(i), Included(j));
+                let mut expects = i..=j;
 
-                for (v, e) in values.by_ref().zip(expects.by_ref()) {
+                for (&v, e) in values.by_ref().zip(expects.by_ref()) {
                     assert_eq!(v, e);
                 }
                 assert_eq!(values.next(), None);
@@ -1589,10 +1594,10 @@ mod tests {
 
         for i in 0..size {
             for j in 0..size {
-                let mut values = sl.range(Included(i), Included(j)).rev().map(|&i| i);
-                let mut expects = (i..(j + 1)).rev();
+                let mut values = sl.range(Included(i), Included(j)).rev();
+                let mut expects = (i..=j).rev();
 
-                for (v, e) in values.by_ref().zip(expects.by_ref()) {
+                for (&v, e) in values.by_ref().zip(expects.by_ref()) {
                     assert_eq!(v, e);
                 }
                 assert_eq!(values.next(), None);

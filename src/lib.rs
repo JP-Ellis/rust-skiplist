@@ -23,8 +23,6 @@
 //! **Failure to satisfy these properties can result in unexpected behaviour at best, and at worst
 //! will cause a segfault, null deref, or some other bad behaviour.**
 
-#![allow(dead_code)]
-
 extern crate rand;
 mod level_generator;
 pub mod ordered_skiplist;

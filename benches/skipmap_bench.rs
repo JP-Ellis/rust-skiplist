@@ -56,10 +56,10 @@ pub fn skipmap_benchmark(c: &mut Criterion) {
     });
 
     c.bench_function("insert_0_100000", |b| {
-        bench_insert(b, 0, 1_00_000);
+        bench_insert(b, 0, 100_000);
     });
     c.bench_function("insert_100000_20", |b| {
-        bench_insert(b, 1_00_000, 20);
+        bench_insert(b, 100_000, 20);
     });
     c.bench_function("iter_20", |b| {
         bench_iter(b, 20);

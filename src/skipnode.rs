@@ -58,7 +58,7 @@ impl<V> SkipNode<V> {
     pub fn new(value: V, level: usize) -> Self {
         SkipNode {
             value: Some(value),
-            level: level,
+            level,
             next: None,
             prev: None,
             links: iter::repeat(None).take(level + 1).collect(),
@@ -81,6 +81,7 @@ impl<V> SkipNode<V> {
     }
 
     /// Returns `true` is the node is a tail-node.
+    #[allow(dead_code)]
     pub fn is_tail(&self) -> bool {
         self.next.is_none()
     }
@@ -95,7 +96,7 @@ where
     V: fmt::Display,
 {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        if let &Some(ref v) = &self.value {
+        if let Some(ref v) = self.value {
             write!(f, "{}", v)
         } else {
             Ok(())
