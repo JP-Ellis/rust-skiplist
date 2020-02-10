@@ -18,10 +18,10 @@ license = "MIT"
 edition = "2018"
 
 [dependencies]
-rand = "0.4"
+rand = {version = "0.7", features = ["small_rng"] }
 
 [dev-dependencies]
-criterion = "0.2"
+criterion = "0.3"
 
 [[bench]]
 name = "main"

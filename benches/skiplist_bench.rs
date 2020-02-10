@@ -2,13 +2,13 @@ use criterion::black_box;
 use criterion::Bencher;
 use criterion::Criterion;
 
-use rand::{weak_rng, Rng};
+use rand::prelude::*;
 
 use skiplist::SkipList;
 
 fn bench_push_front(b: &mut Bencher, base: usize, inserts: usize) {
     let mut sl: SkipList<u32> = SkipList::with_capacity(base + inserts);
-    let mut rng = weak_rng();
+    let mut rng = SmallRng::from_rng(thread_rng()).unwrap();
 
     for _ in 0..base {
         sl.push_front(rng.gen());
@@ -23,7 +23,7 @@ fn bench_push_front(b: &mut Bencher, base: usize, inserts: usize) {
 
 fn bench_push_back(b: &mut Bencher, base: usize, inserts: usize) {
     let mut sl: SkipList<u32> = SkipList::with_capacity(base + inserts);
-    let mut rng = weak_rng();
+    let mut rng = SmallRng::from_rng(thread_rng()).unwrap();
 
     for _ in 0..base {
         sl.push_back(rng.gen());
@@ -38,7 +38,7 @@ fn bench_push_back(b: &mut Bencher, base: usize, inserts: usize) {
 
 fn bench_iter(b: &mut Bencher, size: usize) {
     let mut sl: SkipList<usize> = SkipList::with_capacity(size);
-    let mut rng = weak_rng();
+    let mut rng = SmallRng::from_rng(thread_rng()).unwrap();
 
     for _ in 0..size {
         sl.push_back(rng.gen());

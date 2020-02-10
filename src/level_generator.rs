@@ -9,7 +9,7 @@
 //! It is very unlikely that this will need to be changed as the default should
 //! suffice, but if need be custom level generators can be implemented.
 
-use rand::distributions::{self, Sample};
+use rand::prelude::*;
 
 // ////////////////////////////////////////////////////////////////////////////
 // Level Generator
@@ -35,8 +35,8 @@ pub trait LevelGenerator {
 pub struct GeometricalLevelGenerator {
     total: usize,
     p: f64,
-    unit_range: distributions::Range<f64>,
-    rng: rand::XorShiftRng, // Fast generator
+    // unit_range: distributions::Range<f64>,
+    rng: SmallRng, // Fast generator
 }
 
 impl GeometricalLevelGenerator {
@@ -58,8 +58,8 @@ impl GeometricalLevelGenerator {
         GeometricalLevelGenerator {
             total,
             p,
-            unit_range: distributions::Range::new(0.0f64, 1.0),
-            rng: rand::XorShiftRng::new_unseeded(),
+            // unit_range: distributions::Range::new(0.0f64, 1.0),
+            rng: SmallRng::from_rng(thread_rng()).unwrap(),
         }
     }
 }
@@ -68,7 +68,7 @@ impl LevelGenerator for GeometricalLevelGenerator {
     fn random(&mut self) -> usize {
         let mut h = 0;
         let mut x = self.p;
-        let f = 1.0 - self.unit_range.sample(&mut self.rng);
+        let f = 1.0 - self.rng.gen::<f64>();
         while x > f && h + 1 < self.total {
             h += 1;
             x *= self.p
