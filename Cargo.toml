@@ -1,21 +1,21 @@
 [package]
-
 name = "skiplist"
-version = "0.2.10"
+version = "0.3.0"
 authors = ["JP-Ellis <josh@jpellis.me>"]
-
 description = "Skiplist implementation in rust, providing fast insertion and removal.  A normal skiplist is implemented, as well as an ordered skiplist and a skipmap."
+keywords = ["collection", "skiplist", "sorted"]
 
-documentation = "http://www.jpellis.me/rust-skiplist/skiplist/"
-homepage = "http://www.jpellis.me/projects/rust-skiplist/"
+documentation = "https://docs.rs/skiplist"
+homepage = "https://www.jpellis.me/projects/rust-skiplist/"
 repository = "https://www.github.com/JP-Ellis/rust-skiplist/"
 
 readme = "README.md"
 
-keywords = ["collection", "skiplist", "sorted"]
-
 license = "MIT"
 edition = "2018"
+
+[badges]
+codecov = { repository = "JP-Ellis/rust-skiplist", branch = "master", service = "github" }
 
 [dependencies]
 rand = {version = "0.7", features = ["small_rng"] }
