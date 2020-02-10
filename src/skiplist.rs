@@ -11,12 +11,12 @@ use std::ops;
 use crate::level_generator::{GeometricalLevelGenerator, LevelGenerator};
 use crate::skipnode::SkipNode;
 
-// /////////////////////////////////////////////////////////////////////////////////////////////////
+// ////////////////////////////////////////////////////////////////////////////
 // SkipList
-// /////////////////////////////////////////////////////////////////////////////////////////////////
+// ////////////////////////////////////////////////////////////////////////////
 
-/// SkipList provides a way of storing elements and provides efficient way to access, insert and
-/// remove nodes.
+/// SkipList provides a way of storing elements and provides efficient way to
+/// access, insert and remove nodes.
 pub struct SkipList<T> {
     // Storage, this is not sorted
     head: Box<SkipNode<T>>,
@@ -48,9 +48,10 @@ impl<T> SkipList<T> {
         }
     }
 
-    /// Constructs a new, empty skiplist with the optimal number of levels for the intended
-    /// capacity.  Specifically, it uses `floor(log2(capacity))` number of levels, ensuring that
-    /// only *a few* nodes occupy the highest level.
+    /// Constructs a new, empty skiplist with the optimal number of levels for
+    /// the intended capacity.  Specifically, it uses `floor(log2(capacity))`
+    /// number of levels, ensuring that only *a few* nodes occupy the highest
+    /// level.
     ///
     /// # Examples
     ///
@@ -131,7 +132,8 @@ impl<T> SkipList<T> {
         self.len == 0
     }
 
-    /// Insert the element into the skiplist at the given index, shifting all subsequent nodes down.
+    /// Insert the element into the skiplist at the given index, shifting all
+    /// subsequent nodes down.
     ///
     /// # Panics
     ///
@@ -159,9 +161,10 @@ impl<T> SkipList<T> {
             let mut new_node = Box::new(SkipNode::new(value, self.level_generator.random()));
             let new_node_ptr: *mut SkipNode<T> = mem::transmute_copy(&new_node);
 
-            // At each level, `node` moves down the list until it is just prior to where the node
-            // will be inserted.  As this is parsed top-down, the link lengths can't yet be
-            // adjusted and the insert nodes are stored in `insert_nodes`.
+            // At each level, `node` moves down the list until it is just prior
+            // to where the node will be inserted.  As this is parsed top-down,
+            // the link lengths can't yet be adjusted and the insert nodes are
+            // stored in `insert_nodes`.
             let mut node: *mut SkipNode<T> = mem::transmute_copy(&self.head);
             let mut insert_nodes: Vec<*mut SkipNode<T>> = Vec::with_capacity(new_node.level);
 
@@ -170,7 +173,8 @@ impl<T> SkipList<T> {
             while lvl > 0 {
                 lvl -= 1;
 
-                // Move insert_node down until `next` is not less than the new node.
+                // Move insert_node down until `next` is not less than the new
+                // node.
                 while let Some(next) = (*node).links[lvl] {
                     if index_sum + (*node).links_len[lvl] < index {
                         index_sum += (*node).links_len[lvl];
@@ -180,10 +184,12 @@ impl<T> SkipList<T> {
                         break;
                     }
                 }
-                // The node level is really just how many links it has.
-                // If we've reached the node level, insert it in the links:
+                // The node level is really just how many links it has. If we've
+                // reached the node level, insert it in the links:
+                // ```
                 // Before:    [0] ------------> [1]
                 // After:     [0] --> [new] --> [1]
+                // ```
                 if lvl <= new_node.level {
                     insert_nodes.push(node);
                     new_node.links[lvl] = (*node).links[lvl];
@@ -193,8 +199,8 @@ impl<T> SkipList<T> {
                 }
             }
 
-            // We now parse the insert_nodes from bottom to top, and calculate (and adjust) link
-            // lengths.
+            // We now parse the insert_nodes from bottom to top, and calculate
+            // (and adjust) link lengths.
             for (lvl, &node) in insert_nodes.iter().rev().enumerate() {
                 if lvl == 0 {
                     (*node).links_len[lvl] = if (*node).is_head() { 0 } else { 1 };
@@ -251,7 +257,8 @@ impl<T> SkipList<T> {
         self.insert(value, len);
     }
 
-    /// Provides a reference to the front element, or `None` if the skiplist is empty.
+    /// Provides a reference to the front element, or `None` if the skiplist is
+    /// empty.
     ///
     /// # Examples
     ///
@@ -274,7 +281,8 @@ impl<T> SkipList<T> {
         }
     }
 
-    /// Provides a mutable reference to the front element, or `None` if the skiplist is empty.
+    /// Provides a mutable reference to the front element, or `None` if the
+    /// skiplist is empty.
     ///
     /// # Examples
     ///
@@ -297,7 +305,8 @@ impl<T> SkipList<T> {
         }
     }
 
-    /// Provides a reference to the back element, or `None` if the skiplist is empty.
+    /// Provides a reference to the back element, or `None` if the skiplist is
+    /// empty.
     ///
     /// # Examples
     ///
@@ -321,7 +330,8 @@ impl<T> SkipList<T> {
         }
     }
 
-    /// Provides a reference to the back element, or `None` if the skiplist is empty.
+    /// Provides a reference to the back element, or `None` if the skiplist is
+    /// empty.
     ///
     /// # Examples
     ///
@@ -345,8 +355,8 @@ impl<T> SkipList<T> {
         }
     }
 
-    /// Provides a reference to the element at the given index, or `None` if the skiplist is empty
-    /// or the index is out of bounds.
+    /// Provides a reference to the element at the given index, or `None` if the
+    /// skiplist is empty or the index is out of bounds.
     ///
     /// # Examples
     ///
@@ -369,8 +379,8 @@ impl<T> SkipList<T> {
         }
     }
 
-    /// Provides a mutable reference to the element at the given index, or `None` if the skiplist
-    /// is empty or the index is out of bounds.
+    /// Provides a mutable reference to the element at the given index, or
+    /// `None` if the skiplist is empty or the index is out of bounds.
     ///
     /// # Examples
     ///
@@ -397,7 +407,8 @@ impl<T> SkipList<T> {
         }
     }
 
-    /// Removes the first element and returns it, or `None` if the sequence is empty.
+    /// Removes the first element and returns it, or `None` if the sequence is
+    /// empty.
     ///
     /// # Examples
     ///
@@ -421,7 +432,8 @@ impl<T> SkipList<T> {
         }
     }
 
-    /// Removes the last element and returns it, or `None` if the sequence is empty.
+    /// Removes the last element and returns it, or `None` if the sequence is
+    /// empty.
     ///
     /// # Examples
     ///
@@ -525,14 +537,15 @@ impl<T> SkipList<T> {
         unsafe {
             let mut removed_nodes = Vec::new();
 
-            // Since we have to check every element anyway, we parse this list bottom-up.  This
-            // allows for link lengths to be adjusted on lvl 0 as appropriate and then calculated
-            // on subsequent levels.
+            // Since we have to check every element anyway, we parse this list
+            // bottom-up.  This allows for link lengths to be adjusted on lvl 0
+            // as appropriate and then calculated on subsequent levels.
             for lvl in 0..self.level_generator.total() {
                 let mut node: *mut SkipNode<T> = mem::transmute_copy(&self.head);
                 loop {
-                    // If next will be removed, we update links[lvl] to be that node's links[lvl],
-                    // and we repeat until links[lvl] point to a node which will be retained.
+                    // If next will be removed, we update links[lvl] to be that
+                    // node's links[lvl], and we repeat until links[lvl] point
+                    // to a node which will be retained.
                     if let Some(next) = (*node).links[lvl] {
                         if let Some(ref value) = (*next).value {
                             if !f(value) {
@@ -544,8 +557,9 @@ impl<T> SkipList<T> {
                             }
                         }
                     }
-                    // At this point, links[lvl] points to a node which we know will be retained
-                    // (or None), so we update all the appropriate links.
+                    // At this point, links[lvl] points to a node which we know
+                    // will be retained (or None), so we update all the
+                    // appropriate links.
                     (*node).links_len[lvl] =
                         self.link_length(node, (*node).links[lvl], lvl).unwrap();
                     // And finally proceed to the next node.
@@ -637,9 +651,10 @@ impl<T> SkipList<T> {
         }
     }
 
-    /// Constructs a double-ended iterator over a sub-range of elements in the skiplist, starting
-    /// at min, and ending at max. If min is `Unbounded`, then it will be treated as "negative
-    /// infinity", and if max is `Unbounded`, then it will be treated as "positive infinity".  Thus
+    /// Constructs a double-ended iterator over a sub-range of elements in the
+    /// skiplist, starting at min, and ending at max. If min is `Unbounded`,
+    /// then it will be treated as "negative infinity", and if max is
+    /// `Unbounded`, then it will be treated as "positive infinity".  Thus
     /// range(Unbounded, Unbounded) will yield the whole collection.
     ///
     /// # Examples
@@ -657,10 +672,11 @@ impl<T> SkipList<T> {
     /// ```
     pub fn range(&self, min: Bound<usize>, max: Bound<usize>) -> Iter<T> {
         unsafe {
-            // We have to find the start and end nodes.  We use `find_value`; if no node with the
-            // given value is present, we are done.  If there is a node, we move to the adjacent
-            // nodes until we are before (in the case of included) or at the last node (in the case
-            // of exluded).
+            // We have to find the start and end nodes.  We use `find_value`; if
+            // no node with the given value is present, we are done.  If there
+            // is a node, we move to the adjacent nodes until we are before (in
+            // the case of included) or at the last node (in the case of
+            // excluded).
             let start = match min {
                 Bound::Included(min) => (*self.get_index(min)).prev.unwrap() as *const SkipNode<T>,
                 Bound::Excluded(min) => self.get_index(min),
@@ -698,10 +714,11 @@ impl<T> SkipList<T> {
         }
     }
 
-    /// Constructs a mutable double-ended iterator over a sub-range of elements in the skiplist,
-    /// starting at min, and ending at max. If min is `Unbounded`, then it will be treated as
-    /// "negative infinity", and if max is `Unbounded`, then it will be treated as "positive
-    /// infinity".  Thus range(Unbounded, Unbounded) will yield the whole collection.
+    /// Constructs a mutable double-ended iterator over a sub-range of elements
+    /// in the skiplist, starting at min, and ending at max. If min is
+    /// `Unbounded`, then it will be treated as "negative infinity", and if max
+    /// is `Unbounded`, then it will be treated as "positive infinity".  Thus
+    /// range(Unbounded, Unbounded) will yield the whole collection.
     ///
     /// # Examples
     ///
@@ -718,10 +735,11 @@ impl<T> SkipList<T> {
     /// ```
     pub fn range_mut(&mut self, min: Bound<usize>, max: Bound<usize>) -> IterMut<T> {
         unsafe {
-            // We have to find the start and end nodes.  We use `find_value`; if no node with the
-            // given value is present, we are done.  If there is a node, we move to the adjacent
-            // nodes until we are before (in the case of included) or at the last node (in the case
-            // of exluded).
+            // We have to find the start and end nodes.  We use `find_value`; if
+            // no node with the given value is present, we are done.  If there
+            // is a node, we move to the adjacent nodes until we are before (in
+            // the case of included) or at the last node (in the case of
+            // excluded).
             let start = match min {
                 Bound::Included(min) => (*self.get_index(min)).prev.unwrap(),
                 Bound::Excluded(min) => self.get_index(min) as *mut SkipNode<T>,
@@ -803,19 +821,21 @@ where
     /// assert_eq!(skiplist.len(), 1);
     /// ```
     pub fn dedup(&mut self) {
-        // This follows the same algorithm as `retain` initially to find the nodes to removed (on
-        // lvl 0) and then on higher levels checks whether `next` is among the removed nodes.
+        // This follows the same algorithm as `retain` initially to find the
+        // nodes to removed (on lvl 0) and then on higher levels checks whether
+        // `next` is among the removed nodes.
         unsafe {
             let mut removed_nodes = Vec::new();
 
-            // Since we have to check every element anyway, we parse this list bottom-up.  This
-            // allows for link lengths to be adjusted on lvl 0 as appropriate and then calculated
-            // on subsequent levels.
+            // Since we have to check every element anyway, we parse this list
+            // bottom-up.  This allows for link lengths to be adjusted on lvl 0
+            // as appropriate and then calculated on subsequent levels.
             for lvl in 0..self.level_generator.total() {
                 let mut node: *mut SkipNode<T> = mem::transmute_copy(&self.head);
                 loop {
-                    // If next will be removed, we update links[lvl] to be that node's links[lvl],
-                    // and we repeat until links[lvl] point to a node which will be retained.
+                    // If next will be removed, we update links[lvl] to be that
+                    // node's links[lvl], and we repeat until links[lvl] point
+                    // to a node which will be retained.
                     if let Some(next) = (*node).links[lvl] {
                         if lvl == 0 {
                             if let (&Some(ref a), &Some(ref b)) = (&(*node).value, &(*next).value) {
@@ -839,8 +859,9 @@ where
                             }
                         }
                     }
-                    // At this point, links[lvl] points to a node which we know will be retained
-                    // (or None), so we update all the appropriate links.
+                    // At this point, links[lvl] points to a node which we know
+                    // will be retained (or None), so we update all the
+                    // appropriate links.
                     (*node).links_len[lvl] =
                         self.link_length(node, (*node).links[lvl], lvl).unwrap();
                     // And finally proceed to the next node.
@@ -914,18 +935,19 @@ impl<T> SkipList<T> {
         }
     }
 
-    /// In order to find the number of nodes between two given nodes (or the node and the tail), we
-    /// can count the link lengths at the level below (assuming that is correct).  For example, if
-    /// we have:
+    /// In order to find the number of nodes between two given nodes (or the
+    /// node and the tail), we can count the link lengths at the level below
+    /// (assuming that is correct).  For example, if we have:
     /// ```text
     /// n   : [0] -?-------------------> [4]
     /// n-1 : [0] -1-> [1] -3-> [3] -2-> [4]
     /// ```
     /// Then on level `n`, we know the length will be `1+3+2 = 6`.
     ///
-    /// The `lvl` option specifies the level at which we desire to calculate the length and thus
-    /// assumes that `lvl-1` is correct.  `lvl=0` is always guaranteed to be correct if all the
-    /// `next[0]` links are in order since at level 0, all links lengths are 1.
+    /// The `lvl` option specifies the level at which we desire to calculate the
+    /// length and thus assumes that `lvl-1` is correct.  `lvl=0` is always
+    /// guaranteed to be correct if all the `next[0]` links are in order since
+    /// at level 0, all links lengths are 1.
     ///
     /// If the end node is not encountered, Err(false) is returned.
     fn link_length(
@@ -940,8 +962,9 @@ impl<T> SkipList<T> {
             if lvl == 0 {
                 while Some(node) != end {
                     length += 1;
-                    // Since the head node is not a node proper, the link between it and the next node
-                    // (on level 0) is actual 0 hence the offset here.
+                    // Since the head node is not a node proper, the link
+                    // between it and the next node (on level 0) is actual 0
+                    // hence the offset here.
                     if (*node).is_head() {
                         length -= 1;
                     }
@@ -959,7 +982,8 @@ impl<T> SkipList<T> {
                     }
                 }
             }
-            // Check that we actually have calculated the length to the end node we want.
+            // Check that we actually have calculated the length to the end node
+            // we want.
             if let Some(end) = end {
                 if node != end {
                     return Err(false);
@@ -1018,7 +1042,8 @@ impl<T> SkipList<T>
 where
     T: fmt::Debug,
 {
-    /// Prints out the internal structure of the skiplist (for debugging purposes).
+    /// Prints out the internal structure of the skiplist (for debugging
+    /// purposes).
     #[allow(dead_code)]
     fn debug_structure(&self) {
         unsafe {
@@ -1101,10 +1126,10 @@ impl<T: PartialOrd> default::Default for SkipList<T> {
     }
 }
 
-/// This implementation of PartialEq only checks that the *values* are equal; it does not check for
-/// equivalence of other features (such as the ordering function and the node levels).
-/// Furthermore, this uses `T`'s implementation of PartialEq and *does not* use the owning
-/// skiplist's comparison function.
+/// This implementation of PartialEq only checks that the *values* are equal; it
+/// does not check for equivalence of other features (such as the ordering
+/// function and the node levels). Furthermore, this uses `T`'s implementation
+/// of PartialEq and *does not* use the owning skiplist's comparison function.
 impl<A, B> cmp::PartialEq<SkipList<B>> for SkipList<A>
 where
     A: cmp::PartialEq<B>,
@@ -1412,9 +1437,9 @@ impl<T> DoubleEndedIterator for IntoIter<T> {
     }
 }
 
-// /////////////////////////////////////////////////////////////////////////////////////////////////
-// Tests and Benchmarks
-// /////////////////////////////////////////////////////////////////////////////////////////////////
+// ////////////////////////////////////////////////////////////////////////////
+// Tests
+// ////////////////////////////////////////////////////////////////////////////
 
 #[cfg(test)]
 mod tests {

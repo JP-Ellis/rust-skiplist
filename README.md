@@ -13,7 +13,3 @@ There are three kinds of collections defined here:
 Documentation can be found
 [here](http://www.jpellis.me/rust-skiplist/skiplist/) and the cargo crate
 can be found [here](https://crates.io/crates/skiplist).
-
-
-The various `range` methods work on the stable version of Rust and
-the unstable feature is removed.

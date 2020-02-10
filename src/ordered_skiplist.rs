@@ -11,29 +11,32 @@ use std::ops;
 use crate::level_generator::{GeometricalLevelGenerator, LevelGenerator};
 use crate::skipnode::SkipNode;
 
-// /////////////////////////////////////////////////////////////////////////////////////////////////
+// ////////////////////////////////////////////////////////////////////////////
 // OrderedSkipList
-// /////////////////////////////////////////////////////////////////////////////////////////////////
+// ////////////////////////////////////////////////////////////////////////////
 
-/// The ordered skiplist provides a way of storing elements such that they are always
-/// sorted and at the same time provides efficient way to access, insert and remove nodes.
-/// Just like `SkipList`, it also provides access to indices.
+/// The ordered skiplist provides a way of storing elements such that they are
+/// always sorted and at the same time provides efficient way to access, insert
+/// and remove nodes. Just like `SkipList`, it also provides access to indices.
 ///
-/// By default, the OrderedSkipList uses the comparison function `a.partial_cmp(b).expect("Value
-/// cannot be ordered")`.  This allows the list to handles all types which implement `Ord` and
-/// `PartialOrd`, though it will panic if value which cannot be ordered is inserted (such as
-/// `Float::nan()`).
+/// By default, the OrderedSkipList uses the comparison function
+/// `a.partial_cmp(b).expect("Value cannot be ordered")`.  This allows the list
+/// to handles all types which implement `Ord` and `PartialOrd`, though it will
+/// panic if value which cannot be ordered is inserted (such as `Float::nan()`).
 ///
-/// The ordered skiplist has an associated sorting function which **must** be well-behaved.
-/// Specifically, given some ordering function `f(a, b)`, it must satisfy the folowing properties:
+/// The ordered skiplist has an associated sorting function which **must** be
+/// well-behaved. Specifically, given some ordering function `f(a, b)`, it must
+/// satisfy the following properties:
 ///
 /// - Be well defined: `f(a, b)` should always return the same value
-/// - Be anti-symmetric: `f(a, b) == Greater` iff `f(b, a) == Less` and `f(a, b) == Equal == f(b,
-///   a)`.
-/// - By transitive: If `f(a, b) == Greater` and `f(b, c) == Greater` then `f(a, c) == Greater`.
+/// - Be anti-symmetric: `f(a, b) == Greater` iff `f(b, a) == Less` and `f(a, b)
+///   == Equal == f(b, a)`.
+/// - By transitive: If `f(a, b) == Greater` and `f(b, c) == Greater` then `f(a,
+///   c) == Greater`.
 ///
-/// **Failure to satisfy these properties can result in unexpected behaviour at best, and at worst
-/// will cause a segfault, null deref, or some other bad behaviour.**
+/// **Failure to satisfy these properties can result in unexpected behavior at
+/// best, and at worst will cause a segfault, null deref, or some other bad
+/// behavior.**
 pub struct OrderedSkipList<T> {
     // Storage, this is not sorted
     head: Box<SkipNode<T>>,
@@ -50,17 +53,18 @@ impl<T> OrderedSkipList<T>
 where
     T: cmp::PartialOrd,
 {
-    /// Create a new skiplist with the default default comparison function of `|&a, &b|
-    /// a.cmp(b).unwrap()` and the default number of 16 levels.  As a result, any element which
-    /// cannot be ordered will cause insertion to panic.
+    /// Create a new skiplist with the default default comparison function of
+    /// `|&a, &b| a.cmp(b).unwrap()` and the default number of 16 levels.  As a
+    /// result, any element which cannot be ordered will cause insertion to
+    /// panic.
     ///
-    /// The comparison function can always be changed with `sort_by`, which has essentially no
-    /// cost if done before inserting any elements.
+    /// The comparison function can always be changed with `sort_by`, which has
+    /// essentially no cost if done before inserting any elements.
     ///
     /// # Panic
     ///
-    /// The default comparison function will cause a panic if an element is inserted which cannot
-    /// be ordered (such as `Float::nan()`).
+    /// The default comparison function will cause a panic if an element is
+    /// inserted which cannot be ordered (such as `Float::nan()`).
     ///
     /// # Examples
     ///
@@ -82,17 +86,18 @@ where
         }
     }
 
-    /// Constructs a new, empty skiplist with the optimal number of levels for the intended
-    /// capacity.  Specifically, it uses `floor(log2(capacity))` number of levels, ensuring that
-    /// only *a few* nodes occupy the highest level.
+    /// Constructs a new, empty skiplist with the optimal number of levels for
+    /// the intended capacity.  Specifically, it uses `floor(log2(capacity))`
+    /// number of levels, ensuring that only *a few* nodes occupy the highest
+    /// level.
     ///
-    /// It uses the default comparison function of `|&a, &b| a.cmp(b).unwrap()` and can be changed
-    /// with `sort_by`.
+    /// It uses the default comparison function of `|&a, &b| a.cmp(b).unwrap()`
+    /// and can be changed with `sort_by`.
     ///
     /// # Panic
     ///
-    /// The default comparison function will cause a panic if an element is inserted which cannot
-    /// be ordered (such as `Float::nan()`).
+    /// The default comparison function will cause a panic if an element is
+    /// inserted which cannot be ordered (such as `Float::nan()`).
     ///
     /// # Examples
     ///
@@ -118,21 +123,25 @@ where
 }
 
 impl<T> OrderedSkipList<T> {
-    /// Create a new skiplist using the provided function in order to determine the ordering of
-    /// elements within the list.  It will be generated with 16 levels.
+    /// Create a new skiplist using the provided function in order to determine
+    /// the ordering of elements within the list.  It will be generated with 16
+    /// levels.
     ///
     /// # Safety
     ///
-    /// The sorting function which **must** be well-behaved.  Specifically, given some ordering
-    /// function `f(a, b)`, it must satisfy the folowing properties:
+    /// The ordered skiplist relies on a well-behaved comparison function.
+    /// Specifically, given some ordering function `f(a, b)`, it **must**
+    /// satisfy the following properties:
     ///
     /// - Be well defined: `f(a, b)` should always return the same value
-    /// - Be anti-symmetric: `f(a, b) == Greater` iff `f(b, a) == Less` and `f(a, b) == Equal == f(b,
-    ///   a)`.
-    /// - By transitive: If `f(a, b) == Greater` and `f(b, c) == Greater` then `f(a, c) == Greater`.
+    /// - Be anti-symmetric: `f(a, b) == Greater` if and only if `f(b, a) ==
+    ///   Less`, and `f(a, b) == Equal == f(b, a)`.
+    /// - By transitive: If `f(a, b) == Greater` and `f(b, c) == Greater` then
+    ///   `f(a, c) == Greater`.
     ///
-    /// **Failure to satisfy these properties can result in unexpected behaviour at best, and at worst
-    /// will cause a segfault, null deref, or some other bad behaviour.**
+    /// **Failure to satisfy these properties can result in unexpected behavior
+    /// at best, and at worst will cause a segfault, null deref, or some other
+    /// bad behavior.**
     ///
     /// # Examples
     ///
@@ -165,28 +174,32 @@ impl<T> OrderedSkipList<T> {
         }
     }
 
-    /// Change the method which determines the ordering of the elements in the skiplist.
+    /// Change the method which determines the ordering of the elements in the
+    /// skiplist.
     ///
     /// # Panics
     ///
-    /// This call will panic if the ordering of the elements will be changed as a result of this
-    /// new comparison method.
+    /// This call will panic if the ordering of the elements will be changed as
+    /// a result of this new comparison method.
     ///
-    /// As a result, `sort_by` is best to call if the skiplist is empty or has just a single
-    /// element and may panic with 2 or more elements.
+    /// As a result, `sort_by` is best to call if the skiplist is empty or has
+    /// just a single element and may panic with 2 or more elements.
     ///
     /// # Safety
     ///
-    /// The sorting function which **must** be well-behaved.  Specifically, given some ordering
-    /// function `f(a, b)`, it must satisfy the folowing properties:
+    /// The ordered skiplist relies on a well-behaved comparison function.
+    /// Specifically, given some ordering function `f(a, b)`, it **must**
+    /// satisfy the following properties:
     ///
     /// - Be well defined: `f(a, b)` should always return the same value
-    /// - Be anti-symmetric: `f(a, b) == Greater` iff `f(b, a) == Less` and `f(a, b) == Equal == f(b,
-    ///   a)`.
-    /// - By transitive: If `f(a, b) == Greater` and `f(b, c) == Greater` then `f(a, c) == Greater`.
+    /// - Be anti-symmetric: `f(a, b) == Greater` if and only if `f(b, a) ==
+    ///   Less`, and `f(a, b) == Equal == f(b, a)`.
+    /// - By transitive: If `f(a, b) == Greater` and `f(b, c) == Greater` then
+    ///   `f(a, c) == Greater`.
     ///
-    /// **Failure to satisfy these properties can result in unexpected behaviour at best, and at worst
-    /// will cause a segfault, null deref, or some other bad behaviour.**
+    /// **Failure to satisfy these properties can result in unexpected behavior
+    /// at best, and at worst will cause a segfault, null deref, or some other
+    /// bad behavior.**
     ///
     /// # Examples
     ///
@@ -195,7 +208,7 @@ impl<T> OrderedSkipList<T> {
     ///
     /// let mut skiplist = OrderedSkipList::new();
     /// unsafe { skiplist.sort_by(|a: &i64, b: &i64| b.cmp(a)) } // All good; skiplist empty.
-    /// skiplist.insert(0);                                       // Would still be good here.
+    /// skiplist.insert(0);                                      // Would still be good here.
     /// skiplist.insert(10);
     /// unsafe { skiplist.sort_by(|a: &i64, b: &i64| a.cmp(b)) } // Panics; order would change.
     /// ```
@@ -298,9 +311,10 @@ impl<T> OrderedSkipList<T> {
             let mut new_node = Box::new(SkipNode::new(value, self.level_generator.random()));
             let new_node_ptr: *mut SkipNode<T> = mem::transmute_copy(&new_node);
 
-            // At each level, `insert_node` moves down the list until it is just prior to where the node
-            // will be inserted.  As this is parsed top-down, the link lengths can't yet be
-            // adjusted and the insert nodes are stored in `insert_nodes`.
+            // At each level, `insert_node` moves down the list until it is just
+            // prior to where the node will be inserted.  As this is parsed
+            // top-down, the link lengths can't yet be adjusted and the insert
+            // nodes are stored in `insert_nodes`.
             let mut insert_node: *mut SkipNode<T> = mem::transmute_copy(&self.head);
             let mut insert_nodes: Vec<*mut SkipNode<T>> = Vec::with_capacity(new_node.level);
 
@@ -308,7 +322,8 @@ impl<T> OrderedSkipList<T> {
             while lvl > 0 {
                 lvl -= 1;
 
-                // Move insert_node down until `next` is not less than the new node.
+                // Move insert_node down until `next` is not less than the new
+                // node.
                 while let Some(next) = (*insert_node).links[lvl] {
                     if let (&Some(ref a), &Some(ref b)) = (&(*next).value, &new_node.value) {
                         if (self.compare)(a, b) == Ordering::Less {
@@ -318,10 +333,12 @@ impl<T> OrderedSkipList<T> {
                     }
                     break;
                 }
-                // The node level is really just how many links it has.
-                // If we've reached the node level, insert it in the links:
+                // The node level is really just how many links it has. If we've
+                // reached the node level, insert it in the links:
+                // ```
                 // Before:    [0] ------------> [1]
                 // After:     [0] --> [new] --> [1]
+                // ```
                 if lvl <= new_node.level {
                     insert_nodes.push(insert_node);
                     new_node.links[lvl] = (*insert_node).links[lvl];
@@ -331,8 +348,8 @@ impl<T> OrderedSkipList<T> {
                 }
             }
 
-            // We now parse the insert_nodes from bottom to top, and calculate (and adjust) link
-            // lengths.
+            // We now parse the insert_nodes from bottom to top, and calculate
+            // (and adjust) link lengths.
             for (lvl, &insert_node) in insert_nodes.iter().rev().enumerate() {
                 if lvl == 0 {
                     (*insert_node).links_len[lvl] = if (*insert_node).is_head() { 0 } else { 1 };
@@ -360,7 +377,8 @@ impl<T> OrderedSkipList<T> {
         }
     }
 
-    /// Provides a reference to the front element, or `None` if the skiplist is empty.
+    /// Provides a reference to the front element, or `None` if the skiplist is
+    /// empty.
     ///
     /// # Examples
     ///
@@ -383,7 +401,8 @@ impl<T> OrderedSkipList<T> {
         }
     }
 
-    /// Provides a reference to the back element, or `None` if the skiplist is empty.
+    /// Provides a reference to the back element, or `None` if the skiplist is
+    /// empty.
     ///
     /// # Examples
     ///
@@ -407,8 +426,8 @@ impl<T> OrderedSkipList<T> {
         }
     }
 
-    /// Provides a reference to the element at the given index, or `None` if the skiplist is empty
-    /// or the index is out of bounds.
+    /// Provides a reference to the element at the given index, or `None` if the
+    /// skiplist is empty or the index is out of bounds.
     ///
     /// # Examples
     ///
@@ -431,7 +450,8 @@ impl<T> OrderedSkipList<T> {
         }
     }
 
-    /// Removes the first element and returns it, or `None` if the sequence is empty.
+    /// Removes the first element and returns it, or `None` if the sequence is
+    /// empty.
     ///
     /// # Examples
     ///
@@ -455,7 +475,8 @@ impl<T> OrderedSkipList<T> {
         }
     }
 
-    /// Removes the last element and returns it, or `None` if the sequence is empty.
+    /// Removes the last element and returns it, or `None` if the sequence is
+    /// empty.
     ///
     /// # Examples
     ///
@@ -522,13 +543,14 @@ impl<T> OrderedSkipList<T> {
         }
     }
 
-    /// Removes and returns an element with the same value or None if there are no such values in
-    /// the skiplist.
+    /// Removes and returns an element with the same value or None if there are
+    /// no such values in the skiplist.
     ///
-    /// If the skiplist contains multiple values with the desired value, the highest level one will
-    /// be removed.  This will results in a deterioration in the skiplist's performance if the
-    /// skiplist contains *many* duplicated values which are very frequently inserted and removed.
-    /// In such circumstances, the slower `remove_first` method is preferred.
+    /// If the skiplist contains multiple values with the desired value, the
+    /// highest level one will be removed.  This will results in a deterioration
+    /// in the skiplist's performance if the skiplist contains *many* duplicated
+    /// values which are very frequently inserted and removed. In such
+    /// circumstances, the slower `remove_first` method is preferred.
     ///
     /// # Examples
     ///
@@ -551,10 +573,11 @@ impl<T> OrderedSkipList<T> {
             let mut prev_nodes: Vec<*mut SkipNode<T>> =
                 Vec::with_capacity(self.level_generator.total());
 
-            // We don't know if the value we're looking for is even inside this list until we get
-            // to the lowest level.  For this reason, we store where the returned node would be in
-            // `prev_nodes` and if we find the desired node, we have reference to all the
-            // appropriate nodes to modify.
+            // We don't know if the value we're looking for is even inside this
+            // list until we get to the lowest level.  For this reason, we store
+            // where the returned node would be in `prev_nodes` and if we find
+            // the desired node, we have reference to all the appropriate nodes
+            // to modify.
             let mut lvl = self.level_generator.total();
             while lvl > 0 {
                 lvl -= 1;
@@ -588,8 +611,9 @@ impl<T> OrderedSkipList<T> {
                             }
                         }
                     }
-                    // We have not yet found the node, and there are no further nodes at this
-                    // level, so the return node (if present) is between `node` and tail.
+                    // We have not yet found the node, and there are no further
+                    // nodes at this level, so the return node (if present) is
+                    // between `node` and tail.
                     if (*node).links[lvl].is_none() {
                         prev_nodes.push(node);
                         continue;
@@ -597,8 +621,8 @@ impl<T> OrderedSkipList<T> {
                 }
             }
 
-            // At this point, `return_node` contains a reference to the return node if it was
-            // found, otherwise it is None.
+            // At this point, `return_node` contains a reference to the return
+            // node if it was found, otherwise it is None.
             if let Some(return_node) = return_node {
                 for (lvl, &prev_node) in prev_nodes.iter().rev().enumerate() {
                     if (*prev_node).links[lvl] == Some(return_node) {
@@ -624,12 +648,13 @@ impl<T> OrderedSkipList<T> {
         }
     }
 
-    /// Removes and returns an element with the same value or None if there are no such values in
-    /// the skiplist.
+    /// Removes and returns an element with the same value or None if there are
+    /// no such values in the skiplist.
     ///
-    /// If the skiplist contains multiple values with the desired value, the first one in the
-    /// skiplist will be returned.  If the skiplist contains *many* duplicated values which are
-    /// frequently inserted and removed, this method should be preferred over `remove`.
+    /// If the skiplist contains multiple values with the desired value, the
+    /// first one in the skiplist will be returned.  If the skiplist contains
+    /// *many* duplicated values which are frequently inserted and removed, this
+    /// method should be preferred over `remove`.
     ///
     /// # Examples
     ///
@@ -654,8 +679,9 @@ impl<T> OrderedSkipList<T> {
             return None;
         }
 
-        // This is essentially identical to `remove`, except for a slightly different logic to
-        // determining the actual return node in the Ordering::Equal branch of the match statement.
+        // This is essentially identical to `remove`, except for a slightly
+        // different logic to determining the actual return node in the
+        // Ordering::Equal branch of the match statement.
         unsafe {
             let mut node: *mut SkipNode<T> = mem::transmute_copy(&self.head);
             let mut return_node: Option<*mut SkipNode<T>> = None;
@@ -765,7 +791,8 @@ impl<T> OrderedSkipList<T> {
                         index_sum += (*node).links_len[lvl];
                         node = (*node).links[lvl].unwrap();
                     }
-                    // At this point, node has a reference to the either desired index or beyond it.
+                    // At this point, node has a reference to the either desired
+                    // index or beyond it.
                     if index_sum + (*node).links_len[lvl] == index {
                         if let Some(next) = (*node).links[lvl] {
                             return_node = next;
@@ -813,14 +840,15 @@ impl<T> OrderedSkipList<T> {
         unsafe {
             let mut removed_nodes = Vec::new();
 
-            // Since we have to check every element anyway, we parse this list bottom-up.  This
-            // allows for link lengths to be adjusted on lvl 0 as appropriate and then calculated
-            // on subsequent levels.
+            // Since we have to check every element anyway, we parse this list
+            // bottom-up.  This allows for link lengths to be adjusted on lvl 0
+            // as appropriate and then calculated on subsequent levels.
             for lvl in 0..self.level_generator.total() {
                 let mut node: *mut SkipNode<T> = mem::transmute_copy(&self.head);
                 loop {
-                    // If next will be removed, we update links[lvl] to be that node's links[lvl],
-                    // and we repeat until links[lvl] point to a node which will be retained.
+                    // If next will be removed, we update links[lvl] to be that
+                    // node's links[lvl], and we repeat until links[lvl] point
+                    // to a node which will be retained.
                     if let Some(next) = (*node).links[lvl] {
                         if let Some(ref value) = (*next).value {
                             if !f(value) {
@@ -832,8 +860,9 @@ impl<T> OrderedSkipList<T> {
                             }
                         }
                     }
-                    // At this point, links[lvl] points to a node which we know will be retained
-                    // (or None), so we update all the appropriate links.
+                    // At this point, links[lvl] points to a node which we know
+                    // will be retained (or None), so we update all the
+                    // appropriate links.
                     (*node).links_len[lvl] =
                         self.link_length(node, (*node).links[lvl], lvl).unwrap();
                     // And finally proceed to the next node.
@@ -858,7 +887,8 @@ impl<T> OrderedSkipList<T> {
         }
     }
 
-    /// Removes all repeated elements in the skiplist using the skiplist's comparison function.
+    /// Removes all repeated elements in the skiplist using the skiplist's
+    /// comparison function.
     ///
     /// # Examples
     ///
@@ -871,19 +901,21 @@ impl<T> OrderedSkipList<T> {
     /// skiplist.dedup();
     /// ```
     pub fn dedup(&mut self) {
-        // This follows the same algorithm as `retain` initially to find the nodes to removed (on
-        // lvl 0) and then on higher levels checks whether `next` is among the removed nodes.
+        // This follows the same algorithm as `retain` initially to find the
+        // nodes to removed (on lvl 0) and then on higher levels checks whether
+        // `next` is among the removed nodes.
         unsafe {
             let mut removed_nodes = Vec::new();
 
-            // Since we have to check every element anyway, we parse this list bottom-up.  This
-            // allows for link lengths to be adjusted on lvl 0 as appropriate and then calculated
-            // on subsequent levels.
+            // Since we have to check every element anyway, we parse this list
+            // bottom-up.  This allows for link lengths to be adjusted on lvl 0
+            // as appropriate and then calculated on subsequent levels.
             for lvl in 0..self.level_generator.total() {
                 let mut node: *mut SkipNode<T> = mem::transmute_copy(&self.head);
                 loop {
-                    // If next will be removed, we update links[lvl] to be that node's links[lvl],
-                    // and we repeat until links[lvl] point to a node which will be retained.
+                    // If next will be removed, we update links[lvl] to be that
+                    // node's links[lvl], and we repeat until links[lvl] point
+                    // to a node which will be retained.
                     if let Some(next) = (*node).links[lvl] {
                         if lvl == 0 {
                             if let (&Some(ref a), &Some(ref b)) = (&(*node).value, &(*next).value) {
@@ -907,8 +939,9 @@ impl<T> OrderedSkipList<T> {
                             }
                         }
                     }
-                    // At this point, links[lvl] points to a node which we know will be retained
-                    // (or None), so we update all the appropriate links.
+                    // At this point, links[lvl] points to a node which we know
+                    // will be retained (or None), so we update all the
+                    // appropriate links.
                     (*node).links_len[lvl] =
                         self.link_length(node, (*node).links[lvl], lvl).unwrap();
                     // And finally proceed to the next node.
@@ -978,9 +1011,10 @@ impl<T> OrderedSkipList<T> {
         }
     }
 
-    /// Constructs a double-ended iterator over a sub-range of elements in the skiplist, starting
-    /// at min, and ending at max. If min is `Unbounded`, then it will be treated as "negative
-    /// infinity", and if max is `Unbounded`, then it will be treated as "positive infinity".  Thus
+    /// Constructs a double-ended iterator over a sub-range of elements in the
+    /// skiplist, starting at min, and ending at max. If min is `Unbounded`,
+    /// then it will be treated as "negative infinity", and if max is
+    /// `Unbounded`, then it will be treated as "positive infinity".  Thus
     /// range(Unbounded, Unbounded) will yield the whole collection.
     ///
     /// # Examples
@@ -998,10 +1032,11 @@ impl<T> OrderedSkipList<T> {
     /// ```
     pub fn range(&self, min: Bound<&T>, max: Bound<&T>) -> Iter<T> {
         unsafe {
-            // We have to find the start and end nodes.  We use `find_value`; if no node with the
-            // given value is present, we are done.  If there is a node, we move to the adjacent
-            // nodes until we are before (in the case of included) or at the last node (in the case
-            // of exluded).
+            // We have to find the start and end nodes.  We use `find_value`; if
+            // no node with the given value is present, we are done.  If there
+            // is a node, we move to the adjacent nodes until we are before (in
+            // the case of included) or at the last node (in the case of
+            // excluded).
             let start = match min {
                 Bound::Included(min) => {
                     let mut node = self.find_value(min);
@@ -1144,18 +1179,19 @@ impl<T> OrderedSkipList<T> {
         }
     }
 
-    /// In order to find the number of nodes between two given nodes (or the node and the tail), we
-    /// can count the link lengths at the level below (assuming that is correct).  For example, if
-    /// we have:
+    /// In order to find the number of nodes between two given nodes (or the
+    /// node and the tail), we can count the link lengths at the level below
+    /// (assuming that is correct).  For example, if we have:
     /// ```text
     /// n   : [0] -?-------------------> [4]
     /// n-1 : [0] -1-> [1] -3-> [3] -2-> [4]
     /// ```
     /// Then on level `n`, we know the length will be `1+3+2 = 6`.
     ///
-    /// The `lvl` option specifies the level at which we desire to calculate the length and thus
-    /// assumes that `lvl-1` is correct.  `lvl=0` is always guaranteed to be correct if all the
-    /// `next[0]` links are in order since at level 0, all links lengths are 1.
+    /// The `lvl` option specifies the level at which we desire to calculate the
+    /// length and thus assumes that `lvl-1` is correct.  `lvl=0` is always
+    /// guaranteed to be correct if all the `next[0]` links are in order since
+    /// at level 0, all links lengths are 1.
     ///
     /// If the end node is not encountered, Err(()) is returned.
     fn link_length(
@@ -1170,8 +1206,9 @@ impl<T> OrderedSkipList<T> {
             if lvl == 0 {
                 while Some(node) != end {
                     length += 1;
-                    // Since the head node is not a node proper, the link between it and the next node
-                    // (on level 0) is actual 0 hence the offset here.
+                    // Since the head node is not a node proper, the link
+                    // between it and the next node (on level 0) is actual 0
+                    // hence the offset here.
                     if (*node).is_head() {
                         length -= 1;
                     }
@@ -1189,7 +1226,8 @@ impl<T> OrderedSkipList<T> {
                     }
                 }
             }
-            // Check that we actually have calculated the length to the end node we want.
+            // Check that we actually have calculated the length to the end node
+            // we want.
             if let Some(end) = end {
                 if node != end {
                     return Err(());
@@ -1216,11 +1254,13 @@ impl<T> OrderedSkipList<T> {
         }
     }
 
-    /// Returns the last node whose value is less than or equal the one specified.  If there are
-    /// multiple nodes with the desired value, one of them at random will be returned.
+    /// Returns the last node whose value is less than or equal the one
+    /// specified.  If there are multiple nodes with the desired value, one of
+    /// them at random will be returned.
     ///
-    /// If the skiplist is empty or if the value being searched for is smaller than all the values
-    /// contained in the skiplist, the head node will be returned.
+    /// If the skiplist is empty or if the value being searched for is smaller
+    /// than all the values contained in the skiplist, the head node will be
+    /// returned.
     fn find_value(&self, value: &T) -> *const SkipNode<T> {
         unsafe {
             let mut node: *const SkipNode<T> = mem::transmute_copy(&self.head);
@@ -1230,8 +1270,8 @@ impl<T> OrderedSkipList<T> {
             while lvl > 0 {
                 lvl -= 1;
 
-                // We parse down the list until we get to a greater value; at that point, we move
-                // to the next level down
+                // We parse down the list until we get to a greater value; at
+                // that point, we move to the next level down
                 while let Some(next) = (*node).links[lvl] {
                     if let Some(ref next_value) = (*next).value {
                         match (self.compare)(next_value, value) {
@@ -1284,7 +1324,8 @@ impl<T> OrderedSkipList<T>
 where
     T: fmt::Debug,
 {
-    /// Prints out the internal structure of the skiplist (for debugging purposes).
+    /// Prints out the internal structure of the skiplist (for debugging
+    /// purposes).
     #[allow(dead_code)]
     fn debug_structure(&self) {
         unsafe {
@@ -1367,10 +1408,10 @@ impl<T: PartialOrd> default::Default for OrderedSkipList<T> {
     }
 }
 
-/// This implementation of PartialEq only checks that the *values* are equal; it does not check for
-/// equivalence of other features (such as the ordering function and the node levels).
-/// Furthermore, this uses `T`'s implementation of PartialEq and *does not* use the owning
-/// skiplist's comparison function.
+/// This implementation of PartialEq only checks that the *values* are equal; it
+/// does not check for equivalence of other features (such as the ordering
+/// function and the node levels). Furthermore, this uses `T`'s implementation
+/// of PartialEq and *does not* use the owning skiplist's comparison function.
 impl<A, B> cmp::PartialEq<OrderedSkipList<B>> for OrderedSkipList<A>
 where
     A: cmp::PartialEq<B>,
@@ -1629,9 +1670,9 @@ impl<T> DoubleEndedIterator for IntoIter<T> {
     }
 }
 
-// /////////////////////////////////////////////////////////////////////////////////////////////////
-// Tests and Benchmarks
-// /////////////////////////////////////////////////////////////////////////////////////////////////
+// ////////////////////////////////////////////////////////////////////////////
+// Tests
+// ////////////////////////////////////////////////////////////////////////////
 
 #[cfg(test)]
 mod tests {

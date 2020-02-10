@@ -1,57 +1,37 @@
-//! A skiplist is a list imlementation such that elements are always sorted, and the
-//! insertion and deletion of elements are done in `O(log(n))`.
+//! SkipLists use a probabilistic distribution of nodes over the internal
+//! levels, whereby the lowest level (level 0) contains all the nodes, and each
+//! level `n > 0` will contain a random subset of the nodes on level `n - 1`.
 //!
-//! Conceptually, a skiplist resembles something like:
+//! Most commonly, a geometric distribution is used whereby the chance that a
+//! node occupies level `n` is `p` times the chance of occupying level `n-1`
+//! (with `0 < p < 1`).
 //!
-//! ```text
-//! <head> ----------> [2] --------------------------------------------------> [9] ---------->
-//! <head> ----------> [2] ------------------------------------[7] ----------> [9] ---------->
-//! <head> ----------> [2] ----------> [4] ------------------> [7] ----------> [9] --> [10] ->
-//! <head> --> [1] --> [2] --> [3] --> [4] --> [5] --> [6] --> [7] --> [8] --> [9] --> [10] ->
-//! ```
-//!
-//! where we see that a node `[x]` will have `n` pointers to other nodes, where `n` represents
-//! which level that node reaches.  The idea is that when a node needs to be found (say for
-//! insertion), then you start at the highest level and move down.  This allows for many of the
-//! lower-level nodes to be skipped thus making it faster.
-//!
-//! Each skiplist has an associated sorting function.  By default, the sorting function is
-//! `|a, b| a.cmp(b)`, but any function is permitted, so long as it satisfies the following properties:
-//! - It must be consistent:  `compare(a, b)` should always return the same result;
-//! - It should be anti-symmetric:  If `compare(a, b) == Less`, then `compare(a, b) == Greater`.
-//!   If this is not true, then some unexpected (and probably unsafe) behaviour may happen.
-//!
-//! Due to the nature of the skiplist being always sorted, it is not possible to get mutable
-//! pointers to the elements of the skiplist as this could leave the skiplist in an inconsistent
-//! state.  As a result, the `IndexMut` traits, `iter_mut`, and `get_mut` methods and traits are
-//! not implemented.
+//! It is very unlikely that this will need to be changed as the default should
+//! suffice, but if need be custom level generators can be implemented.
 
 use rand::distributions::{self, Sample};
 
-// /////////////////////////////////////////////////////////////////////////////////////////////////
+// ////////////////////////////////////////////////////////////////////////////
 // Level Generator
-// /////////////////////////////////////////////////////////////////////////////////////////////////
+// ////////////////////////////////////////////////////////////////////////////
 
-/// Upon the insertion of a new node in the list, the node is replicated to high levels with a
-/// certain probability as determined by a `LevelGenerator`.
-///
-/// The `total()` reflects the total number of levels, and `random()` should produce an integer in
-/// the range `[0, total)` with the desired probability distribution.
-///
-/// The most commonly used probability distribution is a geometrical distribution, whereby the
-/// chance that a node occupies level `n` is `p` times as likely as occupying level `n-1`.
-/// Typically, `p` is equal to 1/2, though over values can be used which will trade speed against
-/// memory.
-///
-/// This trait is strictly speaking not necessary (hence not public), but if in the future there is
-/// a need to allow for custom level generators then this trait is ready to go and it will just be
-/// a matter of modifying the skiplist implementation.
+/// Upon the insertion of a new node in the list, the node is replicated to high
+/// levels with a certain probability as determined by a `LevelGenerator`.
 pub trait LevelGenerator {
-    fn random(&mut self) -> usize;
+    /// The total number of levels that are assumed to exist for this level
+    /// generator.
     fn total(&self) -> usize;
+    /// Generate a random level for a new node in the range `[0, total)`.
+    ///
+    /// This must never return a level that is `>= self.total()`.
+    fn random(&mut self) -> usize;
 }
 
 /// A level generator which will produce geometrically distributed numbers.
+///
+/// The probability of generating level `n` is `p` times the probability of
+/// generating level `n-1`, with the probability truncated at the maximum number
+/// of levels allowed.
 pub struct GeometricalLevelGenerator {
     total: usize,
     p: f64,
@@ -60,13 +40,14 @@ pub struct GeometricalLevelGenerator {
 }
 
 impl GeometricalLevelGenerator {
-    /// Create a new GeometricalLevelGenerator with `total` number of levels, and `p` as the
-    /// probability that a given node is present in the next level.
+    /// Create a new GeometricalLevelGenerator with `total` number of levels,
+    /// and `p` as the probability that a given node is present in the next
+    /// level.
     ///
     /// # Panics
     ///
-    /// `p` must be between 0 and 1 and will panic otherwise.  Similarly, `total` must be at
-    /// greater or equal to 1.
+    /// `p` must be between 0 and 1 and will panic otherwise.  Similarly,
+    /// `total` must be at greater or equal to 1.
     pub fn new(total: usize, p: f64) -> Self {
         if total == 0 {
             panic!("total must be non-zero.");

@@ -11,17 +11,19 @@ use std::ops;
 
 use crate::level_generator::{GeometricalLevelGenerator, LevelGenerator};
 
-// /////////////////////////////////////////////////////////////////////////////////////////////////
+// ////////////////////////////////////////////////////////////////////////////
 // SkipNode
-// /////////////////////////////////////////////////////////////////////////////////////////////////
+// ////////////////////////////////////////////////////////////////////////////
 
-/// Implementation of each skipmap node, containing the key and value, the immediately previous
-/// and next nodes, and also a list of links to nodes further down the list.
+/// Implementation of each skipmap node, containing the key and value, the
+/// immediately previous and next nodes, and also a list of links to nodes
+/// further down the list.
 ///
 /// The `next` owns the next node.
 #[derive(Clone, Debug)]
 struct SkipNode<K, V> {
-    // key and value should never be None, with the sole exception being the head node.
+    // key and value should never be None, with the sole exception being the
+    // head node.
     key: Option<K>,
     value: Option<V>,
     // how high the node reaches.  This should be equal to the vector length.
@@ -30,8 +32,9 @@ struct SkipNode<K, V> {
     next: Option<Box<SkipNode<K, V>>>,
     // The immediately previous element.
     prev: Option<*mut SkipNode<K, V>>,
-    // Vector of links to the next node at the respective level.  This vector *must* be of length
-    // `self.level + 1`.  links[0] stores a pointer to the same node as next.
+    // Vector of links to the next node at the respective level.  This vector
+    // *must* be of length `self.level + 1`.  links[0] stores a pointer to the
+    // same node as next.
     links: Vec<Option<*mut SkipNode<K, V>>>,
     // The corresponding length of each link
     links_len: Vec<usize>,
@@ -55,7 +58,8 @@ impl<K, V> SkipNode<K, V> {
         }
     }
 
-    /// Create a new SkipNode with the given value.  `prev` and `next` will all be `None`.
+    /// Create a new SkipNode with the given value.  `prev` and `next` will all
+    /// be `None`.
     fn new(key: K, value: V, level: usize) -> Self {
         SkipNode {
             key: Some(key),
@@ -107,18 +111,20 @@ where
     }
 }
 
-// /////////////////////////////////////////////////////////////////////////////////////////////////
+// ////////////////////////////////////////////////////////////////////////////
 // SkipMap
-// /////////////////////////////////////////////////////////////////////////////////////////////////
+// ////////////////////////////////////////////////////////////////////////////
 
-/// The skipmap provides a way of storing element pairs such that they keys are always sorted
-/// whilst at the same time providing efficient way to access, insert and removes nodes.
+/// The skipmap provides a way of storing element pairs such that they keys are
+/// always sorted whilst at the same time providing efficient way to access,
+/// insert and removes nodes.
 ///
-/// A particular node can be accessed through the matching key, and since the keys are always
-/// sorted, it is also possible to access key-value pairs by index.
+/// A particular node can be accessed through the matching key, and since the
+/// keys are always sorted, it is also possible to access key-value pairs by
+/// index.
 ///
-/// Note that mutable references to keys are not available at all as this could result in a node
-/// being left out of the proper ordering.
+/// Note that mutable references to keys are not available at all as this could
+/// result in a node being left out of the proper ordering.
 pub struct SkipMap<K, V> {
     // Storage, this is not sorted
     head: Box<SkipNode<K, V>>,
@@ -153,9 +159,10 @@ where
         }
     }
 
-    /// Constructs a new, empty skipmap with the optimal number of levels for the intended
-    /// capacity.  Specifically, it uses `floor(log2(capacity))` number of levels, ensuring that
-    /// only *a few* nodes occupy the highest level.
+    /// Constructs a new, empty skipmap with the optimal number of levels for
+    /// the intended capacity.  Specifically, it uses `floor(log2(capacity))`
+    /// number of levels, ensuring that only *a few* nodes occupy the highest
+    /// level.
     ///
     /// # Examples
     ///
@@ -197,10 +204,11 @@ where
             let mut prev_nodes: Vec<*mut SkipNode<K, V>> =
                 Vec::with_capacity(self.level_generator.total());
 
-            // We don't know if the value we're looking for is even inside this list until we get
-            // to the lowest level.  For this reason, we store where the returned node would be in
-            // `prev_nodes` and if we find the desired node, we have reference to all the
-            // appropriate nodes to modify.
+            // We don't know if the value we're looking for is even inside this
+            // list until we get to the lowest level.  For this reason, we store
+            // where the returned node would be in `prev_nodes` and if we find
+            // the desired node, we have reference to all the appropriate nodes
+            // to modify.
             let mut lvl = self.level_generator.total();
             while lvl > 0 {
                 lvl -= 1;
@@ -234,8 +242,9 @@ where
                             }
                         }
                     }
-                    // We have not yet found the node, and there are no further nodes at this
-                    // level, so the return node (if present) is between `node` and tail.
+                    // We have not yet found the node, and there are no further
+                    // nodes at this level, so the return node (if present) is
+                    // between `node` and tail.
                     if (*node).links[lvl].is_none() {
                         prev_nodes.push(node);
                         continue;
@@ -243,8 +252,8 @@ where
                 }
             }
 
-            // At this point, `existing_node` contains a reference to the node with the same key if
-            // it was found, otherwise it is None.
+            // At this point, `existing_node` contains a reference to the node
+            // with the same key if it was found, otherwise it is None.
             if let Some(existing_node) = existing_node {
                 mem::replace(&mut (*existing_node).value, Some(value))
             } else {
@@ -349,7 +358,8 @@ impl<K, V> SkipMap<K, V> {
         self.len == 0
     }
 
-    /// Provides a reference to the front element, or `None` if the skipmap is empty.
+    /// Provides a reference to the front element, or `None` if the skipmap is
+    /// empty.
     ///
     /// # Examples
     ///
@@ -378,9 +388,11 @@ impl<K, V> SkipMap<K, V> {
         }
     }
 
-    /// Provides a mutable reference to the front element, or `None` if the skipmap is empty.
+    /// Provides a mutable reference to the front element, or `None` if the
+    /// skipmap is empty.
     ///
-    /// The reference to the key remains immutable as the keys must remain sorted.
+    /// The reference to the key remains immutable as the keys must remain
+    /// sorted.
     ///
     /// # Examples
     ///
@@ -409,7 +421,8 @@ impl<K, V> SkipMap<K, V> {
         }
     }
 
-    /// Provides a reference to the back element, or `None` if the skipmap is empty.
+    /// Provides a reference to the back element, or `None` if the skipmap is
+    /// empty.
     ///
     /// # Examples
     ///
@@ -439,9 +452,11 @@ impl<K, V> SkipMap<K, V> {
         }
     }
 
-    /// Provides a reference to the back element, or `None` if the skipmap is empty.
+    /// Provides a reference to the back element, or `None` if the skipmap is
+    /// empty.
     ///
-    /// The reference to the key remains immutable as the keys must remain sorted.
+    /// The reference to the key remains immutable as the keys must remain
+    /// sorted.
     ///
     /// # Examples
     ///
@@ -471,8 +486,8 @@ impl<K, V> SkipMap<K, V> {
         }
     }
 
-    /// Provides a reference to the element at the given index, or `None` if the skipmap is empty
-    /// or the index is out of bounds.
+    /// Provides a reference to the element at the given index, or `None` if the
+    /// skipmap is empty or the index is out of bounds.
     ///
     /// # Examples
     ///
@@ -516,8 +531,8 @@ impl<K, V> SkipMap<K, V> {
         }
     }
 
-    /// Provides a reference to the element at the given index, or `None` if the skipmap is empty
-    /// or the index is out of bounds.
+    /// Provides a reference to the element at the given index, or `None` if the
+    /// skipmap is empty or the index is out of bounds.
     ///
     /// # Examples
     ///
@@ -565,7 +580,8 @@ impl<K, V> SkipMap<K, V> {
         }
     }
 
-    /// Removes the first element and returns it, or `None` if the sequence is empty.
+    /// Removes the first element and returns it, or `None` if the sequence is
+    /// empty.
     ///
     /// # Examples
     ///
@@ -589,7 +605,8 @@ impl<K, V> SkipMap<K, V> {
         }
     }
 
-    /// Removes the last element and returns it, or `None` if the sequence is empty.
+    /// Removes the last element and returns it, or `None` if the sequence is
+    /// empty.
     ///
     /// # Examples
     ///
@@ -659,8 +676,8 @@ impl<K, V> SkipMap<K, V> {
         }
     }
 
-    /// Removes and returns an element with the same value or None if there are no such values in
-    /// the skipmap.
+    /// Removes and returns an element with the same value or None if there are
+    /// no such values in the skipmap.
     ///
     /// # Examples
     ///
@@ -687,10 +704,11 @@ impl<K, V> SkipMap<K, V> {
             let mut prev_nodes: Vec<*mut SkipNode<K, V>> =
                 Vec::with_capacity(self.level_generator.total());
 
-            // We don't know if the value we're looking for is even inside this list until we get
-            // to the lowest level.  For this reason, we store where the returned node would be in
-            // `prev_nodes` and if we find the desired node, we have reference to all the
-            // appropriate nodes to modify.
+            // We don't know if the value we're looking for is even inside this
+            // list until we get to the lowest level.  For this reason, we store
+            // where the returned node would be in `prev_nodes` and if we find
+            // the desired node, we have reference to all the appropriate nodes
+            // to modify.
             let mut lvl = self.level_generator.total();
             while lvl > 0 {
                 lvl -= 1;
@@ -705,8 +723,9 @@ impl<K, V> SkipMap<K, V> {
                         }
                     }
                 } else {
-                    // We have not yet found the node, and there are no further nodes at this
-                    // level, so the return node (if present) is between `node` and tail.
+                    // We have not yet found the node, and there are no further
+                    // nodes at this level, so the return node (if present) is
+                    // between `node` and tail.
                     if (*node).links[lvl].is_none() {
                         prev_nodes.push(node);
                         continue;
@@ -733,8 +752,8 @@ impl<K, V> SkipMap<K, V> {
                 }
             }
 
-            // At this point, `return_node` contains a reference to the return node if it was
-            // found, otherwise it is None.
+            // At this point, `return_node` contains a reference to the return
+            // node if it was found, otherwise it is None.
             if let Some(return_node) = return_node {
                 for (lvl, &prev_node) in prev_nodes.iter().rev().enumerate() {
                     if (*prev_node).links[lvl] == Some(return_node) {
@@ -937,10 +956,11 @@ impl<K, V> SkipMap<K, V> {
         }
     }
 
-    /// Constructs a double-ended iterator over a sub-range of elements in the skipmap, starting
-    /// at min, and ending at max. If min is `Unbounded`, then it will be treated as "negative
-    /// infinity", and if max is `Unbounded`, then it will be treated as "positive infinity".  Thus
-    /// range(Unbounded, Unbounded) will yield the whole collection.
+    /// Constructs a double-ended iterator over a sub-range of elements in the
+    /// skipmap, starting at min, and ending at max. If min is `Unbounded`, then
+    /// it will be treated as "negative infinity", and if max is `Unbounded`,
+    /// then it will be treated as "positive infinity".  Thus range(Unbounded,
+    /// Unbounded) will yield the whole collection.
     ///
     /// # Examples
     ///
@@ -1061,18 +1081,19 @@ impl<K, V> SkipMap<K, V> {
         }
     }
 
-    /// In order to find the number of nodes between two given nodes (or the node and the tail), we
-    /// can count the link lengths at the level below (assuming that is correct).  For example, if
-    /// we have:
+    /// In order to find the number of nodes between two given nodes (or the
+    /// node and the tail), we can count the link lengths at the level below
+    /// (assuming that is correct).  For example, if we have:
     /// ```text
     /// n   : [0] -?-------------------> [4]
     /// n-1 : [0] -1-> [1] -3-> [3] -2-> [4]
     /// ```
     /// Then on level `n`, we know the length will be `1+3+2 = 6`.
     ///
-    /// The `lvl` option specifies the level at which we desire to calculate the length and thus
-    /// assumes that `lvl-1` is correct.  `lvl=0` is always guaranteed to be correct if all the
-    /// `next[0]` links are in order since at level 0, all links lengths are 1.
+    /// The `lvl` option specifies the level at which we desire to calculate the
+    /// length and thus assumes that `lvl-1` is correct.  `lvl=0` is always
+    /// guaranteed to be correct if all the `next[0]` links are in order since
+    /// at level 0, all links lengths are 1.
     ///
     /// If the end node is not encountered, Err(false) is returned.
     fn link_length(
@@ -1087,8 +1108,9 @@ impl<K, V> SkipMap<K, V> {
             if lvl == 0 {
                 while Some(node) != end {
                     length += 1;
-                    // Since the head node is not a node proper, the link between it and the next node
-                    // (on level 0) is actual 0 hence the offset here.
+                    // Since the head node is not a node proper, the link
+                    // between it and the next node (on level 0) is actual 0
+                    // hence the offset here.
                     if (*node).is_head() {
                         length -= 1;
                     }
@@ -1106,7 +1128,8 @@ impl<K, V> SkipMap<K, V> {
                     }
                 }
             }
-            // Check that we actually have calculated the length to the end node we want.
+            // Check that we actually have calculated the length to the end node
+            // we want.
             if let Some(end) = end {
                 if node != end {
                     return Err(false);
@@ -1133,11 +1156,13 @@ impl<K, V> SkipMap<K, V> {
         }
     }
 
-    /// Returns the last node whose value is less than or equal the one specified.  If there are
-    /// multiple nodes with the desired value, one of them at random will be returned.
+    /// Returns the last node whose value is less than or equal the one
+    /// specified.  If there are multiple nodes with the desired value, one of
+    /// them at random will be returned.
     ///
-    /// If the skipmap is empty or if the value being searched for is smaller than all the values
-    /// contained in the skipmap, the head node will be returned.
+    /// If the skipmap is empty or if the value being searched for is smaller
+    /// than all the values contained in the skipmap, the head node will be
+    /// returned.
     fn find_key<Q: ?Sized>(&self, key: &Q) -> *const SkipNode<K, V>
     where
         K: Borrow<Q>,
@@ -1151,8 +1176,8 @@ impl<K, V> SkipMap<K, V> {
             while lvl > 0 {
                 lvl -= 1;
 
-                // We parse down the list until we get to a greater value; at that point, we move
-                // to the next level down
+                // We parse down the list until we get to a greater value; at
+                // that point, we move to the next level down
                 while let Some(next) = (*node).links[lvl] {
                     if let Some(ref next_key) = (*next).key {
                         match next_key.borrow().cmp(key) {
@@ -1203,7 +1228,8 @@ where
     K: fmt::Debug,
     V: fmt::Debug,
 {
-    /// Prints out the internal structure of the skipmap (for debugging purposes).
+    /// Prints out the internal structure of the skipmap (for debugging
+    /// purposes).
     #[allow(dead_code)]
     fn debug_structure(&self) {
         unsafe {
@@ -1286,10 +1312,10 @@ impl<K: Ord, V> default::Default for SkipMap<K, V> {
     }
 }
 
-/// This implementation of PartialEq only checks that the *values* are equal; it does not check for
-/// equivalence of other features (such as the ordering function and the node levels).
-/// Furthermore, this uses `T`'s implementation of PartialEq and *does not* use the owning
-/// skipmap's comparison function.
+/// This implementation of PartialEq only checks that the *values* are equal; it
+/// does not check for equivalence of other features (such as the ordering
+/// function and the node levels). Furthermore, this uses `T`'s implementation
+/// of PartialEq and *does not* use the owning skipmap's comparison function.
 impl<AK, AV, BK, BV> cmp::PartialEq<SkipMap<BK, BV>> for SkipMap<AK, AV>
 where
     AK: cmp::PartialEq<BK>,
@@ -1774,9 +1800,9 @@ impl<'a, K, V> DoubleEndedIterator for Values<'a, K, V> {
     }
 }
 
-// /////////////////////////////////////////////////////////////////////////////////////////////////
-// Tests and Benchmarks
-// /////////////////////////////////////////////////////////////////////////////////////////////////
+// ////////////////////////////////////////////////////////////////////////////
+// Tests
+// ////////////////////////////////////////////////////////////////////////////
 
 #[cfg(test)]
 mod tests {
