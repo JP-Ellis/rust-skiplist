@@ -1367,12 +1367,6 @@ where
                 .map(|x| x.1)
                 .partial_cmp(other.iter().map(|x| x.1)),
         }
-        // match iter::order::partial_cmp(self.iter().map(|x| x.0), other.iter().map(|x| x.0)) {
-        //     None => None,
-        //     Some(Ordering::Less) => Some(Ordering::Less),
-        //     Some(Ordering::Greater) => Some(Ordering::Greater),
-        //     Some(Ordering::Equal) => iter::order::partial_cmp(self.iter().map(|x| x.1), other.iter().map(|x| x.1))
-        // }
     }
 }
 
