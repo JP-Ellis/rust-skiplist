@@ -1,3 +1,5 @@
+//! An always-ordered skiplist.
+
 use crate::{
     level_generator::{GeometricalLevelGenerator, LevelGenerator},
     skipnode::SkipNode,
@@ -1550,6 +1552,7 @@ impl<T: Hash> Hash for OrderedSkipList<T> {
 // Extra structs
 // ///////////////////////////////////////////////
 
+/// Iterator for a [`OrderedSkipList`].  
 pub struct Iter<'a, T: 'a> {
     start: *const SkipNode<T>,
     end: *const SkipNode<T>,
@@ -1602,6 +1605,7 @@ impl<'a, T> DoubleEndedIterator for Iter<'a, T> {
     }
 }
 
+/// Consuming terator for a [`OrderedSkipList`].  
 pub struct IntoIter<T> {
     skiplist: OrderedSkipList<T>,
     head: *mut SkipNode<T>,

@@ -1,3 +1,6 @@
+//! SkipMap stores key-value pairs, with the keys being unique and always
+//! sorted.
+
 use crate::level_generator::{GeometricalLevelGenerator, LevelGenerator};
 use std::{
     borrow::Borrow, cmp, cmp::Ordering, default, fmt, hash, hash::Hash, iter, marker::PhantomData,
@@ -1489,6 +1492,7 @@ impl<K: Hash, V: Hash> Hash for SkipMap<K, V> {
 // Extra structs
 // ///////////////////////////////////////////////
 
+/// Iterator for a [`SkipMap`].  
 pub struct Iter<'a, K: 'a, V: 'a> {
     start: *const SkipNode<K, V>,
     end: *const SkipNode<K, V>,
@@ -1550,6 +1554,9 @@ impl<'a, K, V> DoubleEndedIterator for Iter<'a, K, V> {
     }
 }
 
+/// Mutable iterator for a [`SkipMap`].  
+///
+/// As the keys must remain sorted, only the values are mutable.
 pub struct IterMut<'a, K: 'a, V: 'a> {
     start: *mut SkipNode<K, V>,
     end: *mut SkipNode<K, V>,
@@ -1609,6 +1616,7 @@ impl<'a, K, V> DoubleEndedIterator for IterMut<'a, K, V> {
     }
 }
 
+/// Consuming iterator for a [`SkipMap`].
 pub struct IntoIter<K, V> {
     skipmap: SkipMap<K, V>,
     head: *mut SkipNode<K, V>,
@@ -1675,6 +1683,7 @@ impl<K, V> DoubleEndedIterator for IntoIter<K, V> {
     }
 }
 
+/// Iterator over a [`SkipMap`]'s keys.
 pub struct Keys<'a, K: 'a, V> {
     start: *const SkipNode<K, V>,
     end: *const SkipNode<K, V>,
@@ -1729,6 +1738,7 @@ impl<'a, K, V> DoubleEndedIterator for Keys<'a, K, V> {
     }
 }
 
+/// Iterator over a [`SkipMap`]'s values.
 pub struct Values<'a, K, V: 'a> {
     start: *const SkipNode<K, V>,
     end: *const SkipNode<K, V>,

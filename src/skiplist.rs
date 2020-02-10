@@ -1,3 +1,5 @@
+//! A skiplist implementation which allows faster random access than a standard linked list.
+
 use std::{
     cmp, cmp::Ordering, default, fmt, hash, hash::Hash, iter, marker::PhantomData, mem, ops,
     ops::Bound,
@@ -14,6 +16,9 @@ use crate::{
 
 /// SkipList provides a way of storing elements and provides efficient way to
 /// access, insert and remove nodes.
+///
+/// Unlike a standard linked list, the skiplist can skip ahead when trying to
+/// find a particular index.
 pub struct SkipList<T> {
     // Storage, this is not sorted
     head: Box<SkipNode<T>>,
@@ -1270,6 +1275,7 @@ impl<T: Hash> Hash for SkipList<T> {
 // Extra structs
 // ///////////////////////////////////////////////
 
+/// Iterator for a [`SkipList`].  
 pub struct Iter<'a, T: 'a> {
     start: *const SkipNode<T>,
     end: *const SkipNode<T>,
@@ -1322,6 +1328,7 @@ impl<'a, T> DoubleEndedIterator for Iter<'a, T> {
     }
 }
 
+/// Muable iterator for a [`SkipList`].  
 pub struct IterMut<'a, T: 'a> {
     start: *mut SkipNode<T>,
     end: *mut SkipNode<T>,
@@ -1371,6 +1378,7 @@ impl<'a, T> DoubleEndedIterator for IterMut<'a, T> {
         }
     }
 }
+/// Consuming iterator for a [`SkipList`].  
 pub struct IntoIter<T> {
     skiplist: SkipList<T>,
     head: *mut SkipNode<T>,
