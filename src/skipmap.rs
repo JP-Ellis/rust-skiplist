@@ -78,12 +78,6 @@ impl<K, V> SkipNode<K, V> {
     fn is_head(&self) -> bool {
         self.prev.is_none()
     }
-
-    /// Returns `true` is the node is a tail-node.
-    #[allow(dead_code)]
-    fn is_tail(&self) -> bool {
-        self.next.is_none()
-}
 }
 
 // ///////////////////////////////////////////////
