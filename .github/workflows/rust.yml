@@ -53,6 +53,12 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: test
+      - name: bench
+        uses: actions-rs/cargo@v1
+        with:
+          command: test
+          args: >-
+            --benches
 
   coverage:
     runs-on: ubuntu-latest
