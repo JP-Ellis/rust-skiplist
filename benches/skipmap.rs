@@ -33,7 +33,7 @@ fn bench_iter(b: &mut Bencher, size: usize) {
 }
 
 pub fn benchmark(c: &mut Criterion) {
-    c.bench_function("index", |b| {
+    c.bench_function("SkipMap index", |b| {
         let size = 100_000;
         let sm: SkipMap<_, _> = (0..size).map(|x| (x, x)).collect();
         b.iter(|| {
@@ -43,51 +43,51 @@ pub fn benchmark(c: &mut Criterion) {
         })
     });
 
-    c.bench_function("insert_0_1", |b| {
+    c.bench_function("SkipMap insert 1 (empty)", |b| {
         bench_insert(b, 0, 1);
     });
-    c.bench_function("insert_0_10", |b| {
+    c.bench_function("SkipMap insert 10 (empty)", |b| {
         bench_insert(b, 0, 10);
     });
-    c.bench_function("insert_0_100", |b| {
+    c.bench_function("SkipMap insert 100 (empty)", |b| {
         bench_insert(b, 0, 100);
     });
-    c.bench_function("insert_0_1000", |b| {
+    c.bench_function("SkipMap insert 1000 (empty)", |b| {
         bench_insert(b, 0, 1_000);
     });
-    c.bench_function("insert_0_10000", |b| {
+    c.bench_function("SkipMap insert 10000 (empty)", |b| {
         bench_insert(b, 0, 10_000);
     });
 
-    c.bench_function("insert_100000_1", |b| {
+    c.bench_function("SkipMap insert 1 (filled)", |b| {
         bench_insert(b, 100_000, 1);
     });
-    c.bench_function("insert_100000_10", |b| {
+    c.bench_function("SkipMap insert 10 (filled)", |b| {
         bench_insert(b, 100_000, 10);
     });
-    c.bench_function("insert_100000_100", |b| {
+    c.bench_function("SkipMap insert 100 (filled)", |b| {
         bench_insert(b, 100_000, 100);
     });
-    c.bench_function("insert_100000_1000", |b| {
+    c.bench_function("SkipMap insert 1000 (filled)", |b| {
         bench_insert(b, 100_000, 1_000);
     });
-    c.bench_function("insert_100000_10000", |b| {
+    c.bench_function("SkipMap insert 10000 (filled)", |b| {
         bench_insert(b, 100_000, 10_000);
     });
 
-    c.bench_function("iter_1", |b| {
+    c.bench_function("SkipMap iter 1", |b| {
         bench_iter(b, 1);
     });
-    c.bench_function("iter_10", |b| {
+    c.bench_function("SkipMap iter 10", |b| {
         bench_iter(b, 10);
     });
-    c.bench_function("iter_100", |b| {
+    c.bench_function("SkipMap iter 100", |b| {
         bench_iter(b, 100);
     });
-    c.bench_function("iter_1000", |b| {
+    c.bench_function("SkipMap iter 1000", |b| {
         bench_iter(b, 1000);
     });
-    c.bench_function("iter_10000", |b| {
+    c.bench_function("SkipMap iter 10000", |b| {
         bench_iter(b, 10_000);
     });
 }
