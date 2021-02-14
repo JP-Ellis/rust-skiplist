@@ -1390,12 +1390,8 @@ unsafe impl<T: Sync> Sync for OrderedSkipList<T> {}
 impl<T> ops::Drop for OrderedSkipList<T> {
     #[inline]
     fn drop(&mut self) {
-        unsafe {
-            let node: *mut SkipNode<T> = mem::transmute_copy(&self.head);
-
-            while let Some(ref mut next) = (*node).next {
-                mem::replace(&mut (*node).next, mem::replace(&mut next.next, None));
-            }
+        while let Some(mut node) = self.head.next.take() {
+            self.head.next = node.next.take();
         }
     }
 }

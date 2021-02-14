@@ -1286,12 +1286,8 @@ unsafe impl<K: Sync, V: Sync> Sync for SkipMap<K, V> {}
 impl<K, V> ops::Drop for SkipMap<K, V> {
     #[inline]
     fn drop(&mut self) {
-        unsafe {
-            let node: *mut SkipNode<K, V> = mem::transmute_copy(&self.head);
-
-            while let Some(ref mut next) = (*node).next {
-                mem::replace(&mut (*node).next, mem::replace(&mut next.next, None));
-            }
+        while let Some(mut node) = self.head.next.take() {
+            self.head.next = node.next.take();
         }
     }
 }
