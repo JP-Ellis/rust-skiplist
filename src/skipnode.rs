@@ -69,17 +69,21 @@ impl<V> SkipNode<V> {
     }
 
     /// Consumes the node returning the value it contains.
-    pub fn into_inner(self) -> Option<V> {
-        if self.value.is_some() {
-            Some(self.value.unwrap())
-        } else {
-            None
-        }
+    pub fn into_inner(mut self) -> Option<V> {
+        self.value.take()
     }
 
     /// Returns `true` is the node is a head-node.
     pub fn is_head(&self) -> bool {
         self.prev.is_none()
+    }
+}
+
+impl<V> Drop for SkipNode<V> {
+    fn drop(&mut self) {
+        while let Some(mut node) = self.next.take() {
+            self.next = node.next.take();
+        }
     }
 }
 
