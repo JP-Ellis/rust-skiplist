@@ -88,16 +88,8 @@ impl<T> SkipList<T> {
     /// ```
     #[inline]
     pub fn clear(&mut self) {
-        unsafe {
-            let node: *mut SkipNode<T> = mem::transmute_copy(&self.head);
-
-            while let Some(ref mut next) = (*node).next {
-                mem::replace(&mut (*node).next, mem::replace(&mut next.next, None));
-            }
-        }
-        let new_head = Box::new(SkipNode::head(self.level_generator.total()));
         self.len = 0;
-        mem::replace(&mut self.head, new_head);
+        *self.head = SkipNode::head(self.level_generator.total());
     }
 
     /// Returns the number of elements in the skiplist.
@@ -1113,15 +1105,6 @@ where
 
 unsafe impl<T: Send> Send for SkipList<T> {}
 unsafe impl<T: Sync> Sync for SkipList<T> {}
-
-impl<T> ops::Drop for SkipList<T> {
-    #[inline]
-    fn drop(&mut self) {
-        while let Some(mut node) = self.head.next.take() {
-            self.head.next = node.next.take();
-        }
-    }
-}
 
 impl<T: PartialOrd> default::Default for SkipList<T> {
     fn default() -> SkipList<T> {

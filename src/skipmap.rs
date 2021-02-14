@@ -69,12 +69,14 @@ impl<K, V> SkipNode<K, V> {
     }
 
     /// Consumes the node returning the value it contains.
-    fn into_inner(self) -> Option<(K, V)> {
-        if self.key.is_some() {
-            Some((self.key.unwrap(), self.value.unwrap()))
-        } else {
-            None
-        }
+    fn into_inner(mut self) -> Option<(K, V)> {
+        self.key.take().map(|key| {
+            let value = self
+                .value
+                .take()
+                .expect("Somehow there's a key but no value!");
+            (key, value)
+        })
     }
 
     /// Returns `true` is the node is a head-node.
@@ -97,6 +99,14 @@ where
             write!(f, "({}, {})", k, v)
         } else {
             Ok(())
+        }
+    }
+}
+
+impl<K, V> Drop for SkipNode<K, V> {
+    fn drop(&mut self) {
+        while let Some(mut node) = self.next.take() {
+            self.next = node.next.take();
         }
     }
 }
@@ -302,16 +312,8 @@ impl<K, V> SkipMap<K, V> {
     /// ```
     #[inline]
     pub fn clear(&mut self) {
-        unsafe {
-            let node: *mut SkipNode<K, V> = mem::transmute_copy(&self.head);
-
-            while let Some(ref mut next) = (*node).next {
-                mem::replace(&mut (*node).next, mem::replace(&mut next.next, None));
-            }
-        }
-        let new_head = Box::new(SkipNode::head(self.level_generator.total()));
         self.len = 0;
-        mem::replace(&mut self.head, new_head);
+        *self.head = SkipNode::head(self.level_generator.total());
     }
 
     /// Returns the number of elements in the skipmap.
