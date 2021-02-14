@@ -1,4 +1,4 @@
-use std::{fmt, iter};
+use std::{fmt, iter, ptr};
 
 // ////////////////////////////////////////////////////////////////////////////
 // SkipNode
@@ -96,6 +96,63 @@ where
             write!(f, "{}", v)
         } else {
             Ok(())
+        }
+    }
+}
+
+// /////////////////////////////////
+// Iterators
+// /////////////////////////////////
+// Since Iterators (currently) only pop from front and back,
+// they can be shared by some data structures.
+// There's no need for a dummy head (that contains no value) in the iterator.
+// so the members are named first and last instaed of head/end to avoid confusion.
+
+/// Consuming iterator.  
+pub struct IntoIter<T> {
+    pub first: Option<Box<SkipNode<T>>>,
+    pub last: *mut SkipNode<T>,
+    pub size: usize,
+}
+
+impl<T> Iterator for IntoIter<T> {
+    type Item = T;
+
+    fn next(&mut self) -> Option<T> {
+        let mut popped_node = self.first.take()?;
+        self.size -= 1;
+        self.first = popped_node.next.take().map(|mut node| {
+            node.prev = None;
+            node
+        });
+        if self.first.is_none() {
+            self.last = ptr::null_mut();
+        }
+        popped_node.into_inner()
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        (self.size, Some(self.size))
+    }
+}
+
+impl<T> DoubleEndedIterator for IntoIter<T> {
+    fn next_back(&mut self) -> Option<T> {
+        if self.first.is_none() {
+            return None;
+        }
+        assert!(!self.last.is_null());
+        unsafe {
+            let new_last = (*self.last).prev;
+            let popped_node = match new_last {
+                Some(new_last) => {
+                    self.last = new_last;
+                    (*new_last).next.take().unwrap()
+                }
+                None => self.first.take().unwrap(),
+            };
+            self.size -= 1;
+            popped_node.into_inner()
         }
     }
 }

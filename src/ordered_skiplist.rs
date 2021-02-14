@@ -2,11 +2,11 @@
 
 use crate::{
     level_generator::{GeometricalLevelGenerator, LevelGenerator},
-    skipnode::SkipNode,
+    skipnode::{IntoIter, SkipNode},
 };
 use std::{
     cmp, cmp::Ordering, default, fmt, hash, hash::Hash, iter, marker::PhantomData, mem, ops,
-    ops::Bound,
+    ops::Bound, ptr,
 };
 
 // ////////////////////////////////////////////////////////////////////////////
@@ -978,13 +978,17 @@ impl<T> OrderedSkipList<T> {
     /// }
     /// ```
     #[allow(clippy::should_implement_trait)]
-    pub fn into_iter(self) -> IntoIter<T> {
-        IntoIter {
-            head: unsafe { mem::transmute_copy(&self.head) },
-            end: self.get_last() as *mut SkipNode<T>,
-            size: self.len(),
-            skiplist: self,
+    pub fn into_iter(mut self) -> IntoIter<T> {
+        let mut last = self.get_last() as *mut SkipNode<T>;
+        if last == &mut *self.head {
+            last = ptr::null_mut();
         }
+        let size = self.len();
+        let first = self.head.next.take().map(|mut node| {
+            node.prev = None;
+            node
+        });
+        IntoIter { first, last, size }
     }
 
     /// Creates an iterator over the entries of the skiplist.
@@ -1595,71 +1599,6 @@ impl<'a, T> DoubleEndedIterator for Iter<'a, T> {
                 }
                 self.end = prev;
                 return (*node).value.as_ref();
-            }
-            None
-        }
-    }
-}
-
-/// Consuming terator for a [`OrderedSkipList`].  
-pub struct IntoIter<T> {
-    skiplist: OrderedSkipList<T>,
-    head: *mut SkipNode<T>,
-    end: *mut SkipNode<T>,
-    size: usize,
-}
-
-impl<T> Iterator for IntoIter<T> {
-    type Item = T;
-
-    fn next(&mut self) -> Option<T> {
-        unsafe {
-            if let Some(next) = (*self.head).links[0] {
-                for lvl in 0..self.skiplist.level_generator.total() {
-                    if lvl <= (*next).level {
-                        (*self.head).links[lvl] = (*next).links[lvl];
-                        (*self.head).links_len[lvl] = (*next).links_len[lvl] - 1;
-                    } else {
-                        (*self.head).links_len[lvl] -= 1;
-                    }
-                }
-                if let Some(next) = (*self.head).links[0] {
-                    (*next).prev = Some(self.head);
-                }
-                self.skiplist.len -= 1;
-                self.size -= 1;
-                let popped_node = mem::replace(
-                    &mut (*self.head).next,
-                    mem::replace(&mut (*next).next, None),
-                );
-                popped_node.expect("Should have a node").value
-            } else {
-                None
-            }
-        }
-    }
-
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        (self.size, Some(self.size))
-    }
-}
-
-impl<T> DoubleEndedIterator for IntoIter<T> {
-    fn next_back(&mut self) -> Option<T> {
-        unsafe {
-            if self.head == self.end {
-                return None;
-            }
-            if let Some(prev) = (*self.end).prev {
-                if prev as *const SkipNode<T> != self.head {
-                    self.size -= 1;
-                } else {
-                    self.size = 0;
-                }
-                self.end = prev;
-                (*self.end).links[0] = None;
-                let node = mem::replace(&mut (*self.end).next, None);
-                return node.unwrap().into_inner();
             }
             None
         }
