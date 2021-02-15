@@ -640,7 +640,7 @@ impl<T> SkipList<T> {
     ///     println!("Value: {}", i);
     /// }
     /// ```
-    pub fn iter_mut(&self) -> IterMut<T> {
+    pub fn iter_mut(&mut self) -> IterMut<T> {
         IterMut {
             start: unsafe { mem::transmute_copy(&self.head) },
             end: self.get_last() as *mut SkipNode<T>,
@@ -1426,7 +1426,7 @@ mod tests {
     fn iter() {
         let size = 10000;
 
-        let sl: SkipList<_> = (0..size).collect();
+        let mut sl: SkipList<_> = (0..size).collect();
 
         fn test<T>(size: usize, mut iter: T)
         where
@@ -1449,7 +1449,7 @@ mod tests {
     fn iter_rev() {
         let size = 10000;
 
-        let sl: SkipList<_> = (0..size).collect();
+        let mut sl: SkipList<_> = (0..size).collect();
 
         fn test<T>(size: usize, mut iter: T)
         where
@@ -1472,7 +1472,7 @@ mod tests {
     fn iter_mixed() {
         let size = 10000;
 
-        let sl: SkipList<_> = (0..size).collect();
+        let mut sl: SkipList<_> = (0..size).collect();
 
         fn test<T>(size: usize, mut iter: T)
         where
