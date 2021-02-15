@@ -114,9 +114,9 @@ where
 
 /// Consuming iterator.  
 pub struct IntoIter<T> {
-    pub first: Option<Box<SkipNode<T>>>,
-    pub last: *mut SkipNode<T>,
-    pub size: usize,
+    pub(crate) first: Option<Box<SkipNode<T>>>,
+    pub(crate) last: *mut SkipNode<T>,
+    pub(crate) size: usize,
 }
 
 impl<T> Iterator for IntoIter<T> {
