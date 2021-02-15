@@ -894,7 +894,7 @@ impl<K, V> SkipMap<K, V> {
     ///     println!("Key: {}, Value: {}", k, v);
     /// }
     /// ```
-    pub fn iter_mut(&self) -> IterMut<K, V> {
+    pub fn iter_mut(&mut self) -> IterMut<K, V> {
         IterMut {
             start: unsafe { mem::transmute_copy(&self.head) },
             end: self.get_last() as *mut SkipNode<K, V>,
@@ -1871,7 +1871,7 @@ mod tests {
     fn iter() {
         let size = 10000;
 
-        let sm: SkipMap<_, _> = (0..size).map(|x| (x, x)).collect();
+        let mut sm: SkipMap<_, _> = (0..size).map(|x| (x, x)).collect();
 
         fn test<T>(size: usize, mut iter: T)
         where
@@ -1893,7 +1893,7 @@ mod tests {
     fn iter_rev() {
         let size = 1000;
 
-        let sm: SkipMap<_, _> = (0..size).map(|x| (x, x)).collect();
+        let mut sm: SkipMap<_, _> = (0..size).map(|x| (x, x)).collect();
 
         fn test<T>(size: usize, mut iter: T)
         where
@@ -1914,7 +1914,7 @@ mod tests {
     #[test]
     fn iter_mixed() {
         let size = 1000;
-        let sm: SkipMap<_, _> = (0..size).map(|x| (x, x)).collect();
+        let mut sm: SkipMap<_, _> = (0..size).map(|x| (x, x)).collect();
 
         fn test<T>(size: usize, mut iter: T)
         where
