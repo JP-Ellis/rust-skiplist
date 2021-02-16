@@ -86,32 +86,42 @@ impl<V> SkipNode<V> {
     /// Try to move to next nth node at specified level.
     /// If it's impossible, then move as far as possible.
     /// Returns a reference to the new node and the distance travelled.
-    pub fn advance_len(&self, level: usize, target: usize) -> (&Self, usize) {
-        let mut current = self;
-        let mut travelled = 0;
-        loop {
-            match current.advance_if(level, |current, _| {
-                travelled + current.links_len[level] <= target
-            }) {
-                Ok((node, steps)) => {
-                    current = node;
-                    travelled += steps;
-                }
-                Err(node) => return (node, travelled),
+    pub fn advance_len(&self, level: usize, mut max_distance: usize) -> (&Self, usize) {
+        self.advance_while(level, move |current_node, _| {
+            let travelled = current_node.links_len[level];
+            if travelled <= max_distance {
+                max_distance -= travelled;
+                return true;
+            } else {
+                return false;
             }
-        }
+        })
     }
 
     /// Try to move to next nth node at specified level.
     /// If it's impossible, then move as far as possible.
     /// Returns a mutable reference to the new node and the distance travelled.
-    pub fn advance_len_mut(&mut self, level: usize, target: usize) -> (&mut Self, usize) {
+    pub fn advance_len_mut(&mut self, level: usize, mut max_distance: usize) -> (&mut Self, usize) {
+        self.advance_while_mut(level, move |current_node, _| {
+            let travelled = current_node.links_len[level];
+            if travelled <= max_distance {
+                max_distance -= travelled;
+                return true;
+            } else {
+                return false;
+            }
+        })
+    }
+
+    pub fn advance_while(
+        &self,
+        level: usize,
+        mut pred: impl FnMut(&Self, &Self) -> bool,
+    ) -> (&Self, usize) {
         let mut current = self;
         let mut travelled = 0;
         loop {
-            match current.advance_if_mut(level, |current, _| {
-                travelled + current.links_len[level] <= target
-            }) {
+            match current.advance_if(level, &mut pred) {
                 Ok((node, steps)) => {
                     current = node;
                     travelled += steps;
@@ -121,15 +131,21 @@ impl<V> SkipNode<V> {
         }
     }
 
-    pub fn advance_if<'a>(
-        &'a self,
+    pub fn advance_while_mut(
+        &mut self,
         level: usize,
-        predicate: impl FnOnce(&Self, &Self) -> bool,
-    ) -> Result<(&'a Self, usize), &'a Self> {
-        let next = unsafe { self.links[level].and_then(|ptr| ptr.as_ref()) };
-        match next {
-            Some(next) if predicate(self, next) => Ok((next, self.links_len[level])),
-            _ => Err(self),
+        mut pred: impl FnMut(&Self, &Self) -> bool,
+    ) -> (&mut Self, usize) {
+        let mut current = self;
+        let mut travelled = 0;
+        loop {
+            match current.advance_if_mut(level, &mut pred) {
+                Ok((node, steps)) => {
+                    current = node;
+                    travelled += steps;
+                }
+                Err(node) => return (node, travelled),
+            }
         }
     }
 
@@ -144,6 +160,18 @@ impl<V> SkipNode<V> {
         predicate: impl FnOnce(&Self, &Self) -> bool,
     ) -> Result<(&'a mut Self, usize), &'a mut Self> {
         let next = unsafe { self.links[level].and_then(|ptr| ptr.as_mut()) };
+        match next {
+            Some(next) if predicate(self, next) => Ok((next, self.links_len[level])),
+            _ => Err(self),
+        }
+    }
+
+    pub fn advance_if<'a>(
+        &'a self,
+        level: usize,
+        predicate: impl FnOnce(&Self, &Self) -> bool,
+    ) -> Result<(&'a Self, usize), &'a Self> {
+        let next = unsafe { self.links[level].and_then(|ptr| ptr.as_ref()) };
         match next {
             Some(next) if predicate(self, next) => Ok((next, self.links_len[level])),
             _ => Err(self),
