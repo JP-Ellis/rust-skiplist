@@ -83,37 +83,70 @@ impl<V> SkipNode<V> {
         self.prev.is_none()
     }
 
-    pub fn advance_if(
-        &self,
-        level: usize,
-        predicate: impl FnOnce(&Self, &Self) -> bool,
-    ) -> Result<&Self, NextNotFound> {
-        let next = unsafe {
-            self.links[level]
-                .and_then(|ptr| ptr.as_ref())
-                .ok_or(NextNotFound::NoMoreElements)?
-        };
-        if predicate(self, next) {
-            Ok(next)
-        } else {
-            Err(NextNotFound::NoSuchElement)
+    /// Try to move to next nth node at specified level.
+    /// If it's impossible, then move as far as possible.
+    /// Returns a reference to the new node and the distance travelled.
+    pub fn advance_len(&self, level: usize, target: usize) -> (&Self, usize) {
+        let mut current = self;
+        let mut travelled = 0;
+        loop {
+            match current.advance_if(level, |current, _| {
+                travelled + current.links_len[level] <= target
+            }) {
+                Ok((node, steps)) => {
+                    current = node;
+                    travelled += steps;
+                }
+                Err(node) => return (node, travelled),
+            }
         }
     }
 
-    pub fn advance_if_mut(
-        &mut self,
+    /// Try to move to next nth node at specified level.
+    /// If it's impossible, then move as far as possible.
+    /// Returns a mutable reference to the new node and the distance travelled.
+    pub fn advance_len_mut(&mut self, level: usize, target: usize) -> (&mut Self, usize) {
+        let mut current = self;
+        let mut travelled = 0;
+        loop {
+            match current.advance_if_mut(level, |current, _| {
+                travelled + current.links_len[level] <= target
+            }) {
+                Ok((node, steps)) => {
+                    current = node;
+                    travelled += steps;
+                }
+                Err(node) => return (node, travelled),
+            }
+        }
+    }
+
+    pub fn advance_if<'a>(
+        &'a self,
         level: usize,
         predicate: impl FnOnce(&Self, &Self) -> bool,
-    ) -> Result<&mut Self, NextNotFound> {
-        let next = unsafe {
-            self.links[level]
-                .and_then(|ptr| ptr.as_mut())
-                .ok_or(NextNotFound::NoMoreElements)?
-        };
-        if predicate(self, next) {
-            Ok(next)
-        } else {
-            Err(NextNotFound::NoSuchElement)
+    ) -> Result<(&'a Self, usize), &'a Self> {
+        let next = unsafe { self.links[level].and_then(|ptr| ptr.as_ref()) };
+        match next {
+            Some(next) if predicate(self, next) => Ok((next, self.links_len[level])),
+            _ => Err(self),
+        }
+    }
+
+    // Due to Rust lifetime semantics, the lifetime of result is the same as self.
+    // Sometimes Rust cannot determine the result is unused, e.g. in a loop.
+    // As a result, self might be  borrowed forever and caller cannot return that value
+    // if they call this function in a loop.
+    // Therefore this function always return self when it fails to advance.
+    pub fn advance_if_mut<'a>(
+        &'a mut self,
+        level: usize,
+        predicate: impl FnOnce(&Self, &Self) -> bool,
+    ) -> Result<(&'a mut Self, usize), &'a mut Self> {
+        let next = unsafe { self.links[level].and_then(|ptr| ptr.as_mut()) };
+        match next {
+            Some(next) if predicate(self, next) => Ok((next, self.links_len[level])),
+            _ => Err(self),
         }
     }
 }
