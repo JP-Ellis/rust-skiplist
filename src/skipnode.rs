@@ -1,5 +1,10 @@
 use std::{fmt, iter, ptr};
 
+pub enum NextNotFound {
+    NoMoreElements,
+    NoSuchElement,
+}
+
 // ////////////////////////////////////////////////////////////////////////////
 // SkipNode
 // ////////////////////////////////////////////////////////////////////////////
@@ -76,6 +81,40 @@ impl<V> SkipNode<V> {
     /// Returns `true` is the node is a head-node.
     pub fn is_head(&self) -> bool {
         self.prev.is_none()
+    }
+
+    pub fn advance_if(
+        &self,
+        level: usize,
+        predicate: impl FnOnce(&Self, &Self) -> bool,
+    ) -> Result<&Self, NextNotFound> {
+        let next = unsafe {
+            self.links[level]
+                .and_then(|ptr| ptr.as_ref())
+                .ok_or(NextNotFound::NoMoreElements)?
+        };
+        if predicate(self, next) {
+            Ok(next)
+        } else {
+            Err(NextNotFound::NoSuchElement)
+        }
+    }
+
+    pub fn advance_if_mut(
+        &mut self,
+        level: usize,
+        predicate: impl FnOnce(&Self, &Self) -> bool,
+    ) -> Result<&mut Self, NextNotFound> {
+        let next = unsafe {
+            self.links[level]
+                .and_then(|ptr| ptr.as_mut())
+                .ok_or(NextNotFound::NoMoreElements)?
+        };
+        if predicate(self, next) {
+            Ok(next)
+        } else {
+            Err(NextNotFound::NoSuchElement)
+        }
     }
 }
 
