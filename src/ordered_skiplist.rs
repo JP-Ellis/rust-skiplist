@@ -1855,6 +1855,8 @@ mod tests {
                 (Unbounded, Unbounded) => 0..1000,
             };
 
+            assert_eq!(values.size_hint(), expects.size_hint());
+
             for (&v, e) in values.by_ref().zip(expects.by_ref()) {
                 assert_eq!(v, e);
             }
@@ -1882,6 +1884,8 @@ mod tests {
             for j in 0..size {
                 let mut values = sl.range(Included(&i), Included(&j));
                 let mut expects = i..=j;
+
+                assert_eq!(values.size_hint(), expects.size_hint());
 
                 for (&v, e) in values.by_ref().zip(expects.by_ref()) {
                     assert_eq!(v, e);
