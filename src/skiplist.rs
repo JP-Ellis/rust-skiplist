@@ -1106,7 +1106,7 @@ where
 unsafe impl<T: Send> Send for SkipList<T> {}
 unsafe impl<T: Sync> Sync for SkipList<T> {}
 
-impl<T: PartialOrd> default::Default for SkipList<T> {
+impl<T> default::Default for SkipList<T> {
     fn default() -> SkipList<T> {
         SkipList::new()
     }
@@ -1230,10 +1230,7 @@ impl<'a, T> iter::IntoIterator for &'a mut SkipList<T> {
     }
 }
 
-impl<T> iter::FromIterator<T> for SkipList<T>
-where
-    T: PartialOrd,
-{
+impl<T> iter::FromIterator<T> for SkipList<T> {
     #[inline]
     fn from_iter<I>(iter: I) -> SkipList<T>
     where
