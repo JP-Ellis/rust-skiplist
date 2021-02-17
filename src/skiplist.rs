@@ -1,13 +1,10 @@
 //! A skiplist implementation which allows faster random access than a standard linked list.
 
-use std::{
-    cmp, cmp::Ordering, default, fmt, hash, hash::Hash, iter, marker::PhantomData, mem, ops,
-    ops::Bound, ptr,
-};
+use std::{cmp, cmp::Ordering, default, fmt, hash, hash::Hash, iter, ops, ops::Bound, ptr};
 
 use crate::{
     level_generator::{GeometricalLevelGenerator, LevelGenerator},
-    skipnode::{IntoIter, SkipNode},
+    skipnode::{IntoIter, Iter, IterMut, SkipNode},
 };
 
 // ////////////////////////////////////////////////////////////////////////////
@@ -151,7 +148,8 @@ impl<T> SkipList<T> {
         }
         self.len += 1;
         let new_node = Box::new(SkipNode::new(value, self.level_generator.random()));
-        self.head.insert(new_node, index);
+        self.head
+            .insert(new_node, index).expect("No insertion position is found!");
     }
 
     /// Insert the element into the front of the skiplist.
@@ -436,7 +434,7 @@ impl<T> SkipList<T> {
     /// ```
     #[allow(clippy::should_implement_trait)]
     pub fn into_iter(mut self) -> IntoIter<T> {
-        let mut last = self.get_last_mut() as *mut SkipNode<T>;
+        let mut last = self.head.to_last_mut() as *mut SkipNode<T>;
         if last == &mut *self.head {
             last = ptr::null_mut();
         }
@@ -465,11 +463,18 @@ impl<T> SkipList<T> {
     /// }
     /// ```
     pub fn iter(&self) -> Iter<T> {
-        Iter {
-            start: unsafe { mem::transmute_copy(&self.head) },
-            end: self.get_last() as *const _,
-            size: self.len(),
-            _lifetime: PhantomData,
+        if self.len() > 0 {
+            Iter {
+                first: self.get_index(0),
+                last: Some(self.head.to_last()),
+                size: self.len(),
+            }
+        } else {
+            Iter {
+                first: None,
+                last: None,
+                size: 0,
+            }
         }
     }
 
@@ -487,11 +492,20 @@ impl<T> SkipList<T> {
     /// }
     /// ```
     pub fn iter_mut(&mut self) -> IterMut<T> {
-        IterMut {
-            start: unsafe { mem::transmute_copy(&self.head) },
-            end: self.get_last_mut() as *mut SkipNode<T>,
-            size: self.len(),
-            _lifetime: PhantomData,
+        if self.len() > 0 {
+            let size = self.len();
+            let last = self.head.to_last_mut() as *mut _;
+            IterMut {
+                first: self.get_index_mut(0),
+                last,
+                size,
+            }
+        } else {
+            IterMut {
+                first: None,
+                last: ptr::null_mut(),
+                size: 0,
+            }
         }
     }
 
@@ -515,7 +529,17 @@ impl<T> SkipList<T> {
     /// assert_eq!(Some(&4), skiplist.range(Included(4), Unbounded).next());
     /// ```
     pub fn range(&self, min: Bound<usize>, max: Bound<usize>) -> Iter<T> {
-        unsafe { todo!() }
+        let first = match min {
+            Bound::Included(i) => i,
+            Bound::Excluded(i) => i + 1,
+            Bound::Unbounded => 0,
+        };
+        let last = match max {
+            Bound::Included(i) => i,
+            Bound::Excluded(i) => i - 1,
+            Bound::Unbounded => self.len() - 1,
+        };
+        self.iter_range(first, last)
     }
 
     /// Constructs a mutable double-ended iterator over a sub-range of elements
@@ -538,7 +562,17 @@ impl<T> SkipList<T> {
     /// assert_eq!(Some(&mut 4), skiplist.range_mut(Included(4), Unbounded).next());
     /// ```
     pub fn range_mut(&mut self, min: Bound<usize>, max: Bound<usize>) -> IterMut<T> {
-        unsafe { todo!() }
+        let first = match min {
+            Bound::Included(i) => i,
+            Bound::Excluded(i) => i + 1,
+            Bound::Unbounded => 0,
+        };
+        let last = match max {
+            Bound::Included(i) => i,
+            Bound::Excluded(i) => i - 1,
+            Bound::Unbounded => self.len() - 1,
+        };
+        self.iter_range_mut(first, last)
     }
 }
 
@@ -641,13 +675,58 @@ impl<T> SkipList<T> {
         }
     }
 
-    /// Returns the last node of the skiplist.
-    fn get_last(&self) -> &SkipNode<T> {
-        self.head.advance(self.len()).unwrap()
+    /// Makes an iterator between [begin, end]
+    fn iter_range(&self, first_idx: usize, last_idx: usize) -> Iter<T> {
+        if first_idx > last_idx {
+            return Iter {
+                first: None,
+                last: None,
+                size: 0,
+            };
+        }
+        let first = self.get_index(first_idx);
+        let last = self.get_index(last_idx);
+        if first.is_some() && last.is_some() {
+            Iter {
+                first,
+                last,
+                size: last_idx - first_idx + 1,
+            }
+        } else {
+            Iter {
+                first: None,
+                last: None,
+                size: 0,
+            }
+        }
     }
 
-    fn get_last_mut(&mut self) -> &mut SkipNode<T> {
-        self.head.advance_mut(self.len()).unwrap()
+    /// Makes an iterator between [begin, end]
+    fn iter_range_mut(&mut self, first_idx: usize, last_idx: usize) -> IterMut<T> {
+        if first_idx > last_idx {
+            return IterMut {
+                first: None,
+                last: ptr::null_mut(),
+                size: 0,
+            };
+        }
+        let last = self
+            .get_index_mut(last_idx)
+            .map_or(ptr::null_mut(), |node| node as *mut SkipNode<_>);
+        let first = self.get_index_mut(first_idx);
+        if first.is_some() && !last.is_null() {
+            IterMut {
+                first,
+                last,
+                size: last_idx - first_idx + 1,
+            }
+        } else {
+            IterMut {
+                first: None,
+                last: ptr::null_mut(),
+                size: 0,
+            }
+        }
     }
 
     /// Gets a pointer to the node with the given index.
@@ -888,114 +967,6 @@ impl<T: Hash> Hash for SkipList<T> {
     }
 }
 
-// ///////////////////////////////////////////////
-// Extra structs
-// ///////////////////////////////////////////////
-
-/// Iterator for a [`SkipList`].  
-pub struct Iter<'a, T: 'a> {
-    start: *const SkipNode<T>,
-    end: *const SkipNode<T>,
-    size: usize,
-    _lifetime: PhantomData<&'a T>,
-}
-
-impl<'a, T> Iterator for Iter<'a, T> {
-    type Item = &'a T;
-
-    fn next(&mut self) -> Option<&'a T> {
-        unsafe {
-            if self.start == self.end {
-                return None;
-            }
-            if let Some(next) = self.start.as_ref()?.links[0].as_ref() {
-                self.start = next;
-                if self.size > 0 {
-                    self.size -= 1;
-                }
-                return self.start.as_ref().unwrap().value.as_ref();
-            }
-            None
-        }
-    }
-
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        (self.size, Some(self.size))
-    }
-}
-
-impl<'a, T> DoubleEndedIterator for Iter<'a, T> {
-    fn next_back(&mut self) -> Option<&'a T> {
-        unsafe {
-            if self.end == self.start {
-                return None;
-            }
-            if let Some(prev) = self.end.as_ref()?.prev.as_ref() {
-                let node = self.end;
-                if prev as *const SkipNode<T> != self.start {
-                    self.size -= 1;
-                } else {
-                    self.size = 0;
-                }
-                self.end = prev;
-                return (*node).value.as_ref();
-            }
-            None
-        }
-    }
-}
-
-/// Muable iterator for a [`SkipList`].  
-pub struct IterMut<'a, T: 'a> {
-    start: *mut SkipNode<T>,
-    end: *mut SkipNode<T>,
-    size: usize,
-    _lifetime: PhantomData<&'a T>,
-}
-
-impl<'a, T> Iterator for IterMut<'a, T> {
-    type Item = &'a mut T;
-
-    fn next(&mut self) -> Option<&'a mut T> {
-        unsafe {
-            if self.start == self.end {
-                return None;
-            }
-            if let Some(next) = (*self.start).links[0].as_mut() {
-                self.start = next;
-                self.size -= 1;
-                return (*self.start).value.as_mut();
-            }
-            None
-        }
-    }
-
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        (self.size, Some(self.size))
-    }
-}
-
-impl<'a, T> DoubleEndedIterator for IterMut<'a, T> {
-    fn next_back(&mut self) -> Option<&'a mut T> {
-        unsafe {
-            if self.end == self.start {
-                return None;
-            }
-            if let Some(prev) = (*self.end).prev.as_mut() {
-                let node = self.end;
-                if prev as *const SkipNode<T> != self.start {
-                    self.size -= 1;
-                } else {
-                    self.size = 0;
-                }
-                self.end = prev;
-                return (*node).value.as_mut();
-            }
-            None
-        }
-    }
-}
-
 // ////////////////////////////////////////////////////////////////////////////
 // Tests
 // ////////////////////////////////////////////////////////////////////////////
@@ -1119,6 +1090,16 @@ mod tests {
     }
 
     #[test]
+    fn last() {
+        let mut sl = SkipList::new();
+        assert_eq!(sl.iter().rev().next(), None);
+        for i in 0..100 {
+            sl.push_back(i);
+            assert_eq!(sl.iter().rev().next(), Some(&i));
+        }
+    }
+
+    #[test]
     fn iter() {
         let size = 10000;
 
@@ -1192,7 +1173,6 @@ mod tests {
         test(size, sl.into_iter());
     }
 
-    #[ignore]
     #[test]
     fn range_small() {
         let size = 5;
@@ -1207,7 +1187,6 @@ mod tests {
         assert_eq!(j, size - 2);
     }
 
-    #[ignore]
     #[test]
     fn range_1000() {
         let size = 1000;
@@ -1248,7 +1227,6 @@ mod tests {
         test(&sl, Unbounded, Unbounded);
     }
 
-    #[ignore]
     #[test]
     fn range_mut_1000() {
         let size = 1000;
@@ -1288,7 +1266,6 @@ mod tests {
         test(&mut sl, Unbounded, Unbounded);
     }
 
-    #[ignore]
     #[test]
     fn range() {
         let size = 200;
