@@ -265,6 +265,23 @@ impl<V> SkipNode<V> {
         self._insert(self.level, new_node, locater);
     }
 
+    /// Find the node after distance units, then remove the node after that node.
+    pub fn remove<'a>(&'a mut self, distance: usize) -> Option<(Box<Self>, usize)> {
+        let locater = {
+            let mut distance_left = distance;
+            move |node: &'a mut Self, level| {
+                let (dest, distance) = node.advance_atmost_mut(level, distance_left);
+                distance_left -= distance;
+                if dest.links[0].is_null() {
+                    None
+                } else {
+                    Some((dest, distance))
+                }
+            }
+        };
+        self._remove(self.level, locater)
+    }
+
     /// Locater finds the node before the target position in a level,
     /// as well as the distance from input node to that node.
     ///
@@ -301,6 +318,40 @@ impl<V> SkipNode<V> {
                 }
                 return (inserted_node, insert_distance + prev_distance);
             }
+        }
+    }
+
+    pub fn _remove<'a, F>(&'a mut self, level: usize, mut locater: F) -> Option<(Box<Self>, usize)>
+    where
+        F: FnMut(&'a mut Self, usize) -> Option<(&'a mut Self, usize)>,
+    {
+        let (prev_node, prev_distance) = locater(self, level)?;
+        let prev_node_p = prev_node as *mut Self;
+        if level == 0 {
+            // SAFETY: All links will be fixed later.
+            let removed_node = unsafe {
+                let mut removed_node = prev_node.take_next()?;
+                if let Some(new_next) = removed_node.take_next() {
+                    prev_node.replace_next(new_next);
+                }
+                removed_node
+            };
+            if let Some(next_node) = prev_node.next_mut() {
+                next_node.prev = prev_node_p;
+            }
+            return Some((removed_node, prev_distance + 1));
+        } else {
+            let (removed_node, distance) = prev_node._remove(level - 1, locater)?;
+            unsafe {
+                if level <= removed_node.level {
+                    (*prev_node_p).links[level] = removed_node.links[level];
+                    assert_eq!((*prev_node_p).links_len[level], distance);
+                    (*prev_node_p).links_len[level] = distance + removed_node.links_len[level] - 1;
+                } else {
+                    (*prev_node_p).links_len[level] -= 1;
+                }
+            }
+            return Some((removed_node, prev_distance + distance));
         }
     }
 }
