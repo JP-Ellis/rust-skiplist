@@ -299,12 +299,7 @@ impl<T> SkipList<T> {
     /// ```
     #[inline]
     pub fn get(&self, index: usize) -> Option<&T> {
-        let len = self.len();
-        if index < len {
-            self.get_index(index).value.as_ref()
-        } else {
-            None
-        }
+        self.get_index(index).and_then(|node| node.value.as_ref())
     }
 
     /// Provides a mutable reference to the element at the given index, or
@@ -323,12 +318,8 @@ impl<T> SkipList<T> {
     /// ```
     #[inline]
     pub fn get_mut(&mut self, index: usize) -> Option<&mut T> {
-        let len = self.len();
-        if index < len {
-            self.get_index_mut(index).value.as_mut()
-        } else {
-            None
-        }
+        self.get_index_mut(index)
+            .and_then(|node| node.value.as_mut())
     }
 
     /// Removes the first element and returns it, or `None` if the sequence is
@@ -652,53 +643,27 @@ impl<T> SkipList<T> {
 
     /// Returns the last node of the skiplist.
     fn get_last(&self) -> &SkipNode<T> {
-        (0..self.level_generator.total())
-            .rev()
-            .fold(self.head.as_ref(), |prev_node, level| {
-                prev_node.advance_while(level, |_, _| true).0
-            })
+        self.head.advance(self.len()).unwrap()
     }
 
     fn get_last_mut(&mut self) -> &mut SkipNode<T> {
-        (0..self.level_generator.total())
-            .rev()
-            .fold(self.head.as_mut(), |prev_node, level| {
-                prev_node.advance_while_mut(level, |_, _| true).0
-            })
+        self.head.advance_mut(self.len()).unwrap()
     }
 
     /// Gets a pointer to the node with the given index.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the index given is out of bounds.
-    fn get_index(&self, index: usize) -> &SkipNode<T> {
-        if index >= self.len() {
-            panic!("Index out of bounds.");
+    fn get_index(&self, index: usize) -> Option<&SkipNode<T>> {
+        if self.len() <= index {
+            None
         } else {
-            let mut node = self.head.as_ref();
-            let mut distance = index + 1;
-            for level in (0..self.level_generator.total()).rev() {
-                let (new_node, delta) = node.advance_atmost(level, distance);
-                node = new_node;
-                distance -= delta;
-            }
-            return node;
+            self.head.advance(index + 1)
         }
     }
 
-    fn get_index_mut(&mut self, index: usize) -> &mut SkipNode<T> {
-        if index >= self.len() {
-            panic!("Index out of bounds.");
+    fn get_index_mut(&mut self, index: usize) -> Option<&mut SkipNode<T>> {
+        if self.len() <= index {
+            None
         } else {
-            let mut node = self.head.as_mut();
-            let mut distance = index + 1;
-            for level in (0..self.level_generator.total()).rev() {
-                let (new_node, delta) = node.advance_atmost_mut(level, distance);
-                node = new_node;
-                distance -= delta;
-            }
-            return node;
+            self.head.advance_mut(index + 1)
         }
     }
 }
@@ -833,19 +798,13 @@ impl<T> ops::Index<usize> for SkipList<T> {
     type Output = T;
 
     fn index(&self, index: usize) -> &T {
-        self.get_index(index)
-            .value
-            .as_ref()
-            .expect("Index out of range")
+        self.get(index).expect("Index out of range")
     }
 }
 
 impl<T> ops::IndexMut<usize> for SkipList<T> {
     fn index_mut(&mut self, index: usize) -> &mut Self::Output {
-        self.get_index_mut(index)
-            .value
-            .as_mut()
-            .expect("Index out of range")
+        self.get_mut(index).expect("Index out of range")
     }
 }
 

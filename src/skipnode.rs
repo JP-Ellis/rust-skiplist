@@ -137,7 +137,7 @@ impl<V> SkipNode<V> {
     pub fn distance(&self, level: usize, target: Option<&Self>) -> Result<usize, ()> {
         let distance = match target {
             Some(target) => {
-                let (dest, distance) = self.advance_while(level, |current, _| {
+                let (dest, distance) = self.advance_while_at_level(level, |current, _| {
                     current as *const _ != target as *const _
                 });
                 if dest as *const _ != target as *const _ {
@@ -146,18 +146,50 @@ impl<V> SkipNode<V> {
                 distance
             }
             None => {
-                let (dest, distance) = self.advance_while(level, |_, _| true);
+                let (dest, distance) = self.advance_while_at_level(level, |_, _| true);
                 dest.links_len[level] + distance
             }
         };
         Ok(distance)
     }
 
+    pub fn advance(&self, max_distance: usize) -> Option<&Self> {
+        let level = self.level;
+        let mut node = self;
+        let mut distance_left = max_distance;
+        for level in (0..=level).rev() {
+            let (new_node, steps) = node.advance_at_level(level, distance_left);
+            distance_left -= steps;
+            node = new_node;
+        }
+        if distance_left == 0 {
+            Some(node)
+        } else {
+            None
+        }
+    }
+
+    pub fn advance_mut(&mut self, max_distance: usize) -> Option<&mut Self> {
+        let level = self.level;
+        let mut node = self;
+        let mut distance_left = max_distance;
+        for level in (0..=level).rev() {
+            let (new_node, steps) = node.advance_at_level_mut(level, distance_left);
+            distance_left -= steps;
+            node = new_node;
+        }
+        if distance_left == 0 {
+            Some(node)
+        } else {
+            None
+        }
+    }
+
     /// Try to move to next nth node at specified level.
     /// If it's impossible, then move as far as possible.
     /// Returns a reference to the new node and the distance travelled.
-    pub fn advance_atmost(&self, level: usize, mut max_distance: usize) -> (&Self, usize) {
-        self.advance_while(level, move |current_node, _| {
+    pub fn advance_at_level(&self, level: usize, mut max_distance: usize) -> (&Self, usize) {
+        self.advance_while_at_level(level, move |current_node, _| {
             let travelled = current_node.links_len[level];
             if travelled <= max_distance {
                 max_distance -= travelled;
@@ -171,12 +203,12 @@ impl<V> SkipNode<V> {
     /// Try to move to next nth node at specified level.
     /// If it's impossible, then move as far as possible.
     /// Returns a mutable reference to the new node and the distance travelled.
-    pub fn advance_atmost_mut(
+    pub fn advance_at_level_mut(
         &mut self,
         level: usize,
         mut max_distance: usize,
     ) -> (&mut Self, usize) {
-        self.advance_while_mut(level, move |current_node, _| {
+        self.advance_while_at_level_mut(level, move |current_node, _| {
             let travelled = current_node.links_len[level];
             if travelled <= max_distance {
                 max_distance -= travelled;
@@ -187,7 +219,7 @@ impl<V> SkipNode<V> {
         })
     }
 
-    pub fn advance_while(
+    pub fn advance_while_at_level(
         &self,
         level: usize,
         mut pred: impl FnMut(&Self, &Self) -> bool,
@@ -195,7 +227,7 @@ impl<V> SkipNode<V> {
         let mut current = self;
         let mut travelled = 0;
         loop {
-            match current.advance_if(level, &mut pred) {
+            match current.next_if_at_level(level, &mut pred) {
                 Ok((node, steps)) => {
                     current = node;
                     travelled += steps;
@@ -205,7 +237,7 @@ impl<V> SkipNode<V> {
         }
     }
 
-    pub fn advance_while_mut(
+    pub fn advance_while_at_level_mut(
         &mut self,
         level: usize,
         mut pred: impl FnMut(&Self, &Self) -> bool,
@@ -213,7 +245,7 @@ impl<V> SkipNode<V> {
         let mut current = self;
         let mut travelled = 0;
         loop {
-            match current.advance_if_mut(level, &mut pred) {
+            match current.next_if_at_level_mut(level, &mut pred) {
                 Ok((node, steps)) => {
                     current = node;
                     travelled += steps;
@@ -228,7 +260,7 @@ impl<V> SkipNode<V> {
     // As a result, self might be  borrowed forever and caller cannot return that value
     // if they call this function in a loop.
     // Therefore this function always return self when it fails to advance.
-    pub fn advance_if_mut<'a>(
+    pub fn next_if_at_level_mut<'a>(
         &'a mut self,
         level: usize,
         predicate: impl FnOnce(&Self, &Self) -> bool,
@@ -240,7 +272,7 @@ impl<V> SkipNode<V> {
         }
     }
 
-    pub fn advance_if<'a>(
+    pub fn next_if_at_level<'a>(
         &'a self,
         level: usize,
         predicate: impl FnOnce(&Self, &Self) -> bool,
@@ -257,7 +289,7 @@ impl<V> SkipNode<V> {
         let locater = {
             let mut distance_left = distance;
             move |node: &'a mut Self, level| {
-                let (dest, distance) = node.advance_atmost_mut(level, distance_left);
+                let (dest, distance) = node.advance_at_level_mut(level, distance_left);
                 distance_left -= distance;
                 (dest, distance)
             }
@@ -270,7 +302,7 @@ impl<V> SkipNode<V> {
         let locater = {
             let mut distance_left = distance;
             move |node: &'a mut Self, level| {
-                let (dest, distance) = node.advance_atmost_mut(level, distance_left);
+                let (dest, distance) = node.advance_at_level_mut(level, distance_left);
                 distance_left -= distance;
                 if dest.links[0].is_null() {
                     None
