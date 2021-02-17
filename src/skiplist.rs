@@ -399,7 +399,14 @@ impl<T> SkipList<T> {
     /// assert_eq!(skiplist.remove(4), 5);
     /// ```
     pub fn remove(&mut self, index: usize) -> T {
-        todo!()
+        if index >= self.len() {
+            panic!("Index out of bounds.");
+        } else {
+            let (node, distance_from_head) = self.head.remove(index).unwrap();
+            assert_eq!(distance_from_head - 1, index);
+            self.len -= 1;
+            node.into_inner().unwrap()
+        }
     }
 
     /// Retains only the elements specified by the predicate.
@@ -1085,7 +1092,6 @@ mod tests {
         }
     }
 
-    #[ignore]
     #[test]
     fn remove_rand() {
         use rand::distributions::Uniform;
@@ -1099,7 +1105,9 @@ mod tests {
         }
     }
 
-    #[ignore]
+    #[test]
+    fn append_test() {}
+
     #[test]
     fn basic_small() {
         let mut sl: SkipList<i64> = SkipList::new();
@@ -1118,7 +1126,6 @@ mod tests {
         sl.check();
     }
 
-    #[ignore]
     #[test]
     fn basic_large() {
         let size = 500;
@@ -1357,7 +1364,6 @@ mod tests {
         }
     }
 
-    #[ignore]
     #[test]
     fn index_pop() {
         let size = 1000;
