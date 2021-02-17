@@ -129,6 +129,23 @@ impl<V> SkipNode<V> {
         self.links_len[0] = 1;
         old_next
     }
+    // /////////////////////////////
+    // Value Manipulation
+    // /////////////////////////////
+    
+    pub fn retain<F>(&mut self, pred: F)
+        where F: FnMut(&V) -> bool 
+    {
+        assert!(self.is_head());
+    }
+
+    // /////////////////////////////
+    // Pointer Manipulations
+    // /////////////////////////////
+    //
+    // Methods here only care about informations on the node, e.g. distance,
+    // never values carried by the node.
+    //
 
     /// Distance between current node and the given node at specified level.
     /// If no node is given, then return distance between current node and the
@@ -153,6 +170,8 @@ impl<V> SkipNode<V> {
         Ok(distance)
     }
 
+    /// Move at max_distance units.
+    /// Returns None if it's not possible.
     pub fn advance(&self, max_distance: usize) -> Option<&Self> {
         let level = self.level;
         let mut node = self;
@@ -169,6 +188,8 @@ impl<V> SkipNode<V> {
         }
     }
 
+    /// Move at max_distance units.
+    /// Returns None if it's not possible.
     pub fn advance_mut(&mut self, max_distance: usize) -> Option<&mut Self> {
         let level = self.level;
         let mut node = self;
@@ -183,6 +204,18 @@ impl<V> SkipNode<V> {
         } else {
             None
         }
+    }
+
+    pub fn to_last(&self) -> &Self {
+        (0..=self.level).rev().fold(self, |node, level| {
+            node.advance_while_at_level(level, |_, _| true).0
+        })
+    }
+
+    pub fn to_last_mut(&mut self) -> &mut Self {
+        (0..=self.level).rev().fold(self, |node, level| {
+            node.advance_while_at_level_mut(level, |_, _| true).0
+        })
     }
 
     /// Try to move to next nth node at specified level.
@@ -219,6 +252,8 @@ impl<V> SkipNode<V> {
         })
     }
 
+    /// As long as the pred is true, move at specified level.
+    /// pred takes reference to current node and next node.
     pub fn advance_while_at_level(
         &self,
         level: usize,
@@ -237,6 +272,8 @@ impl<V> SkipNode<V> {
         }
     }
 
+    /// As long as the pred is true, move at specified level.
+    /// pred takes reference to current node and next node.
     pub fn advance_while_at_level_mut(
         &mut self,
         level: usize,
@@ -255,11 +292,30 @@ impl<V> SkipNode<V> {
         }
     }
 
-    // Due to Rust lifetime semantics, the lifetime of result is the same as self.
-    // Sometimes Rust cannot determine the result is unused, e.g. in a loop.
-    // As a result, self might be  borrowed forever and caller cannot return that value
-    // if they call this function in a loop.
-    // Therefore this function always return self when it fails to advance.
+    // The following methods return `Err(self)` if they fail.
+    //
+    // In Rust, the lifetime of returned value is the same as `self`.
+    // Therefore if you return something that's borrowed from `self` in a branch,
+    // `self` is considered borrowed in other branches.
+    //
+    // e.g. 
+    // ```
+    // fn some_method(&mut self) -> Option<&mut Self>;
+    //
+    // fn caller(&mut self) {
+    //     match self.some_method(){
+    //         Some(x) => return x, // oops now `self` is borrowed until the function returns...
+    //         None => return self, // Now you cannot use `self` in other branches..
+    //     }                        // including returning it!
+    // }
+    // ```
+    // While in this example you can restructure the code to fix that,
+    // it's much more difficult when loops are involved.
+    // The following methods are usually used in loops, so they return `Err(self)`
+    // when they fail, to ease the pain.
+
+    /// Move to the next node at given level if the given predicate is true.
+    /// The predicate takes reference to the current node and the next node.
     pub fn next_if_at_level_mut<'a>(
         &'a mut self,
         level: usize,
@@ -272,6 +328,8 @@ impl<V> SkipNode<V> {
         }
     }
 
+    /// Move to the next node at given level if the given predicate is true.
+    /// The predicate takes reference to the current node and the next node.
     pub fn next_if_at_level<'a>(
         &'a self,
         level: usize,
@@ -285,16 +343,21 @@ impl<V> SkipNode<V> {
     }
 
     /// Find the node after distance units, then insert a new node after that node.
-    pub fn insert<'a>(&'a mut self, new_node: Box<Self>, distance: usize) {
+    pub fn insert<'a>(&'a mut self, new_node: Box<Self>, distance: usize) -> Result<(), ()> {
         let locater = {
             let mut distance_left = distance;
             move |node: &'a mut Self, level| {
                 let (dest, distance) = node.advance_at_level_mut(level, distance_left);
                 distance_left -= distance;
-                (dest, distance)
+                if level == 0 && distance_left != 0 {
+                    None
+                } else {
+                    Some((dest, distance))
+                }
             }
         };
-        self._insert(self.level, new_node, locater);
+        self._insert(self.level, new_node, locater)?;
+        Ok(())
     }
 
     /// Find the node after distance units, then remove the node after that node.
@@ -314,20 +377,31 @@ impl<V> SkipNode<V> {
         self._remove(self.level, locater)
     }
 
+    /// A helper method for insertion.
+    ///
     /// Locater finds the node before the target position in a level,
     /// as well as the distance from input node to that node.
+    /// If it fails to find such position, return None.
     ///
-    /// Returns the reference to the new node, and distance between self and the new node.
+    /// At level 0 it either returns the target's parent or None.
+    ///
+    /// It may be stateful and use the information from previous
+    /// calls to determine the result.
+    /// In short, it may remember how far it has already travelled.
+    ///
+    /// If the insertion succeeds, return a mutable reference to the new node
+    /// and the distance between self and the new node.
+    /// If the insertion fails, fails return the given node.
     pub fn _insert<'a, F>(
         &'a mut self,
         level: usize,
         mut new_node: Box<Self>,
         mut locater: F,
-    ) -> (&'a mut Self, usize)
+    ) -> Result<(&'a mut Self, usize), ()>
     where
-        F: FnMut(&'a mut Self, usize) -> (&'a mut Self, usize),
+        F: FnMut(&'a mut Self, usize) -> Option<(&'a mut Self, usize)>,
     {
-        let (prev_node, prev_distance) = locater(self, level);
+        let (prev_node, prev_distance) = locater(self, level).ok_or(())?;
         let prev_node_p = prev_node as *mut Self;
         unsafe {
             if level == 0 {
@@ -335,10 +409,10 @@ impl<V> SkipNode<V> {
                     new_node.replace_next(tail);
                 }
                 prev_node.replace_next(new_node);
-                return (prev_node.next_mut().unwrap(), prev_distance + 1);
+                return Ok((prev_node.next_mut().unwrap(), prev_distance + 1));
             } else {
                 let (inserted_node, insert_distance) =
-                    prev_node._insert(level - 1, new_node, locater);
+                    prev_node._insert(level - 1, new_node, locater)?;
                 if level <= inserted_node.level {
                     inserted_node.links[level] = (*prev_node_p).links[level];
                     inserted_node.links_len[level] =
@@ -348,11 +422,28 @@ impl<V> SkipNode<V> {
                 } else {
                     (*prev_node_p).links_len[level] += 1;
                 }
-                return (inserted_node, insert_distance + prev_distance);
+                return Ok((inserted_node, insert_distance + prev_distance));
             }
         }
     }
 
+    /// A helper method for removal.
+    ///
+    /// Locater takes a mutable reference and a level,
+    /// then returns the node after which the node target node may exist
+    /// and the distance it moved from the given reference.
+    ///
+    /// If such position does not exist any where in the list,
+    /// it returns None.
+    /// At level 0 it either returns the target's parent or None.
+    ///
+    /// It may be stateful and use the information from previous
+    /// calls to determine the result.
+    /// In short, it may remember how far it has already travelled.
+    ///
+    /// Returns None if failed.
+    /// Otherwise it returns the removed node and
+    /// the distance it travelled at current level, for fixing up.
     pub fn _remove<'a, F>(&'a mut self, level: usize, mut locater: F) -> Option<(Box<Self>, usize)>
     where
         F: FnMut(&'a mut Self, usize) -> Option<(&'a mut Self, usize)>,
@@ -425,6 +516,112 @@ where
 // they can be shared by some data structures.
 // There's no need for a dummy head (that contains no value) in the iterator.
 // so the members are named first and last instaed of head/end to avoid confusion.
+
+/// Iterator by reference
+pub struct Iter<'a, T> {
+    pub(crate) first: Option<&'a SkipNode<T>>,
+    pub(crate) last: Option<&'a SkipNode<T>>,
+    pub(crate) size: usize,
+}
+
+impl<'a, T> Iterator for Iter<'a, T> {
+    type Item = &'a T;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let current_node = self.first?;
+        if current_node as *const _ == self.last.unwrap() as *const _ {
+            self.first = None;
+            self.last = None;
+        } else {
+            self.first = current_node.next_ref();
+        }
+        self.size -= 1;
+        current_node.value.as_ref()
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        (self.size, Some(self.size))
+    }
+}
+
+impl<'a, T> DoubleEndedIterator for Iter<'a, T> {
+    fn next_back(&mut self) -> Option<Self::Item> {
+        let last_node = self.last?;
+        if self.first.unwrap() as *const _ == last_node as *const _ {
+            self.first = None;
+            self.last = None;
+        } else {
+            unsafe {
+                self.last = last_node.prev.as_ref();
+            }
+        }
+        self.size -= 1;
+        last_node.value.as_ref()
+    }
+}
+
+/// Iterator by mutable reference
+pub struct IterMut<'a, T> {
+    pub(crate) first: Option<&'a mut SkipNode<T>>,
+    pub(crate) last: *mut SkipNode<T>,
+    pub(crate) size: usize,
+}
+
+impl<'a, T> Iterator for IterMut<'a, T> {
+    type Item = &'a mut T;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let current_node = self.first.take()?;
+        if current_node as *mut _ == self.last {
+            self.first = None;
+            self.last = ptr::null_mut();
+        } else {
+            // SAFETY: This line is required since both self.first and return value mutably borrows
+            // from current_node. It's safe because current_node.links[0] either points to the next
+            // node or none.
+            unsafe {
+                self.first = current_node.links[0].as_mut();
+            }
+        }
+        self.size -= 1;
+        current_node.value.as_mut()
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        (self.size, Some(self.size))
+    }
+}
+
+impl<'a, T> DoubleEndedIterator for IterMut<'a, T> {
+    fn next_back(&mut self) -> Option<Self::Item> {
+        if self.last.is_null() {
+            return None;
+        }
+        let first = self.first.take().unwrap();
+        let popped_node = unsafe {
+            if first as *mut _ == self.last {
+                self.first = None;
+                self.last = ptr::null_mut();
+                first
+            } else if first as *mut _ == (*self.last).prev {
+                // self.first aliasing popped.prev.
+                // I'm not sure if it's necessarity,
+                // But lets try not to access (*popped.prev) to avoid UB.
+                self.last = first as *mut _;
+                let popped = first.next_mut().unwrap();
+                self.first = self.last.as_mut();
+                popped
+            } else {
+                self.first.replace(first);
+                let new_last = (*self.last).prev;
+                self.last = new_last;
+                (*new_last).next_mut().unwrap()
+            }
+        };
+        self.size -= 1;
+        popped_node.value.as_mut()
+    }
+}
 
 /// Consuming iterator.  
 pub struct IntoIter<T> {
