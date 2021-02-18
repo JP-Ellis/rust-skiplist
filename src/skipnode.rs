@@ -133,6 +133,7 @@ impl<V> SkipNode<V> {
     // Value Manipulation
     // /////////////////////////////
 
+    #[must_use]
     pub fn retain<'a, F>(&'a mut self, mut pred: F) -> usize
     where
         F: FnMut(Option<&V>, &V) -> bool,
