@@ -149,7 +149,8 @@ impl<T> SkipList<T> {
         self.len += 1;
         let new_node = Box::new(SkipNode::new(value, self.level_generator.random()));
         self.head
-            .insert(new_node, index).expect("No insertion position is found!");
+            .insert(new_node, index)
+            .expect("No insertion position is found!");
     }
 
     /// Insert the element into the front of the skiplist.
@@ -416,7 +417,7 @@ impl<T> SkipList<T> {
     where
         F: FnMut(&T) -> bool,
     {
-        unsafe { todo!() }
+        self.len -= self.head.retain(move |_, x| f(x));
     }
 
     /// Get an owning iterator over the entries of the skiplist.
@@ -620,10 +621,10 @@ where
     /// assert_eq!(skiplist.len(), 1);
     /// ```
     pub fn dedup(&mut self) {
-        // This follows the same algorithm as `retain` initially to find the
-        // nodes to removed (on lvl 0) and then on higher levels checks whether
-        // `next` is among the removed nodes.
-        unsafe { todo!() }
+        let removed = self
+            .head
+            .retain(|prev, current| prev.map_or(true, |prev| !prev.eq(current)));
+        self.len -= removed;
     }
 }
 
@@ -1362,7 +1363,6 @@ mod tests {
         }
     }
 
-    #[ignore]
     #[test]
     fn dedup() {
         let size = 1000;
@@ -1390,16 +1390,16 @@ mod tests {
         }
     }
 
-    #[ignore]
     #[test]
     fn retain() {
         let repeats = 10;
-        let size = 1000;
+        let size = 100;
 
         let mut sl: SkipList<usize> = SkipList::new();
         for i in 0..size {
             for _ in 0..repeats {
                 sl.insert(i, i * repeats);
+                sl.check();
             }
         }
         {
@@ -1411,6 +1411,7 @@ mod tests {
             }
         }
         sl.retain(|&x| x % 5 == 0);
+        sl.debug_structure();
         sl.check();
         assert_eq!(sl.len(), repeats * size / 5);
 
