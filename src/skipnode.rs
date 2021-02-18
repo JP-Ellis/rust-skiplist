@@ -132,11 +132,50 @@ impl<V> SkipNode<V> {
     // /////////////////////////////
     // Value Manipulation
     // /////////////////////////////
-    
-    pub fn retain<F>(&mut self, pred: F)
-        where F: FnMut(&V) -> bool 
+
+    pub fn retain<'a, F>(&'a mut self, mut pred: F) -> usize
+    where
+        F: FnMut(Option<&V>, &V) -> bool,
     {
         assert!(self.is_head());
+        let mut removed = 0;
+        let mut level_head: Vec<_> = iter::repeat(self as *mut Self)
+            .take(self.level + 1)
+            .collect();
+        let mut node = self;
+        unsafe {
+            while let Some(mut next_node) = node.take_next() {
+                if pred(node.value.as_ref(), next_node.value.as_ref().unwrap()) {
+                    for x in &mut level_head[0..=next_node.level] {
+                        *x = next_node.as_mut() as *mut _;
+                    }
+                    node.replace_next(next_node);
+                    node = node.next_mut().unwrap();
+                } else {
+                    removed += 1;
+                    for (level, head) in level_head
+                        .iter_mut()
+                        .map(|&mut x| x.as_mut().unwrap())
+                        .enumerate()
+                        .skip(1)
+                    // should use take_next()/replace_next() to manage 0th level.
+                    {
+                        if level <= next_node.level {
+                            assert_eq!(head.links[level], next_node.as_mut() as *mut _);
+                            head.links_len[level] += next_node.links_len[level];
+                            head.links_len[level] -= 1;
+                            head.links[level] = next_node.links[level];
+                        } else {
+                            head.links_len[level] -= 1;
+                        }
+                    }
+                    if let Some(new_next) = next_node.take_next() {
+                        node.replace_next(new_next);
+                    }
+                }
+            }
+        }
+        removed
     }
 
     // /////////////////////////////
@@ -298,7 +337,7 @@ impl<V> SkipNode<V> {
     // Therefore if you return something that's borrowed from `self` in a branch,
     // `self` is considered borrowed in other branches.
     //
-    // e.g. 
+    // e.g.
     // ```
     // fn some_method(&mut self) -> Option<&mut Self>;
     //
