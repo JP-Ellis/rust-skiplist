@@ -443,10 +443,13 @@ impl<T> SkipList<T> {
             last = ptr::null_mut();
         }
         let size = self.len();
-        let first = self.head.next.take().map(|mut node| {
-            node.prev = ptr::null_mut();
-            node
-        });
+        // SAFETY: self.head is no longer used; it's okay that its links become dangling.
+        let first = unsafe {
+            self.head.take_next().map(|mut node| {
+                node.prev = ptr::null_mut();
+                node
+            })
+        };
         IntoIter { first, last, size }
     }
 
@@ -558,8 +561,8 @@ where
     /// assert!(!skiplist.contains(&15));
     /// ```
     pub fn contains(&self, value: &T) -> bool {
-        let mut node = &self.head;
-        while let Some(ref next) = node.next {
+        let mut node = self.head.as_ref();
+        while let Some(next) = node.next_ref() {
             if node.value.as_ref() == Some(value) {
                 return true;
             } else {
@@ -604,24 +607,15 @@ impl<T> SkipList<T> {
             let head = &self.head;
             assert!(head.is_head() && head.value.is_none() && head.prev.is_null());
 
-            // Check every node
+            // Check SkipNode.prev points to the correct node.
             let mut current_node = Some(self.head.as_ref());
             while let Some(node) = current_node {
                 assert_eq!(node.level + 1, node.links.len());
                 assert_eq!(node.level + 1, node.links_len.len());
-                assert_eq!(
-                    node.next
-                        .as_ref()
-                        .map_or(ptr::null(), |boxed| boxed.as_ref() as *const _),
-                    node.links[0]
-                );
                 if let Some(prev_node) = node.prev.as_ref() {
-                    assert_eq!(
-                        prev_node.next.as_deref().unwrap() as *const _,
-                        node as *const _
-                    );
+                    assert_eq!((*prev_node).links[0] as *const _, node as *const _);
                 }
-                current_node = node.next.as_deref();
+                current_node = node.next_ref();
             }
 
             for lvl in 1..self.level_generator.total() {
@@ -631,7 +625,10 @@ impl<T> SkipList<T> {
                     length_sum += node.links_len[lvl];
                     assert_eq!(
                         node.links_len[lvl],
-                        node.distance(lvl - 1, node.links[lvl].as_ref()).unwrap()
+                        node.distance(lvl - 1, node.links[lvl].as_ref()).unwrap(),
+                        "Node gives different distance at level {} and level {}!",
+                        lvl,
+                        lvl - 1
                     );
 
                     if let Some(next) = node.links[lvl].as_ref() {

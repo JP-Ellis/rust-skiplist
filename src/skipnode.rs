@@ -1,3 +1,4 @@
+use std::marker::PhantomData;
 use std::{fmt, iter, ptr};
 
 /// Minimum levels required for a list of size n.
@@ -21,7 +22,9 @@ pub fn levels_required(n: usize) -> usize {
 /// The node has a `level` which corresponds to how 'high' the node reaches.
 ///
 /// A node of `level` n has (n + 1) links to next nodes, which are stored in
-/// a vector. level 0 points to the same node as `self.next`.
+/// a vector.
+///
+/// The node linked by level 0 should be considered owned by this node.
 ///
 /// There is a corresponding vector of link lengths which contains the distance
 /// between current node and the next node. If there's no next node, the distance
@@ -29,10 +32,6 @@ pub fn levels_required(n: usize) -> usize {
 ///
 /// Lastly, each node contains a link to the immediately previous node in case
 /// one needs to parse the list backwards.
-///
-/// In cases where the value is not applicable, `None` should be used.  In
-/// particular, as there is no tail node, the value of `next` in the last node
-/// should be `None`.
 #[derive(Clone, Debug)]
 pub struct SkipNode<V> {
     // key and value should never be None, with the sole exception being the
@@ -40,16 +39,16 @@ pub struct SkipNode<V> {
     pub value: Option<V>,
     // how high the node reaches.
     pub level: usize,
-    // The immediately next element (and owns that next node).
-    pub next: Option<Box<SkipNode<V>>>,
     // The immediately previous element.
     pub prev: *mut SkipNode<V>,
     // Vector of links to the next node at the respective level.  This vector
     // *must* be of length `self.level + 1`.  links[0] stores a pointer to the
-    // same node as next.
+    // next node, which will have to be dropped.
     pub links: Vec<*mut SkipNode<V>>,
     // The corresponding length of each link
     pub links_len: Vec<usize>,
+    // Owns self.link[0]
+    _phantom_link: PhantomData<SkipNode<V>>,
 }
 
 // ///////////////////////////////////////////////
@@ -62,10 +61,10 @@ impl<V> SkipNode<V> {
         SkipNode {
             value: None,
             level: total_levels - 1,
-            next: None,
             prev: ptr::null_mut(),
             links: iter::repeat(ptr::null_mut()).take(total_levels).collect(),
             links_len: iter::repeat(0).take(total_levels).collect(),
+            _phantom_link: PhantomData,
         }
     }
 
@@ -75,10 +74,10 @@ impl<V> SkipNode<V> {
         SkipNode {
             value: Some(value),
             level,
-            next: None,
             prev: ptr::null_mut(),
             links: iter::repeat(ptr::null_mut()).take(level + 1).collect(),
             links_len: iter::repeat(0).take(level + 1).collect(),
+            _phantom_link: PhantomData,
         }
     }
 
@@ -90,6 +89,45 @@ impl<V> SkipNode<V> {
     /// Returns `true` is the node is a head-node.
     pub fn is_head(&self) -> bool {
         self.prev.is_null()
+    }
+
+    pub fn next_ref(&self) -> Option<&Self> {
+        unsafe { self.links[0].as_ref() }
+    }
+
+    pub fn next_mut(&mut self) -> Option<&mut Self> {
+        unsafe { self.links[0].as_mut() }
+    }
+
+    /// Takes the next node and set next_node.prev as null.
+    ///
+    /// SAFETY: please make sure no link at level 1 or greater becomes dangling.
+    pub unsafe fn take_next(&mut self) -> Option<Box<Self>> {
+        let next = self.links[0];
+        if next.is_null() {
+            None
+        } else {
+            let mut next = Box::from_raw(next);
+            next.prev = ptr::null_mut();
+            self.links[0] = ptr::null_mut();
+            self.links_len[0] = 0;
+            Some(next)
+        }
+    }
+
+    /// Replace the next node.
+    /// Return the old node.
+    ///
+    /// SAFETY: please makes sure all links are fixed.
+    pub unsafe fn replace_next(&mut self, mut new_next: Box<Self>) -> Option<Box<Self>> {
+        let mut old_next = self.take_next();
+        if let Some(old_next) = old_next.as_mut() {
+            old_next.prev = ptr::null_mut();
+        }
+        new_next.prev = self as *mut _;
+        self.links[0] = Box::into_raw(new_next);
+        self.links_len[0] = 1;
+        old_next
     }
 
     /// Distance between current node and the given node at specified level.
@@ -227,12 +265,10 @@ impl<V> SkipNode<V> {
         self._insert(self.level, new_node, locater);
     }
 
-    /// Locater finds the element that's before the target in a level.
-    /// If the target does not exist in that level,
-    /// it finds the last element that's not before target.
-    /// In either case it also returns the distance travelled.
+    /// Locater finds the node before the target position in a level,
+    /// as well as the distance from input node to that node.
     ///
-    /// The return value is distance traveled, used for fixup.
+    /// Returns the reference to the new node, and distance between self and the new node.
     pub fn _insert<'a, F>(
         &'a mut self,
         level: usize,
@@ -244,21 +280,16 @@ impl<V> SkipNode<V> {
     {
         let (prev_node, prev_distance) = locater(self, level);
         let prev_node_p = prev_node as *mut Self;
-        if level == 0 {
-            if let Some(mut tail) = prev_node.next.take() {
-                tail.prev = new_node.as_mut() as *mut _;
-                new_node.links[level] = tail.as_mut();
-                new_node.next = Some(tail);
-                new_node.links_len[level] = 1;
-            }
-            new_node.prev = prev_node as *mut _;
-            prev_node.links[0] = new_node.as_mut() as *mut _;
-            prev_node.links_len[level] = 1;
-            prev_node.next = Some(new_node);
-            return (prev_node.next.as_mut().unwrap(), prev_distance + 1);
-        } else {
-            let (inserted_node, insert_distance) = prev_node._insert(level - 1, new_node, locater);
-            unsafe {
+        unsafe {
+            if level == 0 {
+                if let Some(tail) = prev_node.take_next() {
+                    new_node.replace_next(tail);
+                }
+                prev_node.replace_next(new_node);
+                return (prev_node.next_mut().unwrap(), prev_distance + 1);
+            } else {
+                let (inserted_node, insert_distance) =
+                    prev_node._insert(level - 1, new_node, locater);
                 if level <= inserted_node.level {
                     inserted_node.links[level] = (*prev_node_p).links[level];
                     inserted_node.links_len[level] =
@@ -268,16 +299,21 @@ impl<V> SkipNode<V> {
                 } else {
                     (*prev_node_p).links_len[level] += 1;
                 }
+                return (inserted_node, insert_distance + prev_distance);
             }
-            return (inserted_node, insert_distance + prev_distance);
         }
     }
 }
 
 impl<V> Drop for SkipNode<V> {
     fn drop(&mut self) {
-        while let Some(mut node) = self.next.take() {
-            self.next = node.next.take();
+        // SAFETY: all nodes are going to be dropped; its okay that its links (except those at
+        // level 0) become dangling.
+        unsafe {
+            let mut node = self.take_next();
+            while let Some(mut node_inner) = node {
+                node = node_inner.take_next();
+            }
         }
     }
 }
@@ -320,12 +356,15 @@ impl<T> Iterator for IntoIter<T> {
     fn next(&mut self) -> Option<T> {
         let mut popped_node = self.first.take()?;
         self.size -= 1;
-        self.first = popped_node.next.take().map(|mut node| {
-            node.prev = ptr::null_mut();
-            node
-        });
-        if self.first.is_none() {
-            self.last = ptr::null_mut();
+        unsafe {
+            self.first = if popped_node.links[0].is_null() {
+                self.last = ptr::null_mut();
+                None
+            } else {
+                let next_node = Box::from_raw(popped_node.links[0]);
+                popped_node.links[0] = ptr::null_mut();
+                Some(next_node)
+            }
         }
         popped_node.into_inner()
     }
@@ -343,13 +382,15 @@ impl<T> DoubleEndedIterator for IntoIter<T> {
         assert!(!self.last.is_null());
         unsafe {
             let new_last = (*self.last).prev;
-            let popped_node = match new_last.as_mut() {
-                Some(new_last) => {
-                    self.last = new_last as *mut _;
-                    (*new_last).next.take().unwrap()
-                }
-                None => self.first.take().unwrap(),
+            let popped_node = if new_last.is_null() {
+                self.first.take().unwrap()
+            } else {
+                let popped_node = (*new_last).links[0];
+                (*new_last).links[0] = ptr::null_mut();
+                let popped_node = Box::from_raw(popped_node);
+                popped_node
             };
+            self.last = new_last;
             self.size -= 1;
             popped_node.into_inner()
         }
@@ -400,37 +441,34 @@ mod test {
         let max_level = levels_required(n);
         let mut head = SkipNode::<usize>::head(max_level);
         assert_eq!(head.links.len(), max_level);
-        let mut nodes: Vec<Box<SkipNode<usize>>> = (0..n)
-            .map(|n| Box::new(SkipNode::new(n, level_for_index(n))))
+        let mut nodes: Vec<_> = (0..n)
+            .map(|n| {
+                let new_node = Box::new(SkipNode::new(n, level_for_index(n)));
+                Box::into_raw(new_node)
+            })
             .collect();
-        let node_max_level = nodes.iter().map(|node| node.level).max();
-        if let Some(node_max_level) = node_max_level {
-            assert_eq!(node_max_level + 1, max_level);
-        }
-        for level in 0..max_level {
-            let mut last_node = &mut head as *mut SkipNode<usize>;
-            let mut len_left = n;
-            unsafe {
-                for node in nodes
+        unsafe {
+            let node_max_level = nodes.iter().map(|&node| (*node).level).max();
+            if let Some(node_max_level) = node_max_level {
+                assert_eq!(node_max_level + 1, max_level);
+            }
+            for level in 0..max_level {
+                let mut last_node = &mut head as *mut SkipNode<usize>;
+                let mut len_left = n;
+                for &mut node_ptr in nodes
                     .iter_mut()
-                    .filter(|node| level <= node.level)
-                    .map(|node| node.as_mut() as *mut SkipNode<usize>)
+                    .filter(|&&mut node_ptr| level <= (*node_ptr).level)
                 {
                     if level == 0 {
-                        (*node).prev = last_node;
+                        (*node_ptr).prev = last_node;
                     }
-                    (*last_node).links[level] = node;
+                    (*last_node).links[level] = node_ptr;
                     (*last_node).links_len[level] = 1 << level;
-                    last_node = node;
+                    last_node = node_ptr;
                     len_left -= 1 << level;
                 }
                 (*last_node).links_len[level] = len_left;
             }
-        }
-        let mut last_node = &mut head;
-        for node in nodes.into_iter() {
-            last_node.next.replace(node);
-            last_node = last_node.next.as_mut().unwrap();
         }
         return head;
     }
@@ -439,17 +477,17 @@ mod test {
     fn test_make_new_list() {
         fn test_list_integrity(len: usize) {
             let list = new_list_for_test(len);
-            let mut node = list.next.as_ref();
-            while let Some(node_inner) = node {
-                let idx = node_inner.value.unwrap_or_else(|| panic!());
-                assert_eq!(node_inner.level, level_for_index(idx));
-                node = node_inner.next.as_ref();
-            }
+            unsafe {
+                let mut node = list.links[0].as_ref();
+                while let Some(node_inner) = node {
+                    let idx = node_inner.value.unwrap_or_else(|| panic!());
+                    assert_eq!(node_inner.level, level_for_index(idx));
+                    node = node_inner.links[0].as_ref();
+                }
 
-            for level in 0..levels_required(len) {
-                let mut len_left = len;
-                let mut node = &list;
-                unsafe {
+                for level in 0..levels_required(len) {
+                    let mut len_left = len;
+                    let mut node = &list;
                     while let Some(next_node) = node.links[level].as_ref() {
                         len_left -= node.links_len[level];
                         node = next_node;
