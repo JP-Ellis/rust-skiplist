@@ -1,5 +1,15 @@
 use std::{fmt, iter, ptr};
 
+/// Minimum levels required for a list of size n.
+pub fn levels_required(n: usize) -> usize {
+    if n == 0 {
+        1
+    } else {
+        let num_bits = std::mem::size_of::<usize>() * 8;
+        num_bits - n.leading_zeros() as usize
+    }
+}
+
 // ////////////////////////////////////////////////////////////////////////////
 // SkipNode
 // ////////////////////////////////////////////////////////////////////////////
@@ -343,5 +353,118 @@ impl<T> DoubleEndedIterator for IntoIter<T> {
             self.size -= 1;
             popped_node.into_inner()
         }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    #[test]
+    fn test_level_required() {
+        assert_eq!(levels_required(0), 1);
+        assert_eq!(levels_required(1), 1);
+        assert_eq!(levels_required(2), 2);
+        assert_eq!(levels_required(3), 2);
+        assert_eq!(levels_required(1023), 10);
+        assert_eq!(levels_required(1024), 11);
+    }
+
+    fn level_for_index(mut n: usize) -> usize {
+        let mut cnt = 0;
+        while n & 0x1 == 1 {
+            cnt += 1;
+            n /= 2;
+        }
+        cnt
+    }
+
+    #[test]
+    fn test_level_index() {
+        assert_eq!(level_for_index(0), 0);
+        assert_eq!(level_for_index(1), 1);
+        assert_eq!(level_for_index(2), 0);
+        assert_eq!(level_for_index(3), 2);
+        assert_eq!(level_for_index(4), 0);
+        assert_eq!(level_for_index(5), 1);
+        assert_eq!(level_for_index(6), 0);
+        assert_eq!(level_for_index(7), 3);
+        assert_eq!(level_for_index(8), 0);
+        assert_eq!(level_for_index(9), 1);
+        assert_eq!(level_for_index(10), 0);
+        assert_eq!(level_for_index(11), 2);
+    }
+
+    /// Make a list of size n
+    /// levels are evenly spread out
+    fn new_list_for_test(n: usize) -> SkipNode<usize> {
+        let max_level = levels_required(n);
+        let mut head = SkipNode::<usize>::head(max_level);
+        assert_eq!(head.links.len(), max_level);
+        let mut nodes: Vec<Box<SkipNode<usize>>> = (0..n)
+            .map(|n| Box::new(SkipNode::new(n, level_for_index(n))))
+            .collect();
+        let node_max_level = nodes.iter().map(|node| node.level).max();
+        if let Some(node_max_level) = node_max_level {
+            assert_eq!(node_max_level + 1, max_level);
+        }
+        for level in 0..max_level {
+            let mut last_node = &mut head as *mut SkipNode<usize>;
+            let mut len_left = n;
+            unsafe {
+                for node in nodes
+                    .iter_mut()
+                    .filter(|node| level <= node.level)
+                    .map(|node| node.as_mut() as *mut SkipNode<usize>)
+                {
+                    if level == 0 {
+                        (*node).prev = last_node;
+                    }
+                    (*last_node).links[level] = node;
+                    (*last_node).links_len[level] = 1 << level;
+                    last_node = node;
+                    len_left -= 1 << level;
+                }
+                (*last_node).links_len[level] = len_left;
+            }
+        }
+        let mut last_node = &mut head;
+        for node in nodes.into_iter() {
+            last_node.next.replace(node);
+            last_node = last_node.next.as_mut().unwrap();
+        }
+        return head;
+    }
+
+    #[test]
+    fn test_make_new_list() {
+        fn test_list_integrity(len: usize) {
+            let list = new_list_for_test(len);
+            let mut node = list.next.as_ref();
+            while let Some(node_inner) = node {
+                let idx = node_inner.value.unwrap_or_else(|| panic!());
+                assert_eq!(node_inner.level, level_for_index(idx));
+                node = node_inner.next.as_ref();
+            }
+
+            for level in 0..levels_required(len) {
+                let mut len_left = len;
+                let mut node = &list;
+                unsafe {
+                    while let Some(next_node) = node.links[level].as_ref() {
+                        len_left -= node.links_len[level];
+                        node = next_node;
+                    }
+                    assert_eq!(len_left, node.links_len[level])
+                }
+            }
+        }
+        test_list_integrity(0);
+        test_list_integrity(1);
+        test_list_integrity(2);
+        test_list_integrity(3);
+        test_list_integrity(10);
+        test_list_integrity(1023);
+        test_list_integrity(1024);
+        test_list_integrity(1025);
     }
 }
