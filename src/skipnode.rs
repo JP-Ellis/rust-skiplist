@@ -806,17 +806,30 @@ impl<T> DoubleEndedIterator for IntoIter<T> {
             !self.last.is_null(),
             "The IntoIter should be empty but IntoIter.last somehow still contains something"
         );
-
-        // SAFETY: we already checked self.last is not null.
-        let new_last = unsafe { (*self.last).prev };
-        let popped_node = if new_last.is_null() {
-            self.first.take().unwrap()
+        let popped_node = if ptr::eq(self.first.as_deref().as_ptr(), self.last) {
+            self.last = ptr::null_mut();
+            self.first.take()?
         } else {
-            // SAFETY: new_last is not null there's no need to fix links at upper levels inside
-            // iterators.
-            unsafe { (*new_last).take_tail().unwrap() }
+            // SAFETY: we checked that self.last points to somewhere and does not alias to self.first
+            let new_last = unsafe { (*self.last).prev };
+            if ptr::eq(self.first.as_deref().as_ptr(), new_last) {
+                // SAFETY: take_tail() is always safe in IntoIter.
+                let popped = unsafe {
+                    self.first
+                        .as_mut()
+                        .and_then(|node| node.take_tail())
+                        .unwrap()
+                };
+                self.last = new_last;
+                popped
+            } else {
+                // SAFETY: we checked new_last points to somewhere and do not alias to self.first.
+                let popped = unsafe { (*new_last).take_tail().unwrap() };
+                self.last = new_last;
+                popped
+            }
         };
-        self.last = new_last;
+
         self.size -= 1;
         popped_node.into_inner()
     }
