@@ -68,8 +68,8 @@ impl<V> SkipNode<V> {
         }
     }
 
-    /// Create a new SkipNode with the given value.  The values of `prev` and
-    /// `next` will all be `None` and have to be adjusted.
+    /// Create a new SkipNode with the given value.
+    /// All pointers default to null.
     pub fn new(value: V, level: usize) -> Self {
         SkipNode {
             value: Some(value),
@@ -92,17 +92,19 @@ impl<V> SkipNode<V> {
     }
 
     pub fn next_ref(&self) -> Option<&Self> {
+        // SAFETY: all links either points to something or is null.
         unsafe { self.links[0].as_ref() }
     }
 
     pub fn next_mut(&mut self) -> Option<&mut Self> {
+        // SAFETY: all links either points to something or is null.
         unsafe { self.links[0].as_mut() }
     }
 
     /// Takes the next node and set next_node.prev as null.
     ///
     /// SAFETY: please make sure no link at level 1 or greater becomes dangling.
-    pub unsafe fn take_next(&mut self) -> Option<Box<Self>> {
+    pub unsafe fn take_tail(&mut self) -> Option<Box<Self>> {
         let next = self.links[0];
         if next.is_null() {
             None
@@ -119,8 +121,8 @@ impl<V> SkipNode<V> {
     /// Return the old node.
     ///
     /// SAFETY: please makes sure all links are fixed.
-    pub unsafe fn replace_next(&mut self, mut new_next: Box<Self>) -> Option<Box<Self>> {
-        let mut old_next = self.take_next();
+    pub unsafe fn replace_tail(&mut self, mut new_next: Box<Self>) -> Option<Box<Self>> {
+        let mut old_next = self.take_tail();
         if let Some(old_next) = old_next.as_mut() {
             old_next.prev = ptr::null_mut();
         }
@@ -132,9 +134,11 @@ impl<V> SkipNode<V> {
     // /////////////////////////////
     // Value Manipulation
     // /////////////////////////////
+    //
+    // Methods that care about values carried by the nodes.
 
     #[must_use]
-    pub fn retain<'a, F>(&'a mut self, mut pred: F) -> usize
+    pub fn retain<F>(&mut self, mut pred: F) -> usize
     where
         F: FnMut(Option<&V>, &V) -> bool,
     {
@@ -145,12 +149,12 @@ impl<V> SkipNode<V> {
             .collect();
         let mut node = self;
         unsafe {
-            while let Some(mut next_node) = node.take_next() {
+            while let Some(mut next_node) = node.take_tail() {
                 if pred(node.value.as_ref(), next_node.value.as_ref().unwrap()) {
                     for x in &mut level_head[0..=next_node.level] {
                         *x = next_node.as_mut() as *mut _;
                     }
-                    node.replace_next(next_node);
+                    node.replace_tail(next_node);
                     node = node.next_mut().unwrap();
                 } else {
                     removed += 1;
@@ -170,8 +174,8 @@ impl<V> SkipNode<V> {
                             head.links_len[level] -= 1;
                         }
                     }
-                    if let Some(new_next) = next_node.take_next() {
-                        node.replace_next(new_next);
+                    if let Some(new_next) = next_node.take_tail() {
+                        node.replace_tail(new_next);
                     }
                 }
             }
@@ -183,15 +187,14 @@ impl<V> SkipNode<V> {
     // Pointer Manipulations
     // /////////////////////////////
     //
-    // Methods here only care about informations on the node, e.g. distance,
-    // never values carried by the node.
+    // Methods that care about the whole node.
     //
 
     /// Distance between current node and the given node at specified level.
     /// If no node is given, then return distance between current node and the
     /// last possible node.
     /// If the node is not reachable on given level, return Err(()).
-    pub fn distance(&self, level: usize, target: Option<&Self>) -> Result<usize, ()> {
+    pub fn distance_at_level(&self, level: usize, target: Option<&Self>) -> Result<usize, ()> {
         let distance = match target {
             Some(target) => {
                 let (dest, distance) = self.advance_while_at_level(level, |current, _| {
@@ -210,7 +213,7 @@ impl<V> SkipNode<V> {
         Ok(distance)
     }
 
-    /// Move at max_distance units.
+    /// Move for max_distance units.
     /// Returns None if it's not possible.
     pub fn advance(&self, max_distance: usize) -> Option<&Self> {
         let level = self.level;
@@ -228,7 +231,7 @@ impl<V> SkipNode<V> {
         }
     }
 
-    /// Move at max_distance units.
+    /// Move for max_distance units.
     /// Returns None if it's not possible.
     pub fn advance_mut(&mut self, max_distance: usize) -> Option<&mut Self> {
         let level = self.level;
@@ -246,20 +249,23 @@ impl<V> SkipNode<V> {
         }
     }
 
+    /// Move to the last node reachable from this node.
     pub fn to_last(&self) -> &Self {
         (0..=self.level).rev().fold(self, |node, level| {
             node.advance_while_at_level(level, |_, _| true).0
         })
     }
 
+    /// Move to the last node reachable from this node.
     pub fn to_last_mut(&mut self) -> &mut Self {
         (0..=self.level).rev().fold(self, |node, level| {
             node.advance_while_at_level_mut(level, |_, _| true).0
         })
     }
 
-    /// Try to move to next nth node at specified level.
+    /// Try to move for the given distance, only using links at the specified level.
     /// If it's impossible, then move as far as possible.
+    ///
     /// Returns a reference to the new node and the distance travelled.
     pub fn advance_at_level(&self, level: usize, mut max_distance: usize) -> (&Self, usize) {
         self.advance_while_at_level(level, move |current_node, _| {
@@ -273,8 +279,9 @@ impl<V> SkipNode<V> {
         })
     }
 
-    /// Try to move to next nth node at specified level.
+    /// Try to move for the given distance, only using links at the specified level.
     /// If it's impossible, then move as far as possible.
+    ///
     /// Returns a mutable reference to the new node and the distance travelled.
     pub fn advance_at_level_mut(
         &mut self,
@@ -292,7 +299,7 @@ impl<V> SkipNode<V> {
         })
     }
 
-    /// As long as the pred is true, move at specified level.
+    /// Keep moving at the specified level as long as pred is true.
     /// pred takes reference to current node and next node.
     pub fn advance_while_at_level(
         &self,
@@ -312,7 +319,7 @@ impl<V> SkipNode<V> {
         }
     }
 
-    /// As long as the pred is true, move at specified level.
+    /// Keep moving at the specified level as long as pred is true.
     /// pred takes reference to current node and next node.
     pub fn advance_while_at_level_mut(
         &mut self,
@@ -356,11 +363,12 @@ impl<V> SkipNode<V> {
 
     /// Move to the next node at given level if the given predicate is true.
     /// The predicate takes reference to the current node and the next node.
-    pub fn next_if_at_level_mut<'a>(
-        &'a mut self,
+    pub fn next_if_at_level_mut(
+        &mut self,
         level: usize,
         predicate: impl FnOnce(&Self, &Self) -> bool,
-    ) -> Result<(&'a mut Self, usize), &'a mut Self> {
+    ) -> Result<(&mut Self, usize), &mut Self> {
+        // SAFETY: all links either points to something or is null.
         let next = unsafe { self.links[level].as_mut() };
         match next {
             Some(next) if predicate(self, next) => Ok((next, self.links_len[level])),
@@ -370,11 +378,12 @@ impl<V> SkipNode<V> {
 
     /// Move to the next node at given level if the given predicate is true.
     /// The predicate takes reference to the current node and the next node.
-    pub fn next_if_at_level<'a>(
-        &'a self,
+    pub fn next_if_at_level(
+        &self,
         level: usize,
         predicate: impl FnOnce(&Self, &Self) -> bool,
-    ) -> Result<(&'a Self, usize), &'a Self> {
+    ) -> Result<(&Self, usize), &Self> {
+        // SAFETY: all links either points to something or is null.
         let next = unsafe { self.links[level].as_mut() };
         match next {
             Some(next) if predicate(self, next) => Ok((next, self.links_len[level])),
@@ -382,39 +391,73 @@ impl<V> SkipNode<V> {
         }
     }
 
-    /// Find the node after distance units, then insert a new node after that node.
-    pub fn insert<'a>(&'a mut self, new_node: Box<Self>, distance: usize) -> Result<(), ()> {
-        let locater = {
-            let mut distance_left = distance;
-            move |node: &'a mut Self, level| {
-                let (dest, distance) = node.advance_at_level_mut(level, distance_left);
-                distance_left -= distance;
-                if level == 0 && distance_left != 0 {
-                    None
-                } else {
-                    Some((dest, distance))
+    /// Insert a node after given distance after the list head.
+    ///
+    /// Requries that there's nothing before the node and the new node can't be at a higher level.
+    ///
+    /// Return the reference to the new node if successful.
+    /// Give back the input node if not succssful.
+    pub fn insert(
+        &mut self,
+        new_node: Box<Self>,
+        distance_to_parent: usize,
+    ) -> Result<&mut Self, Box<Self>> {
+        assert!(self.prev.is_null(), "Only the head may insert nodes!");
+        assert!(
+            self.level >= new_node.level,
+            "You may not insert nodes with level higher than the head!"
+        );
+        // SAFETY: This operation is safe because there's no node before self and it's inserting at
+        // the highest level.
+        let (node, distance_to_new_node) = unsafe {
+            self._insert(self.level, new_node, {
+                let mut distance_left = distance_to_parent;
+                move |node: &mut Self, level| {
+                    let (dest, distance) = node.advance_at_level_mut(level, distance_left);
+                    distance_left -= distance;
+                    if level == 0 && distance_left != 0 {
+                        None
+                    } else {
+                        Some((dest, distance))
+                    }
                 }
-            }
-        };
-        self._insert(self.level, new_node, locater)?;
-        Ok(())
+            })
+        }?;
+        assert_eq!(distance_to_parent + 1, distance_to_new_node);
+        Ok(node)
     }
 
-    /// Find the node after distance units, then remove the node after that node.
-    pub fn remove<'a>(&'a mut self, distance: usize) -> Option<(Box<Self>, usize)> {
-        let locater = {
-            let mut distance_left = distance;
-            move |node: &'a mut Self, level| {
-                let (dest, distance) = node.advance_at_level_mut(level, distance_left);
-                distance_left -= distance;
-                if dest.links[0].is_null() {
-                    None
-                } else {
-                    Some((dest, distance))
+    /// Move for distance units, and remove the node after it.
+    ///
+    /// Requries that there's nothing before the node and the new node can't be at a higher level.
+    ///
+    /// If that node exists, remove that node and retrun it.
+    pub fn remove(&mut self, distance_to_parent: usize) -> Option<Box<Self>> {
+        assert!(self.prev.is_null(), "Only the head may remove nodes!");
+        // SAFETY: This operation is safe because there's no node before self and the head can be
+        // assumed as at highest level.
+        let (node, distance_to_removed) = unsafe {
+            self._remove(self.level, {
+                let mut distance_left = distance_to_parent;
+                move |node: &mut Self, level| {
+                    let (dest, distance) = node.advance_at_level_mut(level, distance_left);
+                    distance_left -= distance;
+                    if dest.links[0].is_null() {
+                        None
+                    } else {
+                        Some((dest, distance))
+                    }
                 }
-            }
+            })?
         };
-        self._remove(self.level, locater)
+        assert_eq!(
+            distance_to_removed,
+            distance_to_parent + 1,
+            "Expected to remove node at {} but somehow the node at {} is removed instead",
+            distance_to_parent + 1,
+            distance_to_removed
+        );
+        Some(node)
     }
 
     /// A helper method for insertion.
@@ -432,38 +475,52 @@ impl<V> SkipNode<V> {
     /// If the insertion succeeds, return a mutable reference to the new node
     /// and the distance between self and the new node.
     /// If the insertion fails, fails return the given node.
-    pub fn _insert<'a, F>(
+    ///
+    /// SAFETY: This function only fixes links at or after `self`,
+    /// and only fixes links at or below current level.
+    pub unsafe fn _insert<'a, F>(
         &'a mut self,
         level: usize,
         mut new_node: Box<Self>,
         mut locater: F,
-    ) -> Result<(&'a mut Self, usize), ()>
+    ) -> Result<(&'a mut Self, usize), Box<Self>>
     where
         F: FnMut(&'a mut Self, usize) -> Option<(&'a mut Self, usize)>,
     {
-        let (prev_node, prev_distance) = locater(self, level).ok_or(())?;
+        // This function first finds the node before the insert position using locater.
+        let (prev_node, prev_distance) = match locater(self, level) {
+            Some(res) => res,
+            None => return Err(new_node),
+        };
         let prev_node_p = prev_node as *mut Self;
-        unsafe {
-            if level == 0 {
-                if let Some(tail) = prev_node.take_next() {
-                    new_node.replace_next(tail);
-                }
-                prev_node.replace_next(new_node);
-                return Ok((prev_node.next_mut().unwrap(), prev_distance + 1));
+        if level != 0 {
+            // If it's not the last level, recursively call itself to insert at lower level.
+            // This call fixes all links below current level.
+            // After this call we proceed to fix links at the current level.
+            let (inserted_node, insert_distance) =
+                prev_node._insert(level - 1, new_node, locater)?;
+            // prev_node._insert() borrows `prev_node`, so we need to create a new reference to it.
+            // SAFETY: It's safe because it can never alias with `inserted_node`.
+            let prev_node = &mut *prev_node_p;
+            // Fix links of prev_node and inserted_node at this level.
+            if level <= inserted_node.level {
+                inserted_node.links[level] = prev_node.links[level];
+                inserted_node.links_len[level] = prev_node.links_len[level] + 1 - insert_distance;
+                prev_node.links[level] = inserted_node as *mut _;
+                prev_node.links_len[level] = insert_distance;
             } else {
-                let (inserted_node, insert_distance) =
-                    prev_node._insert(level - 1, new_node, locater)?;
-                if level <= inserted_node.level {
-                    inserted_node.links[level] = (*prev_node_p).links[level];
-                    inserted_node.links_len[level] =
-                        (*prev_node_p).links_len[level] + 1 - insert_distance;
-                    (*prev_node_p).links[level] = inserted_node as *mut _;
-                    (*prev_node_p).links_len[level] = insert_distance;
-                } else {
-                    (*prev_node_p).links_len[level] += 1;
-                }
-                return Ok((inserted_node, insert_distance + prev_distance));
+                // Already pointing to the correct node; fix length.
+                prev_node.links_len[level] += 1;
             }
+            return Ok((inserted_node, insert_distance + prev_distance));
+        } else {
+            // {take|replace}_tail takes care of links at level 0.
+            // SAFETY: The caller takes care of links at other levels.
+            if let Some(tail) = prev_node.take_tail() {
+                new_node.replace_tail(tail);
+            }
+            prev_node.replace_tail(new_node);
+            return Ok((prev_node.next_mut().unwrap(), prev_distance + 1));
         }
     }
 
@@ -473,48 +530,58 @@ impl<V> SkipNode<V> {
     /// then returns the node after which the node target node may exist
     /// and the distance it moved from the given reference.
     ///
-    /// If such position does not exist any where in the list,
-    /// it returns None.
+    /// If the locater is certain that such node does not exist at any level,
+    /// the locater should return None.
     /// At level 0 it either returns the target's parent or None.
     ///
-    /// It may be stateful and use the information from previous
+    /// The locater may be stateful and use the information from previous
     /// calls to determine the result.
     /// In short, it may remember how far it has already travelled.
     ///
-    /// Returns None if failed.
+    /// Returns None if failed to remove a node.
     /// Otherwise it returns the removed node and
-    /// the distance it travelled at current level, for fixing up.
-    pub fn _remove<'a, F>(&'a mut self, level: usize, mut locater: F) -> Option<(Box<Self>, usize)>
+    /// the distance between the current node and the removed node.
+    ///
+    /// SAFETY: This function only fixes links at or after `self`,
+    /// and only fixes links at or below current level.
+    pub unsafe fn _remove<'a, F>(
+        &'a mut self,
+        level: usize,
+        mut locater: F,
+    ) -> Option<(Box<Self>, usize)>
     where
         F: FnMut(&'a mut Self, usize) -> Option<(&'a mut Self, usize)>,
     {
+        // This function first finds the node to remove using locater.
         let (prev_node, prev_distance) = locater(self, level)?;
         let prev_node_p = prev_node as *mut Self;
-        if level == 0 {
-            // SAFETY: All links will be fixed later.
-            let removed_node = unsafe {
-                let mut removed_node = prev_node.take_next()?;
-                if let Some(new_next) = removed_node.take_next() {
-                    prev_node.replace_next(new_next);
-                }
-                removed_node
-            };
-            if let Some(next_node) = prev_node.next_mut() {
-                next_node.prev = prev_node_p;
-            }
-            return Some((removed_node, prev_distance + 1));
-        } else {
+        if level != 0 {
+            // If it's not the last level, recursively call itself to remove at lower level.
+            // This call fixes all links below current level.
+            // After this call we proceed to fix links at the current level.
             let (removed_node, distance) = prev_node._remove(level - 1, locater)?;
-            unsafe {
-                if level <= removed_node.level {
-                    (*prev_node_p).links[level] = removed_node.links[level];
-                    assert_eq!((*prev_node_p).links_len[level], distance);
-                    (*prev_node_p).links_len[level] = distance + removed_node.links_len[level] - 1;
-                } else {
-                    (*prev_node_p).links_len[level] -= 1;
-                }
+            // Rust consider prev_node as borrowed until we return for some reason.
+            // We create a new mutable reference to that.
+            // It's safe because nothing aliases it.
+            let prev_node = &mut *prev_node_p;
+            // Fix links of prev_node at this level.
+            if level <= removed_node.level {
+                prev_node.links[level] = removed_node.links[level];
+                assert_eq!(prev_node.links_len[level], distance);
+                prev_node.links_len[level] = distance + removed_node.links_len[level] - 1;
+            } else {
+                // Already pointing to the correct node; fix length.
+                prev_node.links_len[level] -= 1;
             }
             return Some((removed_node, prev_distance + distance));
+        } else {
+            // {take|replace}_tail takes care of links at level 0.
+            // SAFETY: The caller takes care of links at other levels.
+            let mut removed_node = prev_node.take_tail()?;
+            if let Some(new_tail) = removed_node.take_tail() {
+                prev_node.replace_tail(new_tail);
+            }
+            return Some((removed_node, prev_distance + 1));
         }
     }
 }
@@ -524,9 +591,9 @@ impl<V> Drop for SkipNode<V> {
         // SAFETY: all nodes are going to be dropped; its okay that its links (except those at
         // level 0) become dangling.
         unsafe {
-            let mut node = self.take_next();
+            let mut node = self.take_tail();
             while let Some(mut node_inner) = node {
-                node = node_inner.take_next();
+                node = node_inner.take_tail();
             }
         }
     }
@@ -591,6 +658,7 @@ impl<'a, T> DoubleEndedIterator for Iter<'a, T> {
             self.first = None;
             self.last = None;
         } else {
+            // SAFETY: The iterator is not empty yet.
             unsafe {
                 self.last = last_node.prev.as_ref();
             }
@@ -616,11 +684,13 @@ impl<'a, T> Iterator for IterMut<'a, T> {
             self.first = None;
             self.last = ptr::null_mut();
         } else {
-            // SAFETY: This line is required since both self.first and return value mutably borrows
-            // from current_node. It's safe because current_node.links[0] either points to the next
-            // node or none.
+            // calling current_node.next_mut() borrows it, so we need to use a pointer.
+            let p = current_node.next_mut().unwrap() as *mut SkipNode<T>;
+            // SAFETY: p.as_mut() is safe because it points to a valid object.
+            // There's no aliasing issue since nobody else holds a reference to current_node
+            // until this function returns, and the returned reference does not points to a node.
             unsafe {
-                self.first = current_node.links[0].as_mut();
+                self.first = p.as_mut();
             }
         }
         self.size -= 1;
@@ -637,26 +707,30 @@ impl<'a, T> DoubleEndedIterator for IterMut<'a, T> {
         if self.last.is_null() {
             return None;
         }
+        // There can be at most one mutable reference to the first node.
+        // We need to take it from self.first before doing anything,
+        // including simple comparison.
         let first = self.first.take().unwrap();
-        let popped_node = unsafe {
-            if first as *mut _ == self.last {
-                self.first = None;
-                self.last = ptr::null_mut();
-                first
-            } else if first as *mut _ == (*self.last).prev {
-                // self.first aliasing popped.prev.
-                // I'm not sure if it's necessarity,
-                // But lets try not to access (*popped.prev) to avoid UB.
-                self.last = first as *mut _;
-                let popped = first.next_mut().unwrap();
-                self.first = self.last.as_mut();
-                popped
-            } else {
-                self.first.replace(first);
-                let new_last = (*self.last).prev;
-                self.last = new_last;
-                (*new_last).next_mut().unwrap()
-            }
+        // SAFETY: we already checked self.last points to something.
+        let before_last = unsafe { (*self.last).prev };
+        let popped_node = if first as *mut _ == self.last {
+            self.first = None;
+            self.last = ptr::null_mut();
+            first
+        } else if first as *mut _ == before_last {
+            // self.first aliasing before_last
+            // I'm not sure if it's necessarity,
+            // But lets try not to access (*before_last) to avoid UB.
+            self.last = first as *mut _;
+            let popped = first.next_mut().unwrap();
+            // SAFETY: we already checked self.last points to something.
+            self.first = unsafe { self.last.as_mut() };
+            popped
+        } else {
+            self.first.replace(first); // we took self.first, put it back.
+            self.last = before_last;
+            // SAFETY: before_last.next_mut() points to the old self.last.
+            unsafe { (*before_last).next_mut().unwrap() }
         };
         self.size -= 1;
         popped_node.value.as_mut()
@@ -676,15 +750,10 @@ impl<T> Iterator for IntoIter<T> {
     fn next(&mut self) -> Option<T> {
         let mut popped_node = self.first.take()?;
         self.size -= 1;
-        unsafe {
-            self.first = if popped_node.links[0].is_null() {
-                self.last = ptr::null_mut();
-                None
-            } else {
-                let next_node = Box::from_raw(popped_node.links[0]);
-                popped_node.links[0] = ptr::null_mut();
-                Some(next_node)
-            }
+        // SAFETY: no need to fix links at upper levels inside iterators.
+        self.first = unsafe { popped_node.take_tail() };
+        if self.first.is_none() {
+            self.last = ptr::null_mut();
         }
         popped_node.into_inner()
     }
@@ -699,21 +768,23 @@ impl<T> DoubleEndedIterator for IntoIter<T> {
         if self.first.is_none() {
             return None;
         }
-        assert!(!self.last.is_null());
-        unsafe {
-            let new_last = (*self.last).prev;
-            let popped_node = if new_last.is_null() {
-                self.first.take().unwrap()
-            } else {
-                let popped_node = (*new_last).links[0];
-                (*new_last).links[0] = ptr::null_mut();
-                let popped_node = Box::from_raw(popped_node);
-                popped_node
-            };
-            self.last = new_last;
-            self.size -= 1;
-            popped_node.into_inner()
-        }
+        assert!(
+            !self.last.is_null(),
+            "The IntoIter should be empty but IntoIter.last somehow still contains something"
+        );
+
+        // SAFETY: we already checked self.last is not null.
+        let new_last = unsafe { (*self.last).prev };
+        let popped_node = if new_last.is_null() {
+            self.first.take().unwrap()
+        } else {
+            // SAFETY: new_last is not null there's no need to fix links at upper levels inside
+            // iterators.
+            unsafe { (*new_last).take_tail().unwrap() }
+        };
+        self.last = new_last;
+        self.size -= 1;
+        popped_node.into_inner()
     }
 }
 
@@ -824,5 +895,24 @@ mod test {
         test_list_integrity(1023);
         test_list_integrity(1024);
         test_list_integrity(1025);
+    }
+
+    #[test]
+    fn test_insert() {
+        let mut list = new_list_for_test(50);
+        list.insert(Box::new(SkipNode::new(100,0)), 25).unwrap();
+        list.insert(Box::new(SkipNode::new(101,1)), 25).unwrap();
+        list.insert(Box::new(SkipNode::new(102,2)), 25).unwrap();
+        list.insert(Box::new(SkipNode::new(103,3)), 25).unwrap();
+        list.insert(Box::new(SkipNode::new(104,4)), 25).unwrap();
+    }
+
+    #[test]
+    fn test_distance() {
+        let list = new_list_for_test(50);
+        for i in 0..=list.level {
+            list.distance_at_level(i, None);
+        }
+        
     }
 }
