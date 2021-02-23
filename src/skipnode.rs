@@ -250,14 +250,14 @@ impl<V> SkipNode<V> {
     }
 
     /// Move to the last node reachable from this node.
-    pub fn to_last(&self) -> &Self {
+    pub fn last(&self) -> &Self {
         (0..=self.level).rev().fold(self, |node, level| {
             node.advance_while_at_level(level, |_, _| true).0
         })
     }
 
     /// Move to the last node reachable from this node.
-    pub fn to_last_mut(&mut self) -> &mut Self {
+    pub fn last_mut(&mut self) -> &mut Self {
         (0..=self.level).rev().fold(self, |node, level| {
             node.advance_while_at_level_mut(level, |_, _| true).0
         })
@@ -272,9 +272,9 @@ impl<V> SkipNode<V> {
             let travelled = current_node.links_len[level];
             if travelled <= max_distance {
                 max_distance -= travelled;
-                return true;
+                true
             } else {
-                return false;
+                false
             }
         })
     }
@@ -292,9 +292,9 @@ impl<V> SkipNode<V> {
             let travelled = current_node.links_len[level];
             if travelled <= max_distance {
                 max_distance -= travelled;
-                return true;
+                true
             } else {
-                return false;
+                false
             }
         })
     }
@@ -512,7 +512,7 @@ impl<V> SkipNode<V> {
                 // Already pointing to the correct node; fix length.
                 prev_node.links_len[level] += 1;
             }
-            return Ok((inserted_node, insert_distance + prev_distance));
+            Ok((inserted_node, insert_distance + prev_distance))
         } else {
             // {take|replace}_tail takes care of links at level 0.
             // SAFETY: The caller takes care of links at other levels.
@@ -520,7 +520,7 @@ impl<V> SkipNode<V> {
                 new_node.replace_tail(tail);
             }
             prev_node.replace_tail(new_node);
-            return Ok((prev_node.next_mut().unwrap(), prev_distance + 1));
+            Ok((prev_node.next_mut().unwrap(), prev_distance + 1))
         }
     }
 
@@ -573,7 +573,7 @@ impl<V> SkipNode<V> {
                 // Already pointing to the correct node; fix length.
                 prev_node.links_len[level] -= 1;
             }
-            return Some((removed_node, prev_distance + distance));
+            Some((removed_node, prev_distance + distance))
         } else {
             // {take|replace}_tail takes care of links at level 0.
             // SAFETY: The caller takes care of links at other levels.
@@ -581,7 +581,7 @@ impl<V> SkipNode<V> {
             if let Some(new_tail) = removed_node.take_tail() {
                 prev_node.replace_tail(new_tail);
             }
-            return Some((removed_node, prev_distance + 1));
+            Some((removed_node, prev_distance + 1))
         }
     }
 }
@@ -616,6 +616,38 @@ where
     }
 }
 
+// ///////////////////////////////////////////////
+// Helper Traits
+// ///////////////////////////////////////////////
+
+// Converting Option<&T> to *_ T becomes more and more annoying...
+trait AsPtr<T> {
+    fn as_ptr(&self) -> *const T;
+}
+
+trait AsPtrMut<T> {
+    fn as_ptr_mut(&mut self) -> *mut T;
+}
+
+impl<T> AsPtr<T> for Option<&T> {
+    fn as_ptr(&self) -> *const T {
+        self.map_or(ptr::null(), |inner_ref| inner_ref)
+    }
+}
+
+impl<T> AsPtr<T> for Option<&mut T> {
+    fn as_ptr(&self) -> *const T {
+        self.as_ref().map_or(ptr::null(), |inner: &&mut T| &**inner)
+    }
+}
+
+impl<T> AsPtrMut<T> for Option<&mut T> {
+    fn as_ptr_mut(&mut self) -> *mut T {
+        self.as_mut()
+            .map_or(ptr::null_mut(), |inner: &mut &mut T| *inner)
+    }
+}
+
 // /////////////////////////////////
 // Iterators
 // /////////////////////////////////
@@ -636,7 +668,7 @@ impl<'a, T> Iterator for Iter<'a, T> {
 
     fn next(&mut self) -> Option<Self::Item> {
         let current_node = self.first?;
-        if current_node as *const _ == self.last.unwrap() as *const _ {
+        if ptr::eq(current_node, self.last.as_ptr()) {
             self.first = None;
             self.last = None;
         } else {
@@ -654,7 +686,8 @@ impl<'a, T> Iterator for Iter<'a, T> {
 impl<'a, T> DoubleEndedIterator for Iter<'a, T> {
     fn next_back(&mut self) -> Option<Self::Item> {
         let last_node = self.last?;
-        if self.first.unwrap() as *const _ == last_node as *const _ {
+
+        if ptr::eq(self.first.as_ptr(), last_node) {
             self.first = None;
             self.last = None;
         } else {
@@ -680,7 +713,7 @@ impl<'a, T> Iterator for IterMut<'a, T> {
 
     fn next(&mut self) -> Option<Self::Item> {
         let current_node = self.first.take()?;
-        if current_node as *mut _ == self.last {
+        if ptr::eq(current_node, self.last) {
             self.first = None;
             self.last = ptr::null_mut();
         } else {
@@ -765,6 +798,7 @@ impl<T> Iterator for IntoIter<T> {
 
 impl<T> DoubleEndedIterator for IntoIter<T> {
     fn next_back(&mut self) -> Option<T> {
+        #[allow(clippy::question_mark)]
         if self.first.is_none() {
             return None;
         }
@@ -900,11 +934,11 @@ mod test {
     #[test]
     fn test_insert() {
         let mut list = new_list_for_test(50);
-        list.insert(Box::new(SkipNode::new(100,0)), 25).unwrap();
-        list.insert(Box::new(SkipNode::new(101,1)), 25).unwrap();
-        list.insert(Box::new(SkipNode::new(102,2)), 25).unwrap();
-        list.insert(Box::new(SkipNode::new(103,3)), 25).unwrap();
-        list.insert(Box::new(SkipNode::new(104,4)), 25).unwrap();
+        list.insert(Box::new(SkipNode::new(100, 0)), 25).unwrap();
+        list.insert(Box::new(SkipNode::new(101, 1)), 25).unwrap();
+        list.insert(Box::new(SkipNode::new(102, 2)), 25).unwrap();
+        list.insert(Box::new(SkipNode::new(103, 3)), 25).unwrap();
+        list.insert(Box::new(SkipNode::new(104, 4)), 25).unwrap();
     }
 
     #[test]
@@ -913,6 +947,5 @@ mod test {
         for i in 0..=list.level {
             list.distance_at_level(i, None);
         }
-        
     }
 }
