@@ -150,7 +150,7 @@ impl<T> SkipList<T> {
         let new_node = Box::new(SkipNode::new(value, self.level_generator.random()));
         self.head
             .insert(new_node, index)
-            .expect("No insertion position is found!");
+            .unwrap_or_else(|_| panic!("No insertion position is found!"));
     }
 
     /// Insert the element into the front of the skiplist.
@@ -392,8 +392,7 @@ impl<T> SkipList<T> {
         if index >= self.len() {
             panic!("Index out of bounds.");
         } else {
-            let (node, distance_from_head) = self.head.remove(index).unwrap();
-            assert_eq!(distance_from_head - 1, index);
+            let node = self.head.remove(index).unwrap();
             self.len -= 1;
             node.into_inner().unwrap()
         }
@@ -442,7 +441,7 @@ impl<T> SkipList<T> {
         let size = self.len();
         // SAFETY: self.head is no longer used; it's okay that its links become dangling.
         let first = unsafe {
-            self.head.take_next().map(|mut node| {
+            self.head.take_tail().map(|mut node| {
                 node.prev = ptr::null_mut();
                 node
             })
@@ -646,7 +645,7 @@ impl<T> SkipList<T> {
                 assert_eq!(node.level + 1, node.links.len());
                 assert_eq!(node.level + 1, node.links_len.len());
                 if let Some(prev_node) = node.prev.as_ref() {
-                    assert_eq!((*prev_node).links[0] as *const _, node as *const _);
+                    assert!(std::ptr::eq(prev_node.links[0], node));
                 }
                 current_node = node.next_ref();
             }
@@ -658,7 +657,8 @@ impl<T> SkipList<T> {
                     length_sum += node.links_len[lvl];
                     assert_eq!(
                         node.links_len[lvl],
-                        node.distance(lvl - 1, node.links[lvl].as_ref()).unwrap(),
+                        node.distance_at_level(lvl - 1, node.links[lvl].as_ref())
+                            .unwrap(),
                         "Node gives different distance at level {} and level {}!",
                         lvl,
                         lvl - 1
@@ -980,20 +980,20 @@ mod tests {
     #[test]
     fn push_front() {
         let mut sl = SkipList::new();
-        for i in (1..1000).rev() {
+        for i in (1..100).rev() {
             sl.push_front(i);
         }
 
-        assert!(sl.into_iter().eq(1..1000));
+        assert!(sl.into_iter().eq(1..100));
     }
 
     #[test]
     fn push_back() {
         let mut sl = SkipList::new();
-        for i in 1..1000 {
+        for i in 1..100 {
             sl.push_back(i);
         }
-        assert!(sl.into_iter().eq(1..1000));
+        assert!(sl.into_iter().eq(1..100));
     }
 
     #[test]
@@ -1003,7 +1003,7 @@ mod tests {
         let mut rng = rand::thread_rng();
         let mut sl: SkipList<usize> = SkipList::new();
         let mut vec: Vec<usize> = Vec::new();
-        for i in 0..1000 {
+        for i in 0..100 {
             let idx = rng.sample(Uniform::new_inclusive(0, i));
             sl.insert(i, idx);
             vec.insert(idx, i);
