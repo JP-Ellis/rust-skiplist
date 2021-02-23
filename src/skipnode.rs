@@ -898,41 +898,13 @@ mod test {
         return head;
     }
 
-    #[test]
-    fn test_make_new_list() {
-        fn test_list_integrity(len: usize) {
-            let list = new_list_for_test(len);
-            unsafe {
-                let mut node = list.links[0].as_ref();
-                while let Some(node_inner) = node {
-                    let idx = node_inner.value.unwrap_or_else(|| panic!());
-                    assert_eq!(node_inner.level, level_for_index(idx));
-                    node = node_inner.links[0].as_ref();
-                }
-
-                for level in 0..levels_required(len) {
-                    let mut len_left = len;
-                    let mut node = &list;
-                    while let Some(next_node) = node.links[level].as_ref() {
-                        len_left -= node.links_len[level];
-                        node = next_node;
-                    }
-                    assert_eq!(len_left, node.links_len[level])
-                }
-            }
-        }
-        test_list_integrity(0);
-        test_list_integrity(1);
-        test_list_integrity(2);
-        test_list_integrity(3);
-        test_list_integrity(10);
-        test_list_integrity(1023);
-        test_list_integrity(1024);
-        test_list_integrity(1025);
-    }
+    /////////////////////////////////////////////////////////
+    // Those tests are supposed to be run using Miri to detect UB.
+    // The size of those test are limited since Miri doesn't run very fast.
+    /////////////////////////////////////////////////////////
 
     #[test]
-    fn test_insert() {
+    fn miri_test_insert() {
         let mut list = new_list_for_test(50);
         list.insert(Box::new(SkipNode::new(100, 0)), 25).unwrap();
         list.insert(Box::new(SkipNode::new(101, 1)), 25).unwrap();
@@ -942,10 +914,72 @@ mod test {
     }
 
     #[test]
-    fn test_distance() {
+    fn miri_test_remove() {
+        let mut list = new_list_for_test(50);
+        for i in (0..50).rev() {
+            list.remove(i).unwrap();
+        }
+    }
+
+    #[test]
+    fn miri_test_distance() {
         let list = new_list_for_test(50);
         for i in 0..=list.level {
-            list.distance_at_level(i, None);
+            let _ = list.distance_at_level(i, None);
         }
+    }
+
+    #[test]
+    fn miri_test_iter() {
+        let list = new_list_for_test(50);
+        let first = list.next_ref();
+        let last = Some(list.last());
+        let mut iter = Iter {
+            first,
+            last,
+            size: 50,
+        };
+        for _ in 0..25 {
+            let _ = iter.next();
+            let _ = iter.next_back();
+        }
+    }
+
+    #[test]
+    fn miri_test_iter_mut() {
+        let mut list = new_list_for_test(50);
+        let mut first = list.next_mut();
+        let last = first.as_mut().unwrap().last_mut() as *mut SkipNode<usize>;
+        let mut iter = IterMut {
+            first,
+            last,
+            size: 50,
+        };
+        for _ in 0..25 {
+            let _ = iter.next();
+            let _ = iter.next_back();
+        }
+    }
+
+    #[test]
+    fn miri_test_into_iter() {
+        let mut list = new_list_for_test(50);
+        let mut first = unsafe {Some(list.take_tail().unwrap())};
+        let last = first.as_mut().unwrap().last_mut() as *mut SkipNode<usize>;
+        let mut iter = IntoIter{
+            first,
+            last,
+            size: 50,
+        };
+        for _ in 0..25 {
+            let _ = iter.next();
+            let _ = iter.next_back();
+        }
+    }
+
+    #[test]
+    fn miri_test_retain() {
+        let mut list = new_list_for_test(50);
+        let _ = list.retain(|_, val| val % 2 == 0);
     }
 }
