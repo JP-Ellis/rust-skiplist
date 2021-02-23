@@ -434,7 +434,7 @@ impl<T> SkipList<T> {
     /// ```
     #[allow(clippy::should_implement_trait)]
     pub fn into_iter(mut self) -> IntoIter<T> {
-        let mut last = self.head.to_last_mut() as *mut SkipNode<T>;
+        let mut last = self.head.last_mut() as *mut SkipNode<T>;
         if last == &mut *self.head {
             last = ptr::null_mut();
         }
@@ -463,10 +463,10 @@ impl<T> SkipList<T> {
     /// }
     /// ```
     pub fn iter(&self) -> Iter<T> {
-        if self.len() > 0 {
+        if !self.is_empty() {
             Iter {
                 first: self.get_index(0),
-                last: Some(self.head.to_last()),
+                last: Some(self.head.last()),
                 size: self.len(),
             }
         } else {
@@ -492,9 +492,9 @@ impl<T> SkipList<T> {
     /// }
     /// ```
     pub fn iter_mut(&mut self) -> IterMut<T> {
-        if self.len() > 0 {
+        if !self.is_empty() {
             let size = self.len();
-            let last = self.head.to_last_mut() as *mut _;
+            let last = self.head.last_mut() as *mut _;
             IterMut {
                 first: self.get_index_mut(0),
                 last,
