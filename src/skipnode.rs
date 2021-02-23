@@ -931,50 +931,54 @@ mod test {
 
     #[test]
     fn miri_test_iter() {
-        let list = new_list_for_test(50);
-        let first = list.next_ref();
-        let last = Some(list.last());
-        let mut iter = Iter {
-            first,
-            last,
-            size: 50,
-        };
-        for _ in 0..25 {
-            let _ = iter.next();
-            let _ = iter.next_back();
+        fn test_iter(size: usize) {
+            let list = new_list_for_test(size);
+            let first = list.next_ref();
+            let last = Some(list.last());
+            let mut iter = Iter { first, last, size };
+            for _ in 0..(size + 1) / 2 {
+                let _ = iter.next();
+                let _ = iter.next_back();
+            }
+            assert!(iter.next().is_none());
         }
+        test_iter(9);
+        test_iter(10);
     }
 
     #[test]
     fn miri_test_iter_mut() {
-        let mut list = new_list_for_test(50);
-        let mut first = list.next_mut();
-        let last = first.as_mut().unwrap().last_mut() as *mut SkipNode<usize>;
-        let mut iter = IterMut {
-            first,
-            last,
-            size: 50,
-        };
-        for _ in 0..25 {
-            let _ = iter.next();
-            let _ = iter.next_back();
+        fn test_iter_mut(size: usize) {
+            let mut list = new_list_for_test(size);
+            let mut first = list.next_mut();
+            let last = first.as_mut().unwrap().last_mut() as *mut SkipNode<usize>;
+            let mut iter = IterMut { first, last, size };
+            for _ in 0..(size + 1) / 2 {
+                let _ = iter.next();
+                let _ = iter.next_back();
+            }
+            assert!(iter.next().is_none());
         }
+        test_iter_mut(9);
+        test_iter_mut(10);
     }
 
     #[test]
     fn miri_test_into_iter() {
-        let mut list = new_list_for_test(50);
-        let mut first = unsafe {Some(list.take_tail().unwrap())};
-        let last = first.as_mut().unwrap().last_mut() as *mut SkipNode<usize>;
-        let mut iter = IntoIter{
-            first,
-            last,
-            size: 50,
-        };
-        for _ in 0..25 {
-            let _ = iter.next();
-            let _ = iter.next_back();
+        fn test_into_iter(size: usize) {
+            let mut list = new_list_for_test(size);
+            let mut first = unsafe { Some(list.take_tail().unwrap()) };
+            let last = first.as_mut().unwrap().last_mut() as *mut SkipNode<usize>;
+            let mut iter = IntoIter { first, last, size };
+            for _ in 0..(size + 1) / 2 {
+                let _ = iter.next();
+                let _ = iter.next_back();
+            }
+            assert!(iter.next().is_none());
         }
+
+        test_into_iter(9);
+        test_into_iter(10);
     }
 
     #[test]
