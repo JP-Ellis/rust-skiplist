@@ -144,23 +144,28 @@ impl<V> SkipNode<V> {
     {
         assert!(self.is_head());
         let mut removed = 0;
-        let mut level_head: Vec<_> = iter::repeat(self as *mut Self)
-            .take(self.level + 1)
-            .collect();
-        let mut node = self;
+        // Aliasing mutable references is undefined behavior.
+        // However if you create a pointer from a mutable reference,
+        // it essentially borrows from it, we are free to alias it until
+        // the next time we use that reference.
+        let mut current_node = self as *mut Self;
+        let mut level_head: Vec<_> = iter::repeat(current_node).take(self.level + 1).collect();
         unsafe {
-            while let Some(mut next_node) = node.take_tail() {
-                if pred(node.value.as_ref(), next_node.value.as_ref().unwrap()) {
+            while let Some(mut next_node) = (*current_node).take_tail() {
+                if pred(
+                    (*current_node).value.as_ref(),
+                    next_node.value.as_ref().unwrap(),
+                ) {
                     for x in &mut level_head[0..=next_node.level] {
                         *x = next_node.as_mut() as *mut _;
                     }
-                    node.replace_tail(next_node);
-                    node = node.next_mut().unwrap();
+                    (*current_node).replace_tail(next_node);
+                    current_node = (*current_node).next_mut().unwrap();
                 } else {
                     removed += 1;
                     for (level, head) in level_head
                         .iter_mut()
-                        .map(|&mut x| x.as_mut().unwrap())
+                        .map(|&mut node_p| &mut *node_p)
                         .enumerate()
                         .skip(1)
                     // should use take_next()/replace_next() to manage 0th level.
@@ -175,7 +180,7 @@ impl<V> SkipNode<V> {
                         }
                     }
                     if let Some(new_next) = next_node.take_tail() {
-                        node.replace_tail(new_next);
+                        (*current_node).replace_tail(new_next);
                     }
                 }
             }
