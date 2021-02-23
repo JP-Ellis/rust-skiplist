@@ -744,29 +744,26 @@ impl<'a, T> DoubleEndedIterator for IterMut<'a, T> {
         // We need to take it from self.first before doing anything,
         // including simple comparison.
         let first = self.first.take().unwrap();
-        // SAFETY: we already checked self.last points to something.
-        let before_last = unsafe { (*self.last).prev };
-        let popped_node = if first as *mut _ == self.last {
-            self.first = None;
+        let popped = if ptr::eq(first, self.last) {
             self.last = ptr::null_mut();
             first
-        } else if first as *mut _ == before_last {
-            // self.first aliasing before_last
-            // I'm not sure if it's necessarity,
-            // But lets try not to access (*before_last) to avoid UB.
-            self.last = first as *mut _;
-            let popped = first.next_mut().unwrap();
-            // SAFETY: we already checked self.last points to something.
-            self.first = unsafe { self.last.as_mut() };
-            popped
         } else {
-            self.first.replace(first); // we took self.first, put it back.
-            self.last = before_last;
-            // SAFETY: before_last.next_mut() points to the old self.last.
-            unsafe { (*before_last).next_mut().unwrap() }
+            // SAFETY: self.last isn't null and doesn't alias first
+            let new_last = unsafe { (*self.last).prev };
+            if ptr::eq(first, new_last) {
+                self.last = new_last;
+                let popped_p = first.next_mut().unwrap() as *mut SkipNode<T>;
+                self.first.replace(first);
+                unsafe { &mut (*popped_p) }
+            } else {
+                self.first.replace(first);
+                let last = self.last;
+                self.last = new_last;
+                unsafe { &mut *last }
+            }
         };
         self.size -= 1;
-        popped_node.value.as_mut()
+        popped.value.as_mut()
     }
 }
 
