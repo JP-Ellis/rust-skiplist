@@ -621,44 +621,44 @@ impl<T> SkipList<T> {
     /// Checks the integrity of the skiplist.
     #[allow(dead_code)]
     fn check(&self) {
-        unsafe {
-            let head = &self.head;
-            assert!(head.is_head() && head.value.is_none() && head.prev.is_null());
+        let head = self.head.as_ref();
+        assert!(head.is_head() && head.value.is_none() && head.prev.is_null());
 
-            // Check SkipNode.prev points to the correct node.
+        let mut current_node = Some(self.head.as_ref());
+        while let Some(node) = current_node {
+            // Check the integrity of node.
+            assert_eq!(node.level + 1, node.links.len());
+            assert_eq!(node.level + 1, node.links_len.len());
+            if !node.is_head() {
+                assert!(node.value.is_some());
+            }
+            // Check link at level 0
+            if let Some(next_node) = node.next_ref() {
+                assert!(ptr::eq(next_node.prev, node));
+            }
+            current_node = node.next_ref();
+        }
+
+        for lvl in 1..self.level_generator.total() {
+            let mut length_sum = 0;
             let mut current_node = Some(self.head.as_ref());
             while let Some(node) = current_node {
-                assert_eq!(node.level + 1, node.links.len());
-                assert_eq!(node.level + 1, node.links_len.len());
-                if let Some(prev_node) = node.prev.as_ref() {
-                    assert!(std::ptr::eq(prev_node.links[0], node));
-                }
-                current_node = node.next_ref();
+                length_sum += node.links_len[lvl];
+                // SAFETY: Assuming the invariant is not broken, all links should either points to a
+                // valid arrivable node or none.
+                let next_node = unsafe { node.links[lvl].as_ref() };
+                assert_eq!(
+                    node.links_len[lvl],
+                    node.distance_at_level(lvl - 1, next_node).unwrap(),
+                    "Node gives different distance at level {} and level {}!",
+                    lvl,
+                    lvl - 1
+                );
+
+                current_node = next_node;
             }
 
-            for lvl in 1..self.level_generator.total() {
-                let mut length_sum = 0;
-                let mut node = self.head.as_ref();
-                loop {
-                    length_sum += node.links_len[lvl];
-                    assert_eq!(
-                        node.links_len[lvl],
-                        node.distance_at_level(lvl - 1, node.links[lvl].as_ref())
-                            .unwrap(),
-                        "Node gives different distance at level {} and level {}!",
-                        lvl,
-                        lvl - 1
-                    );
-
-                    if let Some(next) = node.links[lvl].as_ref() {
-                        assert!(next.value.is_some());
-                        node = next;
-                    } else {
-                        break;
-                    }
-                }
-                assert_eq!(length_sum, self.len());
-            }
+            assert_eq!(length_sum, self.len());
         }
     }
 
