@@ -411,24 +411,8 @@ impl<V> SkipNode<V> {
             self.level >= new_node.level,
             "You may not insert nodes with level higher than the head!"
         );
-        // SAFETY: This operation is safe because there's no node before self and it's inserting at
-        // the highest level.
-        let (node, distance_to_new_node) = unsafe {
-            self._insert(self.level, new_node, {
-                let mut distance_left = distance_to_parent;
-                move |node: &mut Self, level| {
-                    let (dest, distance) = node.advance_at_level_mut(level, distance_left);
-                    distance_left -= distance;
-                    if level == 0 && distance_left != 0 {
-                        None
-                    } else {
-                        Some((dest, distance))
-                    }
-                }
-            })
-        }?;
-        assert_eq!(distance_to_parent + 1, distance_to_new_node);
-        Ok(node)
+        let inserter = IndexInserter::new(distance_to_parent, new_node);
+        inserter.act(self)
     }
 
     /// Move for distance units, and remove the node after it.
@@ -438,155 +422,8 @@ impl<V> SkipNode<V> {
     /// If that node exists, remove that node and retrun it.
     pub fn remove_at(&mut self, distance_to_parent: usize) -> Option<Box<Self>> {
         assert!(self.prev.is_null(), "Only the head may remove nodes!");
-        // SAFETY: This operation is safe because there's no node before self and the head can be
-        // assumed as at highest level.
-        let (node, distance_to_removed) = unsafe {
-            self._remove(self.level, {
-                let mut distance_left = distance_to_parent;
-                move |node: &mut Self, level| {
-                    let (dest, distance) = node.advance_at_level_mut(level, distance_left);
-                    distance_left -= distance;
-                    if dest.links[0].is_null() {
-                        None
-                    } else {
-                        Some((dest, distance))
-                    }
-                }
-            })?
-        };
-        assert_eq!(
-            distance_to_removed,
-            distance_to_parent + 1,
-            "Expected to remove node at {} but somehow the node at {} is removed instead",
-            distance_to_parent + 1,
-            distance_to_removed
-        );
-        Some(node)
-    }
-
-    /// A helper method for insertion.
-    ///
-    /// Locater finds the node before the target position in a level,
-    /// as well as the distance from input node to that node.
-    /// If it fails to find such position, return None.
-    ///
-    /// At level 0 it either returns the target's parent or None.
-    ///
-    /// It may be stateful and use the information from previous
-    /// calls to determine the result.
-    /// In short, it may remember how far it has already travelled.
-    ///
-    /// If the insertion succeeds, return a mutable reference to the new node
-    /// and the distance between self and the new node.
-    /// If the insertion fails, fails return the given node.
-    ///
-    /// SAFETY: This function only fixes links at or after `self`,
-    /// and only fixes links at or below current level.
-    pub unsafe fn _insert<'a, F>(
-        &'a mut self,
-        level: usize,
-        mut new_node: Box<Self>,
-        mut locater: F,
-    ) -> Result<(&'a mut Self, usize), Box<Self>>
-    where
-        F: FnMut(&'a mut Self, usize) -> Option<(&'a mut Self, usize)>,
-    {
-        // This function first finds the node before the insert position using locater.
-        let (level_head, distance_this_level) = match locater(self, level) {
-            Some(res) => res,
-            None => return Err(new_node),
-        };
-        let level_head_p = level_head as *mut Self;
-        if level != 0 {
-            // If it's not the last level, recursively call itself to insert at lower level.
-            // This call fixes all links below current level.
-            // After this call we proceed to fix links at the current level.
-            let (inserted_node, distance_from_head) =
-                level_head._insert(level - 1, new_node, locater)?;
-            // prev_node._insert() borrows `prev_node`, so we need to create a new reference to it.
-            // SAFETY: It's safe because it can never alias with `inserted_node`.
-            let level_head = &mut *level_head_p;
-            // Fix links of prev_node and inserted_node at this level.
-            if level <= inserted_node.level {
-                inserted_node.links[level] = level_head.links[level];
-                inserted_node.links_len[level] = level_head.links_len[level] + 1 - distance_from_head;
-                level_head.links[level] = inserted_node as *mut _;
-                level_head.links_len[level] = distance_from_head;
-            } else {
-                // Already pointing to the correct node; fix length.
-                level_head.links_len[level] += 1;
-            }
-            Ok((inserted_node, distance_from_head + distance_this_level))
-        } else {
-            // {take|replace}_tail takes care of links at level 0.
-            // SAFETY: The caller takes care of links at other levels.
-            if let Some(tail) = level_head.take_tail() {
-                new_node.replace_tail(tail);
-            }
-            level_head.replace_tail(new_node);
-            Ok((level_head.next_mut().unwrap(), distance_this_level + 1))
-        }
-    }
-
-    /// A helper method for removal.
-    ///
-    /// Locater takes a mutable reference and a level,
-    /// then returns the node after which the node target node may exist
-    /// and the distance it moved from the given reference.
-    ///
-    /// If the locater is certain that such node does not exist at any level,
-    /// the locater should return None.
-    /// At level 0 it either returns the target's parent or None.
-    ///
-    /// The locater may be stateful and use the information from previous
-    /// calls to determine the result.
-    /// In short, it may remember how far it has already travelled.
-    ///
-    /// Returns None if failed to remove a node.
-    /// Otherwise it returns the removed node and
-    /// the distance between the current node and the removed node.
-    ///
-    /// SAFETY: This function only fixes links at or after `self`,
-    /// and only fixes links at or below current level.
-    pub unsafe fn _remove<'a, F>(
-        &'a mut self,
-        level: usize,
-        mut locater: F,
-    ) -> Option<(Box<Self>, usize)>
-    where
-        F: FnMut(&'a mut Self, usize) -> Option<(&'a mut Self, usize)>,
-    {
-        // This function first finds the node to remove using locater.
-        let (level_head, distance_this_level) = locater(self, level)?;
-        let level_head_p = level_head as *mut Self;
-        if level != 0 {
-            // If it's not the last level, recursively call itself to remove at lower level.
-            // This call fixes all links below current level.
-            // After this call we proceed to fix links at the current level.
-            let (removed_node, distance_from_head) = level_head._remove(level - 1, locater)?;
-            // Rust consider prev_node as borrowed until we return for some reason.
-            // We create a new mutable reference to that.
-            // It's safe because nothing aliases it.
-            let level_head = &mut *level_head_p;
-            // Fix links of prev_node at this level.
-            if level <= removed_node.level {
-                level_head.links[level] = removed_node.links[level];
-                assert_eq!(level_head.links_len[level], distance_from_head);
-                level_head.links_len[level] = distance_from_head + removed_node.links_len[level] - 1;
-            } else {
-                // Already pointing to the correct node; fix length.
-                level_head.links_len[level] -= 1;
-            }
-            Some((removed_node, distance_this_level + distance_from_head))
-        } else {
-            // {take|replace}_tail takes care of links at level 0.
-            // SAFETY: The caller takes care of links at other levels.
-            let mut removed_node = level_head.take_tail()?;
-            if let Some(new_tail) = removed_node.take_tail() {
-                level_head.replace_tail(new_tail);
-            }
-            Some((removed_node, distance_this_level + 1))
-        }
+        let remover = IndexRemover::new(distance_to_parent);
+        remover.act(self).ok()
     }
 
     /// Check the integrity of the list.
@@ -663,6 +500,229 @@ where
             write!(f, "{}", v)
         } else {
             Ok(())
+        }
+    }
+}
+
+// ///////////////////////////////////////////////
+// Actions
+// ///////////////////////////////////////////////
+
+/// A SeekListAction seeks a node on the list and do something, e.g. insertion, deletion,
+/// replacement, on it.
+///
+/// This trait provides some common operations that you need to implement for such actions,
+/// and a default implementation of list traversal logic.
+///
+/// See one of the types that implements this trait for examples.
+pub trait SkipListAction<'a, T>: Sized {
+    /// Return type when this action succeeds.
+    type Ok;
+    /// Return type when this action fails.
+    type Err;
+    fn fail(&mut self) -> Self::Err;
+    /// Find the target node at the given level.
+    /// Return some node and distance travelled.
+    /// Return None when target node does not exist anywhere in the list.
+    ///
+    /// Target node may not exist at a higher level.
+    /// You should return some node before the target node in this case.
+    /// At level 0 it always finds the target or return None.
+    fn seek(
+        &mut self,
+        node: &'a mut SkipNode<T>,
+        level: usize,
+    ) -> Option<(&'a mut SkipNode<T>, usize)>;
+
+    /// Do something on the node.
+    /// SAFETY: If `Self::Ok` is a reference, it shall not alias with any node that needs fixup.
+    unsafe fn act_on_node(&mut self, node: &'a mut SkipNode<T>) -> Result<Self::Ok, Self::Err>;
+
+    /// Usually SkipListAction breaks links between nodes.
+    /// This method should fix that up.
+    ///
+    /// `level_head` is the node whose links may needs to be fixed.
+    /// `action_result` is a mutable reference to the return value of act_no_node (if it succeeds).
+    /// `distance_to_target` is distance from `level_head` to `target`.
+    fn fixup(
+        &mut self,
+        level: usize,
+        level_head: &'a mut SkipNode<T>,
+        distance_to_target: usize,
+        action_result: &mut Self::Ok,
+    );
+
+    /// List traversal logic.
+    /// It's unlikely one will need to override this.
+    /// Override act() instead.
+    unsafe fn _traverse(
+        &mut self,
+        node: &'a mut SkipNode<T>,
+        level: usize,
+    ) -> Result<(Self::Ok, usize), Self::Err> {
+        let (level_head, distance_this_level) = match self.seek(node, level) {
+            Some(res) => res,
+            None => return Err(self.fail()),
+        };
+        let level_head_p = level_head as *mut SkipNode<T>;
+        if level == 0 {
+            let mut res = self.act_on_node(level_head)?;
+            self.fixup(0, &mut *level_head_p, 0, &mut res);
+            Ok((res, distance_this_level))
+        } else {
+            let (mut res, distance_after_head) = self._traverse(level_head, level - 1)?;
+            let level_head = &mut *level_head_p;
+            self.fixup(level, level_head, distance_after_head, &mut res);
+            Ok((res, distance_this_level + distance_after_head))
+        }
+    }
+
+    /// Perform the action.
+    fn act(mut self, list_head: &'a mut SkipNode<T>) -> Result<Self::Ok, Self::Err> {
+        let (res, _distance) = unsafe { self._traverse(list_head, list_head.level)? };
+        Ok(res)
+    }
+}
+
+struct DistanceSeeker(usize);
+
+impl DistanceSeeker {
+    fn seek<'a, V>(
+        &mut self,
+        node: &'a mut SkipNode<V>,
+        level: usize,
+    ) -> Option<(&'a mut SkipNode<V>, usize)> {
+        let (node, distance) = node.advance_at_level_mut(level, self.0);
+        if level == 0 && distance != self.0 {
+            None
+        } else {
+            self.0 -= distance;
+            Some((node, distance))
+        }
+    }
+}
+
+struct IndexInserter<V> {
+    seeker: DistanceSeeker,
+    new_node: Option<Box<SkipNode<V>>>,
+}
+
+impl<V> IndexInserter<V> {
+    fn new(distance: usize, new_node: Box<SkipNode<V>>) -> Self {
+        IndexInserter {
+            seeker: DistanceSeeker(distance),
+            new_node: Some(new_node),
+        }
+    }
+}
+
+impl<'a, V: 'a> SkipListAction<'a, V> for IndexInserter<V> {
+    type Ok = &'a mut SkipNode<V>;
+
+    type Err = Box<SkipNode<V>>;
+
+    fn fail(&mut self) -> Self::Err {
+        self.new_node.take().unwrap()
+    }
+
+    // Finds the parent of the new node.
+    fn seek(
+        &mut self,
+        node: &'a mut SkipNode<V>,
+        level: usize,
+    ) -> Option<(&'a mut SkipNode<V>, usize)> {
+        self.seeker.seek(node, level)
+    }
+
+    // SAFETY: This returns a new node, which should never alias with any old nodes.
+    unsafe fn act_on_node(&mut self, node: &'a mut SkipNode<V>) -> Result<Self::Ok, Self::Err> {
+        let mut new_node = self.new_node.take().unwrap();
+        if let Some(tail) = node.take_tail() {
+            new_node.replace_tail(tail);
+        }
+        node.replace_tail(new_node);
+        Ok(node.next_mut().unwrap())
+    }
+
+    fn fixup(
+        &mut self,
+        level: usize,
+        level_head: &'a mut SkipNode<V>,
+        distance_to_parent: usize,
+        new_node: &mut Self::Ok,
+    ) {
+        if level == 0 {
+            return;
+        }
+        if level <= new_node.level {
+            new_node.links[level] = level_head.links[level] as *mut _;
+            level_head.links[level] = *new_node as *mut _;
+            let old_len = level_head.links_len[level];
+            // SkipListAction defines the distance by the node which you mutate.
+            // It's different from the old _insert implementation.
+            new_node.links_len[level] = old_len - distance_to_parent;
+            level_head.links_len[level] = distance_to_parent + 1;
+        } else {
+            level_head.links_len[level] += 1;
+        }
+    }
+}
+
+struct IndexRemover {
+    seeker: DistanceSeeker,
+}
+
+impl IndexRemover {
+    fn new(distance: usize) -> Self {
+        IndexRemover {
+            seeker: DistanceSeeker(distance),
+        }
+    }
+}
+
+impl<'a, V> SkipListAction<'a, V> for IndexRemover {
+    type Ok = Box<SkipNode<V>>;
+
+    type Err = ();
+
+    #[allow(clippy::unused_unit)]
+    fn fail(&mut self) -> Self::Err {
+        ()
+    }
+
+    fn seek(
+        &mut self,
+        node: &'a mut SkipNode<V>,
+        level: usize,
+    ) -> Option<(&'a mut SkipNode<V>, usize)> {
+        self.seeker.seek(node, level)
+    }
+
+    // SAFETY: Self::Ok is not a reference type
+    unsafe fn act_on_node(&mut self, node: &'a mut SkipNode<V>) -> Result<Self::Ok, Self::Err> {
+        let mut tail = node.take_tail().ok_or(())?;
+        if let Some(new_tail) = tail.take_tail() {
+            node.replace_tail(new_tail);
+        }
+        Ok(tail)
+    }
+
+    fn fixup(
+        &mut self,
+        level: usize,
+        level_head: &'a mut SkipNode<V>,
+        _distance_to_parent: usize,
+        removed_node: &mut Self::Ok,
+    ) {
+        if level == 0 {
+            return;
+        }
+        if level <= removed_node.level {
+            level_head.links[level] = removed_node.links[level];
+            level_head.links_len[level] += removed_node.links_len[level];
+            level_head.links_len[level] -= 1;
+        } else {
+            level_head.links_len[level] -= 1;
         }
     }
 }
