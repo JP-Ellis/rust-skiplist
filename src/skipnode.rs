@@ -492,39 +492,39 @@ impl<V> SkipNode<V> {
         F: FnMut(&'a mut Self, usize) -> Option<(&'a mut Self, usize)>,
     {
         // This function first finds the node before the insert position using locater.
-        let (prev_node, prev_distance) = match locater(self, level) {
+        let (level_head, distance_this_level) = match locater(self, level) {
             Some(res) => res,
             None => return Err(new_node),
         };
-        let prev_node_p = prev_node as *mut Self;
+        let level_head_p = level_head as *mut Self;
         if level != 0 {
             // If it's not the last level, recursively call itself to insert at lower level.
             // This call fixes all links below current level.
             // After this call we proceed to fix links at the current level.
-            let (inserted_node, insert_distance) =
-                prev_node._insert(level - 1, new_node, locater)?;
+            let (inserted_node, distance_from_head) =
+                level_head._insert(level - 1, new_node, locater)?;
             // prev_node._insert() borrows `prev_node`, so we need to create a new reference to it.
             // SAFETY: It's safe because it can never alias with `inserted_node`.
-            let prev_node = &mut *prev_node_p;
+            let level_head = &mut *level_head_p;
             // Fix links of prev_node and inserted_node at this level.
             if level <= inserted_node.level {
-                inserted_node.links[level] = prev_node.links[level];
-                inserted_node.links_len[level] = prev_node.links_len[level] + 1 - insert_distance;
-                prev_node.links[level] = inserted_node as *mut _;
-                prev_node.links_len[level] = insert_distance;
+                inserted_node.links[level] = level_head.links[level];
+                inserted_node.links_len[level] = level_head.links_len[level] + 1 - distance_from_head;
+                level_head.links[level] = inserted_node as *mut _;
+                level_head.links_len[level] = distance_from_head;
             } else {
                 // Already pointing to the correct node; fix length.
-                prev_node.links_len[level] += 1;
+                level_head.links_len[level] += 1;
             }
-            Ok((inserted_node, insert_distance + prev_distance))
+            Ok((inserted_node, distance_from_head + distance_this_level))
         } else {
             // {take|replace}_tail takes care of links at level 0.
             // SAFETY: The caller takes care of links at other levels.
-            if let Some(tail) = prev_node.take_tail() {
+            if let Some(tail) = level_head.take_tail() {
                 new_node.replace_tail(tail);
             }
-            prev_node.replace_tail(new_node);
-            Ok((prev_node.next_mut().unwrap(), prev_distance + 1))
+            level_head.replace_tail(new_node);
+            Ok((level_head.next_mut().unwrap(), distance_this_level + 1))
         }
     }
 
@@ -557,35 +557,35 @@ impl<V> SkipNode<V> {
         F: FnMut(&'a mut Self, usize) -> Option<(&'a mut Self, usize)>,
     {
         // This function first finds the node to remove using locater.
-        let (prev_node, prev_distance) = locater(self, level)?;
-        let prev_node_p = prev_node as *mut Self;
+        let (level_head, distance_this_level) = locater(self, level)?;
+        let level_head_p = level_head as *mut Self;
         if level != 0 {
             // If it's not the last level, recursively call itself to remove at lower level.
             // This call fixes all links below current level.
             // After this call we proceed to fix links at the current level.
-            let (removed_node, distance) = prev_node._remove(level - 1, locater)?;
+            let (removed_node, distance_from_head) = level_head._remove(level - 1, locater)?;
             // Rust consider prev_node as borrowed until we return for some reason.
             // We create a new mutable reference to that.
             // It's safe because nothing aliases it.
-            let prev_node = &mut *prev_node_p;
+            let level_head = &mut *level_head_p;
             // Fix links of prev_node at this level.
             if level <= removed_node.level {
-                prev_node.links[level] = removed_node.links[level];
-                assert_eq!(prev_node.links_len[level], distance);
-                prev_node.links_len[level] = distance + removed_node.links_len[level] - 1;
+                level_head.links[level] = removed_node.links[level];
+                assert_eq!(level_head.links_len[level], distance_from_head);
+                level_head.links_len[level] = distance_from_head + removed_node.links_len[level] - 1;
             } else {
                 // Already pointing to the correct node; fix length.
-                prev_node.links_len[level] -= 1;
+                level_head.links_len[level] -= 1;
             }
-            Some((removed_node, prev_distance + distance))
+            Some((removed_node, distance_this_level + distance_from_head))
         } else {
             // {take|replace}_tail takes care of links at level 0.
             // SAFETY: The caller takes care of links at other levels.
-            let mut removed_node = prev_node.take_tail()?;
+            let mut removed_node = level_head.take_tail()?;
             if let Some(new_tail) = removed_node.take_tail() {
-                prev_node.replace_tail(new_tail);
+                level_head.replace_tail(new_tail);
             }
-            Some((removed_node, prev_distance + 1))
+            Some((removed_node, distance_this_level + 1))
         }
     }
 
