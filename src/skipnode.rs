@@ -588,6 +588,53 @@ impl<V> SkipNode<V> {
             Some((removed_node, prev_distance + 1))
         }
     }
+
+    /// Check the integrity of the list.
+    ///
+    pub fn check(&self) {
+        assert!(self.is_head());
+        assert!(self.value.is_none());
+        let mut current_node = Some(self);
+        let mut len = 0;
+        while let Some(node) = current_node {
+            // Check the integrity of node.
+            assert_eq!(node.level + 1, node.links.len());
+            assert_eq!(node.level + 1, node.links_len.len());
+            if !node.is_head() {
+                assert!(node.value.is_some());
+            }
+            // Check link at level 0
+            if let Some(next_node) = node.next_ref() {
+                len += 1;
+                assert!(ptr::eq(next_node.prev, node));
+            }
+            current_node = node.next_ref();
+        }
+
+        let len = len; // no mutation
+
+        for lvl in 1..=self.level {
+            let mut length_sum = 0;
+            let mut current_node = Some(self);
+            while let Some(node) = current_node {
+                length_sum += node.links_len[lvl];
+                // SAFETY: Assuming the invariant is not broken, all links should either points to a
+                // valid arrivable node or none.
+                let next_node = unsafe { node.links[lvl].as_ref() };
+                assert_eq!(
+                    node.links_len[lvl],
+                    node.distance_at_level(lvl - 1, next_node).unwrap(),
+                    "Node gives different distance at level {} and level {}!",
+                    lvl,
+                    lvl - 1
+                );
+
+                current_node = next_node;
+            }
+
+            assert_eq!(length_sum, len);
+        }
+    }
 }
 
 impl<V> Drop for SkipNode<V> {
