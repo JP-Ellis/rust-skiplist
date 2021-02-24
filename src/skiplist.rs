@@ -435,7 +435,7 @@ impl<T> SkipList<T> {
     #[allow(clippy::should_implement_trait)]
     pub fn into_iter(mut self) -> IntoIter<T> {
         let mut last = self.head.last_mut() as *mut SkipNode<T>;
-        if last == &mut *self.head {
+        if ptr::eq(last, self.head.as_ref()) {
             last = ptr::null_mut();
         }
         let size = self.len();
