@@ -440,12 +440,7 @@ impl<T> SkipList<T> {
         }
         let size = self.len();
         // SAFETY: self.head is no longer used; it's okay that its links become dangling.
-        let first = unsafe {
-            self.head.take_tail().map(|mut node| {
-                node.prev = ptr::null_mut();
-                node
-            })
-        };
+        let first = unsafe { self.head.take_tail() };
         IntoIter { first, last, size }
     }
 
@@ -593,16 +588,7 @@ where
     /// assert!(!skiplist.contains(&15));
     /// ```
     pub fn contains(&self, value: &T) -> bool {
-        let mut node = self.head.as_ref();
-        while let Some(next) = node.next_ref() {
-            if node.value.as_ref() == Some(value) {
-                return true;
-            } else {
-                node = next;
-            }
-        }
-        // Check the last node
-        node.value.as_ref() == Some(value)
+        self.iter().any(|val| val.eq(value))
     }
 
     /// Removes all consecutive repeated elements in the skiplist.
