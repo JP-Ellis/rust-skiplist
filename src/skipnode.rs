@@ -402,7 +402,7 @@ impl<V> SkipNode<V> {
     ///
     /// Return the reference to the new node if successful.
     /// Give back the input node if not succssful.
-    pub fn insert(
+    pub fn insert_at(
         &mut self,
         new_node: Box<Self>,
         distance_to_parent: usize,
@@ -437,7 +437,7 @@ impl<V> SkipNode<V> {
     /// Requries that there's nothing before the node and the new node can't be at a higher level.
     ///
     /// If that node exists, remove that node and retrun it.
-    pub fn remove(&mut self, distance_to_parent: usize) -> Option<Box<Self>> {
+    pub fn remove_at(&mut self, distance_to_parent: usize) -> Option<Box<Self>> {
         assert!(self.prev.is_null(), "Only the head may remove nodes!");
         // SAFETY: This operation is safe because there's no node before self and the head can be
         // assumed as at highest level.
@@ -921,18 +921,18 @@ mod test {
     #[test]
     fn miri_test_insert() {
         let mut list = new_list_for_test(50);
-        list.insert(Box::new(SkipNode::new(100, 0)), 25).unwrap();
-        list.insert(Box::new(SkipNode::new(101, 1)), 25).unwrap();
-        list.insert(Box::new(SkipNode::new(102, 2)), 25).unwrap();
-        list.insert(Box::new(SkipNode::new(103, 3)), 25).unwrap();
-        list.insert(Box::new(SkipNode::new(104, 4)), 25).unwrap();
+        list.insert_at(Box::new(SkipNode::new(100, 0)), 25).unwrap();
+        list.insert_at(Box::new(SkipNode::new(101, 1)), 25).unwrap();
+        list.insert_at(Box::new(SkipNode::new(102, 2)), 25).unwrap();
+        list.insert_at(Box::new(SkipNode::new(103, 3)), 25).unwrap();
+        list.insert_at(Box::new(SkipNode::new(104, 4)), 25).unwrap();
     }
 
     #[test]
     fn miri_test_remove() {
         let mut list = new_list_for_test(50);
         for i in (0..50).rev() {
-            list.remove(i).unwrap();
+            list.remove_at(i).unwrap();
         }
     }
 

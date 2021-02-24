@@ -149,7 +149,7 @@ impl<T> SkipList<T> {
         self.len += 1;
         let new_node = Box::new(SkipNode::new(value, self.level_generator.random()));
         self.head
-            .insert(new_node, index)
+            .insert_at(new_node, index)
             .unwrap_or_else(|_| panic!("No insertion position is found!"));
     }
 
@@ -392,7 +392,7 @@ impl<T> SkipList<T> {
         if index >= self.len() {
             panic!("Index out of bounds.");
         } else {
-            let node = self.head.remove(index).unwrap();
+            let node = self.head.remove_at(index).unwrap();
             self.len -= 1;
             node.into_inner().unwrap()
         }
