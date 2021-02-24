@@ -1031,46 +1031,7 @@ impl<K, V> SkipMap<K, V> {
     /// Checks the integrity of the skipmap.
     #[allow(dead_code)]
     fn check(&self) {
-        unsafe {
-            let mut node: *const SkipNode<K, V> = mem::transmute_copy(&self.head);
-            assert!((*node).is_head() == (*node).key.is_none());
-            assert!((*node).key.is_none() == (*node).value.is_none());
-            assert!((*node).value.is_none() == (*node).prev.is_none());
-
-            let mut length_sum;
-            for lvl in 0..self.level_generator.total() {
-                length_sum = 0;
-                node = mem::transmute_copy(&self.head);
-
-                loop {
-                    length_sum += (*node).links_len[lvl];
-                    assert_eq!((*node).level + 1, (*node).links.len());
-                    assert_eq!((*node).level + 1, (*node).links_len.len());
-                    assert_eq!(
-                        (*node).links_len[lvl],
-                        self.link_length(node as *mut SkipNode<K, V>, (*node).links[lvl], lvl)
-                            .unwrap()
-                    );
-
-                    if lvl == 0 {
-                        assert!((*node).next.is_some() == (*node).links[lvl].is_some());
-
-                        if let Some(prev) = (*node).prev {
-                            assert_eq!((*prev).links[lvl], Some(node as *mut SkipNode<K, V>));
-                            assert_eq!(node, mem::transmute_copy((*prev).next.as_ref().unwrap()));
-                        }
-                    }
-
-                    if let Some(next) = (*node).links[lvl] {
-                        assert!((*next).key.is_some());
-                        node = next;
-                    } else {
-                        break;
-                    }
-                }
-                assert_eq!(length_sum, self.len());
-            }
-        }
+        self.head.check()
     }
 
     /// In order to find the number of nodes between two given nodes (or the
