@@ -202,10 +202,9 @@ impl<V> SkipNode<V> {
     pub fn distance_at_level(&self, level: usize, target: Option<&Self>) -> Result<usize, ()> {
         let distance = match target {
             Some(target) => {
-                let (dest, distance) = self.advance_while_at_level(level, |current, _| {
-                    current as *const _ != target as *const _
-                });
-                if dest as *const _ != target as *const _ {
+                let (dest, distance) =
+                    self.advance_while_at_level(level, |current, _| !ptr::eq(current, target));
+                if !ptr::eq(dest, target) {
                     return Err(());
                 }
                 distance
