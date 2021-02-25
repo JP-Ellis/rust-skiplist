@@ -5,6 +5,7 @@ use crate::level_generator::{GeometricalLevelGenerator, LevelGenerator};
 use crate::skipnode::{self, IntoIter};
 use std::{
     borrow::Borrow, cmp, cmp::Ordering, default, fmt, hash, hash::Hash, iter, mem, ops, ops::Bound,
+    ptr,
 };
 
 type SkipNode<K, V> = skipnode::SkipNode<(K, V)>;
@@ -20,6 +21,14 @@ impl<K, V> SkipNode<K, V> {
 
     fn value_mut(&mut self) -> Option<&mut V> {
         self.item.as_mut().map(|item| &mut item.1)
+    }
+
+    fn item_ref(&self) -> Option<(&K, &V)> {
+        self.item.as_ref().map(|item| (&item.0, &item.1))
+    }
+
+    fn item_mut(&mut self) -> Option<(&K, &mut V)> {
+        self.item.as_mut().map(|item| (&item.0, &mut item.1))
     }
 }
 
@@ -184,7 +193,7 @@ impl<K, V> SkipMap<K, V> {
     /// ```
     #[inline]
     pub fn front(&self) -> Option<(&K, &V)> {
-        todo!()
+        self.get_index(0).and_then(|node| node.item_ref())
     }
 
     /// Provides a mutable reference to the front element, or `None` if the
@@ -206,8 +215,8 @@ impl<K, V> SkipMap<K, V> {
     /// assert_eq!(skipmap.front_mut(), Some((&1, &mut "Hello")));
     /// ```
     #[inline]
-    pub fn front_mut(&self) -> Option<(&K, &mut V)> {
-        todo!()
+    pub fn front_mut(&mut self) -> Option<(&K, &mut V)> {
+        self.get_index_mut(0).and_then(|node| node.item_mut())
     }
 
     /// Provides a reference to the back element, or `None` if the skipmap is
@@ -227,7 +236,7 @@ impl<K, V> SkipMap<K, V> {
     /// ```
     #[inline]
     pub fn back(&self) -> Option<(&K, &V)> {
-        todo!()
+        self.head.last().item_ref()
     }
 
     /// Provides a reference to the back element, or `None` if the skipmap is
@@ -250,7 +259,7 @@ impl<K, V> SkipMap<K, V> {
     /// ```
     #[inline]
     pub fn back_mut(&mut self) -> Option<(&K, &mut V)> {
-        todo!()
+        self.head.last_mut().item_mut()
     }
 
     /// Provides a reference to the element at the given index, or `None` if the
@@ -273,7 +282,7 @@ impl<K, V> SkipMap<K, V> {
         K: Borrow<Q>,
         Q: Ord,
     {
-        todo!()
+        self.find_key(key).and_then(|node| node.value_ref())
     }
 
     /// Provides a reference to the element at the given index, or `None` if the
@@ -297,12 +306,12 @@ impl<K, V> SkipMap<K, V> {
     /// assert_eq!(skipmap.get(&0), Some(&100));
     /// ```
     #[inline]
-    pub fn get_mut<Q: ?Sized>(&self, key: &Q) -> Option<&mut V>
+    pub fn get_mut<Q: ?Sized>(&mut self, key: &Q) -> Option<&mut V>
     where
         K: Borrow<Q>,
         Q: Ord,
     {
-        todo!()
+        self.find_key_mut(key).and_then(|node| node.value_mut())
     }
 
     /// Removes the first element and returns it, or `None` if the sequence is
@@ -373,7 +382,7 @@ impl<K, V> SkipMap<K, V> {
         K: Borrow<Q>,
         Q: Ord,
     {
-        todo!()
+        self.find_key(key).is_some()
     }
 
     /// Removes and returns an element with the same value or None if there are
@@ -414,7 +423,13 @@ impl<K, V> SkipMap<K, V> {
     /// assert_eq!(skipmap.remove_index(4), (5, 5));
     /// ```
     pub fn remove_index(&mut self, index: usize) -> (K, V) {
-        todo!()
+        if index >= self.len() {
+            panic!("Index out of bounds.");
+        } else {
+            let node = self.head.remove_at(index).unwrap();
+            self.len -= 1;
+            node.into_inner().unwrap()
+        }
     }
 
     /// Get an owning iterator over the entries of the skipmap.
@@ -431,8 +446,15 @@ impl<K, V> SkipMap<K, V> {
     /// }
     /// ```
     #[allow(clippy::should_implement_trait)]
-    pub fn into_iter(self) -> IntoIter<(K, V)> {
-        todo!()
+    pub fn into_iter(mut self) -> IntoIter<(K, V)> {
+        let mut last = self.head.last_mut() as *mut SkipNode<K, V>;
+        if ptr::eq(last, self.head.as_ref()) {
+            last = ptr::null_mut();
+        }
+        let size = self.len();
+        // SAFETY: self.head is no longer used; it's okay that its links become dangling.
+        let first = unsafe { self.head.take_tail() };
+        IntoIter { first, last, size }
     }
 
     /// Creates an iterator over the entries of the skipmap.
@@ -449,7 +471,20 @@ impl<K, V> SkipMap<K, V> {
     /// }
     /// ```
     pub fn iter(&self) -> Iter<K, V> {
-        todo!()
+        let iter = if !self.is_empty() {
+            skipnode::Iter {
+                first: self.get_index(0),
+                last: Some(self.head.last()),
+                size: self.len(),
+            }
+        } else {
+            skipnode::Iter {
+                first: None,
+                last: None,
+                size: 0,
+            }
+        };
+        Iter(iter)
     }
 
     /// Creates an mutable iterator over the entries of the skipmap.
@@ -468,7 +503,22 @@ impl<K, V> SkipMap<K, V> {
     /// }
     /// ```
     pub fn iter_mut(&mut self) -> IterMut<K, V> {
-        todo!()
+        let iter_mut = if !self.is_empty() {
+            let size = self.len();
+            let last = self.head.last_mut() as *mut _;
+            skipnode::IterMut {
+                first: self.get_index_mut(0),
+                last,
+                size,
+            }
+        } else {
+            skipnode::IterMut {
+                first: None,
+                last: ptr::null_mut(),
+                size: 0,
+            }
+        };
+        IterMut(iter_mut)
     }
 
     /// Creates an iterator over the keys of the skipmap.
@@ -485,7 +535,7 @@ impl<K, V> SkipMap<K, V> {
     /// }
     /// ```
     pub fn keys(&self) -> Keys<K, V> {
-        todo!()
+        Keys(self.iter())
     }
 
     /// Creates an iterator over the values of the skipmap.
@@ -502,7 +552,7 @@ impl<K, V> SkipMap<K, V> {
     /// }
     /// ```
     pub fn values(&self) -> Values<K, V> {
-        todo!()
+        Values(self.iter())
     }
 
     /// Constructs a double-ended iterator over a sub-range of elements in the
@@ -544,57 +594,58 @@ impl<K, V> SkipMap<K, V> {
         self.head.check()
     }
 
-    /// In order to find the number of nodes between two given nodes (or the
-    /// node and the tail), we can count the link lengths at the level below
-    /// (assuming that is correct).  For example, if we have:
-    /// ```text
-    /// n   : [0] -?-------------------> [4]
-    /// n-1 : [0] -1-> [1] -3-> [3] -2-> [4]
-    /// ```
-    /// Then on level `n`, we know the length will be `1+3+2 = 6`.
-    ///
-    /// The `lvl` option specifies the level at which we desire to calculate the
-    /// length and thus assumes that `lvl-1` is correct.  `lvl=0` is always
-    /// guaranteed to be correct if all the `next[0]` links are in order since
-    /// at level 0, all links lengths are 1.
-    ///
-    /// If the end node is not encountered, Err(false) is returned.
-    fn link_length(
-        &self,
-        start: *mut SkipNode<K, V>,
-        end: Option<*mut SkipNode<K, V>>,
-        lvl: usize,
-    ) -> Result<usize, bool> {
-        todo!()
-    }
-
-    /// Returns the last node of the skipmap.
-    fn get_last(&self) -> *const SkipNode<K, V> {
-        todo!()
-    }
-
-    /// Returns the last node whose value is less than or equal the one
-    /// specified.  If there are multiple nodes with the desired value, one of
-    /// them at random will be returned.
-    ///
-    /// If the skipmap is empty or if the value being searched for is smaller
-    /// than all the values contained in the skipmap, the head node will be
-    /// returned.
-    fn find_key<Q: ?Sized>(&self, key: &Q) -> *const SkipNode<K, V>
+    /// Find the reference to the node equal to the given key.
+    fn find_key<Q: ?Sized>(&self, key: &Q) -> Option<&SkipNode<K, V>>
     where
         K: Borrow<Q>,
         Q: Ord,
     {
-        todo!()
+        let level = self.level_generator.total();
+        let last_le = (0..level).rev().fold(self.head.as_ref(), |node, level| {
+            let (node, _) = node.advance_while_at_level(level, |_, next_node| {
+                let next_key = next_node.key_ref().unwrap();
+                next_key.borrow() <= key
+            });
+            node
+        });
+        let node_key = last_le.key_ref()?;
+        if node_key.borrow() == key {
+            Some(last_le)
+        } else {
+            None
+        }
     }
 
-    /// Gets a pointer to the node with the given index.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the index given is out of bounds.
-    fn get_index(&self, index: usize) -> *const SkipNode<K, V> {
-        todo!()
+    /// Find the mutable reference to the node equal to the given key.
+    fn find_key_mut<Q: ?Sized>(&mut self, key: &Q) -> Option<&mut SkipNode<K, V>>
+    where
+        K: Borrow<Q>,
+        Q: Ord,
+    {
+        let level = self.level_generator.total();
+        let last_le = (0..level).rev().fold(self.head.as_mut(), |node, level| {
+            let (node, _) = node.advance_while_at_level_mut(level, |_, next_node| {
+                let next_key = next_node.key_ref().unwrap();
+                next_key.borrow() <= key
+            });
+            node
+        });
+        let node_key = last_le.key_ref()?;
+        if node_key.borrow() == key {
+            Some(last_le)
+        } else {
+            None
+        }
+    }
+
+    /// Gets a reference to the node with the given index.
+    fn get_index(&self, index: usize) -> Option<&SkipNode<K, V>> {
+        self.head.advance(index + 1)
+    }
+
+    /// Gets a mutable reference to the node with the given index.
+    fn get_index_mut(&mut self, index: usize) -> Option<&mut SkipNode<K, V>> {
+        self.head.advance_mut(index + 1)
     }
 }
 
@@ -760,17 +811,17 @@ impl<'a, K, V> ops::Index<usize> for SkipMap<K, V> {
     type Output = V;
 
     fn index(&self, index: usize) -> &V {
-        unsafe { (*self.get_index(index)).value_ref().unwrap() }
+        self.get_index(index)
+            .and_then(|node| node.value_ref())
+            .expect("Index out of bounds")
     }
 }
 
 impl<'a, K, V> ops::IndexMut<usize> for SkipMap<K, V> {
     fn index_mut(&mut self, index: usize) -> &mut V {
-        unsafe {
-            (*(self.get_index(index) as *mut SkipNode<K, V>))
-                .value_mut()
-                .unwrap()
-        }
+        self.get_index_mut(index)
+            .and_then(|node| node.value_mut())
+            .expect("Index out of bounds")
     }
 }
 
@@ -868,13 +919,16 @@ pub struct Iter<'a, K: 'a, V: 'a>(skipnode::Iter<'a, (K, V)>);
 impl<'a, K: 'a, V: 'a> Iterator for Iter<'a, K, V> {
     type Item = (&'a K, &'a V);
     fn next(&mut self) -> Option<Self::Item> {
-        todo!()
+        self.0.next().map(|x| (&x.0, &x.1))
+    }
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.0.size_hint()
     }
 }
 
 impl<'a, K: 'a, V: 'a> DoubleEndedIterator for Iter<'a, K, V> {
     fn next_back(&mut self) -> Option<Self::Item> {
-        todo!()
+        self.0.next_back().map(|x| (&x.0, &x.1))
     }
 }
 
@@ -883,13 +937,16 @@ pub struct IterMut<'a, K: 'a, V: 'a>(skipnode::IterMut<'a, (K, V)>);
 impl<'a, K: 'a, V: 'a> Iterator for IterMut<'a, K, V> {
     type Item = (&'a K, &'a mut V);
     fn next(&mut self) -> Option<Self::Item> {
-        todo!()
+        self.0.next().map(|x| (&x.0, &mut x.1))
+    }
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.0.size_hint()
     }
 }
 
 impl<'a, K: 'a, V: 'a> DoubleEndedIterator for IterMut<'a, K, V> {
     fn next_back(&mut self) -> Option<Self::Item> {
-        todo!()
+        self.0.next_back().map(|x| (&x.0, &mut x.1))
     }
 }
 
@@ -899,13 +956,16 @@ pub struct Keys<'a, K: 'a, V>(Iter<'a, K, V>);
 impl<'a, K: 'a, V> Iterator for Keys<'a, K, V> {
     type Item = &'a K;
     fn next(&mut self) -> Option<Self::Item> {
-        todo!()
+        self.0.next().map(|x| x.0)
+    }
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.0.size_hint()
     }
 }
 
 impl<'a, K: 'a, V> DoubleEndedIterator for Keys<'a, K, V> {
     fn next_back(&mut self) -> Option<Self::Item> {
-        todo!()
+        self.0.next_back().map(|x| x.0)
     }
 }
 
@@ -915,13 +975,16 @@ pub struct Values<'a, K, V: 'a>(Iter<'a, K, V>);
 impl<'a, K, V: 'a> Iterator for Values<'a, K, V> {
     type Item = &'a V;
     fn next(&mut self) -> Option<Self::Item> {
-        todo!()
+        self.0.next().map(|x| x.1)
+    }
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.0.size_hint()
     }
 }
 
 impl<'a, K, V: 'a> DoubleEndedIterator for Values<'a, K, V> {
     fn next_back(&mut self) -> Option<Self::Item> {
-        todo!()
+        self.0.next_back().map(|x| x.1)
     }
 }
 
