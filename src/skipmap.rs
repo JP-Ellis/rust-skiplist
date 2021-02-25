@@ -277,7 +277,7 @@ impl<K, V> SkipMap<K, V> {
     /// assert!(skipmap.get(&10).is_none());
     /// ```
     #[inline]
-    pub fn get<Q: ?Sized>(&self, key: &Q) -> Option<&V>
+    pub fn get<Q>(&self, key: &Q) -> Option<&V>
     where
         K: Borrow<Q>,
         Q: Ord,
@@ -306,7 +306,7 @@ impl<K, V> SkipMap<K, V> {
     /// assert_eq!(skipmap.get(&0), Some(&100));
     /// ```
     #[inline]
-    pub fn get_mut<Q: ?Sized>(&mut self, key: &Q) -> Option<&mut V>
+    pub fn get_mut<Q>(&mut self, key: &Q) -> Option<&mut V>
     where
         K: Borrow<Q>,
         Q: Ord,
@@ -377,7 +377,7 @@ impl<K, V> SkipMap<K, V> {
     /// assert!(skipmap.contains_key(&4));
     /// assert!(!skipmap.contains_key(&15));
     /// ```
-    pub fn contains_key<Q: ?Sized>(&self, key: &Q) -> bool
+    pub fn contains_key<Q>(&self, key: &Q) -> bool
     where
         K: Borrow<Q>,
         Q: Ord,
@@ -398,7 +398,7 @@ impl<K, V> SkipMap<K, V> {
     /// assert_eq!(skipmap.remove(&4), Some(4)); // Removes the last one
     /// assert!(skipmap.remove(&4).is_none());    // No more '4' left
     /// ```
-    pub fn remove<Q: ?Sized>(&mut self, key: &Q) -> Option<V>
+    pub fn remove<Q>(&mut self, key: &Q) -> Option<V>
     where
         K: Borrow<Q>,
         Q: Ord,
