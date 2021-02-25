@@ -388,7 +388,7 @@ impl<V> SkipNode<V> {
         predicate: impl FnOnce(&Self, &Self) -> bool,
     ) -> Result<(&Self, usize), &Self> {
         // SAFETY: all links either points to something or is null.
-        let next = unsafe { self.links[level].as_mut() };
+        let next = unsafe { self.links[level].as_ref() };
         match next {
             Some(next) if predicate(self, next) => Ok((next, self.links_len[level])),
             _ => Err(self),
