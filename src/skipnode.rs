@@ -584,6 +584,31 @@ pub trait SkipListAction<'a, T>: Sized {
     }
 }
 
+// helpers for ListActions.
+impl<T> SkipNode<T> {
+    /// Insert the new node immediatly after this node.
+    ///
+    /// SAFETY: This doesn't fix links at level 1 or higher.
+    pub unsafe fn insert_next(&mut self, mut new_node: Box<SkipNode<T>>) -> &mut SkipNode<T> {
+        if let Some(tail) = self.take_tail() {
+            new_node.replace_tail(tail);
+        }
+        self.replace_tail(new_node);
+        self.next_mut().unwrap()
+    }
+
+    /// Take the node immediatly after this node.
+    ///
+    /// SAFETY: This doesn't fix links at level 1 or higher.
+    pub unsafe fn take_next(&mut self) -> Option<Box<SkipNode<T>>> {
+        let mut ret = self.take_tail()?;
+        if let Some(new_tail) = ret.take_tail() {
+            self.replace_tail(new_tail);
+        }
+        Some(ret)
+    }
+}
+
 struct DistanceSeeker(usize);
 
 impl DistanceSeeker {
@@ -599,6 +624,45 @@ impl DistanceSeeker {
             self.0 -= distance;
             Some((node, distance))
         }
+    }
+}
+
+pub fn insertion_fixup<T>(
+    level: usize,
+    level_head: &mut SkipNode<T>,
+    distance_to_parent: usize,
+    new_node: &mut &mut SkipNode<T>,
+) {
+    if level == 0 {
+        return;
+    }
+    if level <= new_node.level {
+        new_node.links[level] = level_head.links[level] as *mut _;
+        level_head.links[level] = *new_node as *mut _;
+        let old_len = level_head.links_len[level];
+        // SkipListAction defines the distance by the node which you mutate.
+        // It's different from the old _insert implementation.
+        new_node.links_len[level] = old_len - distance_to_parent;
+        level_head.links_len[level] = distance_to_parent + 1;
+    } else {
+        level_head.links_len[level] += 1;
+    }
+}
+
+pub fn removal_fixup<T>(
+    level: usize,
+    level_head: &mut SkipNode<T>,
+    removed_node: &mut Box<SkipNode<T>>,
+) {
+    if level == 0 {
+        return;
+    }
+    if level <= removed_node.level {
+        level_head.links[level] = removed_node.links[level];
+        level_head.links_len[level] += removed_node.links_len[level];
+        level_head.links_len[level] -= 1;
+    } else {
+        level_head.links_len[level] -= 1;
     }
 }
 
@@ -636,12 +700,9 @@ impl<'a, V: 'a> SkipListAction<'a, V> for IndexInserter<V> {
 
     // SAFETY: This returns a new node, which should never alias with any old nodes.
     unsafe fn act_on_node(&mut self, node: &'a mut SkipNode<V>) -> Result<Self::Ok, Self::Err> {
-        let mut new_node = self.new_node.take().unwrap();
-        if let Some(tail) = node.take_tail() {
-            new_node.replace_tail(tail);
-        }
-        node.replace_tail(new_node);
-        Ok(node.next_mut().unwrap())
+        let new_node = self.new_node.take().unwrap();
+        // SAFETY: Links will be fixed by the caller.
+        Ok(node.insert_next(new_node))
     }
 
     fn fixup(
@@ -651,20 +712,7 @@ impl<'a, V: 'a> SkipListAction<'a, V> for IndexInserter<V> {
         distance_to_parent: usize,
         new_node: &mut Self::Ok,
     ) {
-        if level == 0 {
-            return;
-        }
-        if level <= new_node.level {
-            new_node.links[level] = level_head.links[level] as *mut _;
-            level_head.links[level] = *new_node as *mut _;
-            let old_len = level_head.links_len[level];
-            // SkipListAction defines the distance by the node which you mutate.
-            // It's different from the old _insert implementation.
-            new_node.links_len[level] = old_len - distance_to_parent;
-            level_head.links_len[level] = distance_to_parent + 1;
-        } else {
-            level_head.links_len[level] += 1;
-        }
+        insertion_fixup(level, level_head, distance_to_parent, new_node)
     }
 }
 
@@ -700,11 +748,8 @@ impl<'a, V> SkipListAction<'a, V> for IndexRemover {
 
     // SAFETY: Self::Ok is not a reference type
     unsafe fn act_on_node(&mut self, node: &'a mut SkipNode<V>) -> Result<Self::Ok, Self::Err> {
-        let mut tail = node.take_tail().ok_or(())?;
-        if let Some(new_tail) = tail.take_tail() {
-            node.replace_tail(new_tail);
-        }
-        Ok(tail)
+        // SAFETY: links will be fixed by the caller.
+        node.take_next().ok_or(())
     }
 
     fn fixup(
@@ -714,16 +759,7 @@ impl<'a, V> SkipListAction<'a, V> for IndexRemover {
         _distance_to_parent: usize,
         removed_node: &mut Self::Ok,
     ) {
-        if level == 0 {
-            return;
-        }
-        if level <= removed_node.level {
-            level_head.links[level] = removed_node.links[level];
-            level_head.links_len[level] += removed_node.links_len[level];
-            level_head.links_len[level] -= 1;
-        } else {
-            level_head.links_len[level] -= 1;
-        }
+        removal_fixup(level, level_head, removed_node)
     }
 }
 
