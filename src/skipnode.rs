@@ -1143,4 +1143,10 @@ mod test {
         let mut list = new_list_for_test(50);
         let _ = list.retain(|_, val| val % 2 == 0);
     }
+
+    #[test]
+    fn miri_test_check() {
+        let list = new_list_for_test(100);
+        list.check();
+    }
 }
