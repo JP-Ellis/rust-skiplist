@@ -647,7 +647,82 @@ impl<T> OrderedSkipList<T> {
     /// assert_eq!(Some(&4), skiplist.range(Included(&4), Unbounded).next());
     /// ```
     pub fn range(&self, min: Bound<&T>, max: Bound<&T>) -> Iter<T> {
-        todo!()
+        self._range(min, max).unwrap_or(Iter {
+            first: None,
+            last: None,
+            size: 0,
+        })
+    }
+
+    /// A helper function to ease error handling.
+    fn _range(&self, min: Bound<&T>, max: Bound<&T>) -> Option<Iter<T>> {
+        let max_level = self.level_generator.total();
+        let (first, first_distance_from_head) = match min {
+            Bound::Unbounded => (self.head.next_ref()?, 1usize),
+            Bound::Included(min) => {
+                let (last_lt, last_lt_from_head) = (0..max_level).rev().fold(
+                    (self.head.as_ref(), 0),
+                    |(node, distance), level| {
+                        let (node, steps) = node.advance_while_at_level(level, |_, next_node| {
+                            let value = next_node.value.as_ref().unwrap();
+                            (self.compare)(value, min) == Ordering::Less
+                        });
+                        (node, distance + steps)
+                    },
+                );
+                let first_ge = last_lt.next_ref()?;
+                (first_ge, last_lt_from_head + 1)
+            }
+            Bound::Excluded(min) => {
+                let (last_le, last_le_from_head) = (0..max_level).rev().fold(
+                    (self.head.as_ref(), 0),
+                    |(node, distance), level| {
+                        let (node, steps) = node.advance_while_at_level(level, |_, next_node| {
+                            let value = next_node.value.as_ref().unwrap();
+                            (self.compare)(value, min) != Ordering::Greater
+                        });
+                        (node, distance + steps)
+                    },
+                );
+                let first_gt = last_le.next_ref()?;
+                (first_gt, last_le_from_head + 1)
+            }
+        };
+        let (last, last_distance_from_head) = match max {
+            Bound::Unbounded => (self.head.last(), self.len()),
+            Bound::Included(max) => {
+                let (last_le, last_le_from_head) = (0..max_level).rev().fold(
+                    (self.head.as_ref(), 0),
+                    |(node, distance), level| {
+                        let (node, steps) = node.advance_while_at_level(level, |_, next_node| {
+                            let value = next_node.value.as_ref().unwrap();
+                            (self.compare)(value, max) != Ordering::Greater
+                        });
+                        (node, distance + steps)
+                    },
+                );
+                (last_le, last_le_from_head)
+            }
+            Bound::Excluded(max) => {
+                let (last_lt, last_lt_from_head) = (0..max_level).rev().fold(
+                    (self.head.as_ref(), 0),
+                    |(node, distance), level| {
+                        let (node, steps) = node.advance_while_at_level(level, |_, next_node| {
+                            let value = next_node.value.as_ref().unwrap();
+                            (self.compare)(value, max) == Ordering::Less
+                        });
+                        (node, distance + steps)
+                    },
+                );
+                (last_lt, last_lt_from_head)
+            }
+        };
+        let size = last_distance_from_head.checked_sub(first_distance_from_head)? + 1;
+        Some(Iter {
+            first: Some(first),
+            last: Some(last),
+            size,
+        })
     }
 }
 
@@ -1382,7 +1457,6 @@ mod tests {
         assert!(sl.is_empty());
     }
 
-    #[ignore]
     #[test]
     fn range_small() {
         let size = 5;
@@ -1396,7 +1470,6 @@ mod tests {
         assert_eq!(j, size - 2);
     }
 
-    #[ignore]
     #[test]
     fn range_1000() {
         let size = 1000;
@@ -1437,7 +1510,6 @@ mod tests {
         test(&sl, Unbounded, Unbounded);
     }
 
-    #[ignore]
     #[test]
     fn range() {
         let size = 200;
