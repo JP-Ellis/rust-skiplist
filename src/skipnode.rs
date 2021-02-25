@@ -1,3 +1,4 @@
+use std::cmp::Ordering;
 use std::marker::PhantomData;
 use std::{fmt, iter, ptr};
 
@@ -605,6 +606,85 @@ impl<T> SkipNode<T> {
             self.replace_tail(new_tail);
         }
         Some(ret)
+    }
+}
+
+// helpers for ordered types.
+impl<T> SkipNode<T> {
+    /// Find the last node such that f(node.item) returns true.
+    /// Return a reference to the node and distance travelled.
+    fn find_ordering_impl<F>(&self, f: F) -> (&Self, usize)
+    where
+        F: Fn(&T) -> bool,
+    {
+        (0..=self.level)
+            .rev()
+            .fold((self, 0), |(node, distance), level| {
+                let (node, steps) = node.advance_while_at_level(level, |_, next_node| {
+                    let value = next_node.item.as_ref().unwrap();
+                    f(value)
+                });
+                (node, distance + steps)
+            })
+    }
+
+    /// Find the last node such that f(node.item) returns true.
+    /// Return a mutable reference to the node and distance travelled.
+    fn find_ordering_mut_impl<F>(&mut self, f: F) -> (&mut Self, usize)
+    where
+        F: Fn(&T) -> bool,
+    {
+        (0..=self.level)
+            .rev()
+            .fold((self, 0), |(node, distance), level| {
+                let (node, steps) = node.advance_while_at_level_mut(level, |_, next_node| {
+                    let value = next_node.item.as_ref().unwrap();
+                    f(value)
+                });
+                (node, distance + steps)
+            })
+    }
+
+    /// Given a list head, a comparison function and a target,
+    /// return a reference to the last node whose item compares less than the target,
+    /// and the distance to that node.
+    pub fn find_last_le_with<F>(&self, cmp: F, target: &T) -> (&Self, usize)
+    where
+        F: Fn(&T, &T) -> Ordering,
+    {
+        self.find_ordering_impl(|node_value| cmp(node_value, target) != Ordering::Greater)
+    }
+
+    /// Given a list head, a comparison function and a target,
+    /// return a mutable reference to the last node whose item compares less than the target.
+    /// and the distance to that node.
+    pub fn find_last_le_with_mut<F>(&mut self, cmp: F, target: &T) -> (&mut Self, usize)
+    where
+        F: Fn(&T, &T) -> Ordering,
+    {
+        self.find_ordering_mut_impl(|node_value| cmp(node_value, target) != Ordering::Greater)
+    }
+
+    /// Given a list head, a comparison function and a target,
+    /// return a reference to the last node whose item compares less than or equal to the target.
+    /// and the distance to that node.
+    pub fn find_last_lt_with<F>(&self, cmp: F, target: &T) -> (&Self, usize)
+    where
+        F: Fn(&T, &T) -> Ordering,
+    {
+        assert!(self.is_head());
+        self.find_ordering_impl(|node_value| cmp(node_value, target) == Ordering::Less)
+    }
+
+    /// Given a list head, a comparison function and a target,
+    /// return a mutable refeerence to the last node whose item compares less than or equal to the target.
+    /// and the distance to that node.
+    pub fn find_last_lt_with_mut<F>(&mut self, cmp: F, target: &T) -> (&mut Self, usize)
+    where
+        F: Fn(&T, &T) -> Ordering,
+    {
+        assert!(self.is_head());
+        self.find_ordering_mut_impl(|node_value| cmp(node_value, target) == Ordering::Less)
     }
 }
 

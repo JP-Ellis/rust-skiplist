@@ -428,16 +428,8 @@ impl<T> OrderedSkipList<T> {
     /// assert!(!skiplist.contains(&15));
     /// ```
     pub fn contains(&self, value: &T) -> bool {
-        let parent = (0..=self.head.level)
-            .rev()
-            .fold(self.head.as_ref(), |node, level| {
-                let (node, _dis) = node.advance_while_at_level(level, |_curr, next| {
-                    let next = next.item.as_ref().unwrap();
-                    (self.compare)(value, next) == Ordering::Greater
-                });
-                node
-            });
-        parent
+        let (last_lt, _) = self.head.find_last_lt_with(&self.compare, value);
+        last_lt
             .next_ref()
             .and_then(|node| node.item.as_ref())
             .map_or(false, |node_value| {
@@ -656,66 +648,23 @@ impl<T> OrderedSkipList<T> {
 
     /// A helper function to ease error handling.
     fn _range(&self, min: Bound<&T>, max: Bound<&T>) -> Option<Iter<T>> {
-        let max_level = self.level_generator.total();
         let (first, first_distance_from_head) = match min {
             Bound::Unbounded => (self.head.next_ref()?, 1usize),
             Bound::Included(min) => {
-                let (last_lt, last_lt_from_head) = (0..max_level).rev().fold(
-                    (self.head.as_ref(), 0),
-                    |(node, distance), level| {
-                        let (node, steps) = node.advance_while_at_level(level, |_, next_node| {
-                            let value = next_node.item.as_ref().unwrap();
-                            (self.compare)(value, min) == Ordering::Less
-                        });
-                        (node, distance + steps)
-                    },
-                );
+                let (last_lt, last_lt_from_head) = self.head.find_last_lt_with(&self.compare, min);
                 let first_ge = last_lt.next_ref()?;
                 (first_ge, last_lt_from_head + 1)
             }
             Bound::Excluded(min) => {
-                let (last_le, last_le_from_head) = (0..max_level).rev().fold(
-                    (self.head.as_ref(), 0),
-                    |(node, distance), level| {
-                        let (node, steps) = node.advance_while_at_level(level, |_, next_node| {
-                            let value = next_node.item.as_ref().unwrap();
-                            (self.compare)(value, min) != Ordering::Greater
-                        });
-                        (node, distance + steps)
-                    },
-                );
+                let (last_le, last_le_from_head) = self.head.find_last_le_with(&self.compare, min);
                 let first_gt = last_le.next_ref()?;
                 (first_gt, last_le_from_head + 1)
             }
         };
         let (last, last_distance_from_head) = match max {
             Bound::Unbounded => (self.head.last(), self.len()),
-            Bound::Included(max) => {
-                let (last_le, last_le_from_head) = (0..max_level).rev().fold(
-                    (self.head.as_ref(), 0),
-                    |(node, distance), level| {
-                        let (node, steps) = node.advance_while_at_level(level, |_, next_node| {
-                            let value = next_node.item.as_ref().unwrap();
-                            (self.compare)(value, max) != Ordering::Greater
-                        });
-                        (node, distance + steps)
-                    },
-                );
-                (last_le, last_le_from_head)
-            }
-            Bound::Excluded(max) => {
-                let (last_lt, last_lt_from_head) = (0..max_level).rev().fold(
-                    (self.head.as_ref(), 0),
-                    |(node, distance), level| {
-                        let (node, steps) = node.advance_while_at_level(level, |_, next_node| {
-                            let value = next_node.item.as_ref().unwrap();
-                            (self.compare)(value, max) == Ordering::Less
-                        });
-                        (node, distance + steps)
-                    },
-                );
-                (last_lt, last_lt_from_head)
-            }
+            Bound::Included(max) => self.head.find_last_le_with(&self.compare, max),
+            Bound::Excluded(max) => self.head.find_last_lt_with(&self.compare, max),
         };
         let size = last_distance_from_head.checked_sub(first_distance_from_head)? + 1;
         Some(Iter {
