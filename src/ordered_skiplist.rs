@@ -910,9 +910,8 @@ where
                         == Ordering::Greater
                 });
             if level == 0 {
-                if let Some(target_value) = target_parent
-                    .next_ref()
-                    .and_then(|node| node.item.as_ref())
+                if let Some(target_value) =
+                    target_parent.next_ref().and_then(|node| node.item.as_ref())
                 {
                     if (self.cmp)(self.target_value, target_value) == Ordering::Equal {
                         return Some((target_parent, distance));
