@@ -1019,9 +1019,9 @@ mod test {
 
     /// Make a list of size n
     /// levels are evenly spread out
-    fn new_list_for_test(n: usize) -> SkipNode<usize> {
+    fn new_list_for_test(n: usize) -> Box<SkipNode<usize>> {
         let max_level = levels_required(n);
-        let mut head = SkipNode::<usize>::head(max_level);
+        let mut head = Box::new(SkipNode::<usize>::head(max_level));
         assert_eq!(head.links.len(), max_level);
         let mut nodes: Vec<_> = (0..n)
             .map(|n| {
@@ -1035,7 +1035,7 @@ mod test {
                 assert_eq!(node_max_level + 1, max_level);
             }
             for level in 0..max_level {
-                let mut last_node = &mut head as *mut SkipNode<usize>;
+                let mut last_node = head.as_mut() as *mut SkipNode<usize>;
                 let mut len_left = n;
                 for &mut node_ptr in nodes
                     .iter_mut()
