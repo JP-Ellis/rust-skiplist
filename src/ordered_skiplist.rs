@@ -207,11 +207,15 @@ impl<T> OrderedSkipList<T> {
     /// skiplist.insert(10);
     /// unsafe { skiplist.sort_by(|a: &i64, b: &i64| a.cmp(b)) } // Panics; order would change.
     /// ```
-    pub unsafe fn sort_by<F>(&mut self, f: F)
+    pub unsafe fn sort_by<F>(&mut self, cmp: F)
     where
         F: 'static + Fn(&T, &T) -> Ordering,
     {
-        todo!()
+        assert!(
+            self.is_sort(&cmp),
+            "The new ordering does not respect the ordering in the list!"
+        );
+        self.compare = Box::new(cmp);
     }
 
     /// Clears the skiplist, removing all values.
@@ -641,10 +645,28 @@ impl<T> OrderedSkipList<T> {
 // ///////////////////////////////////////////////
 
 impl<T> OrderedSkipList<T> {
+    fn is_sort(&self, cmp: impl Fn(&T, &T) -> Ordering) -> bool {
+        let mut current_node = self.head.as_ref();
+        while let Some(next_node) = current_node.next_ref() {
+            if let (Some(current_value), Some(next_value)) =
+                (current_node.value.as_ref(), next_node.value.as_ref())
+            {
+                if (cmp)(current_value, next_value) != Ordering::Greater {
+                    return false;
+                }
+            }
+            current_node = next_node;
+        }
+        true
+    }
     /// Checks the integrity of the skiplist.
     #[allow(dead_code)]
     fn check(&self) {
-        self.head.check()
+        self.head.check();
+        assert!(
+            self.is_sort(self.compare.as_ref()),
+            "The list isn't properly sorted!"
+        );
     }
 
     /// Returns the last node whose value is less than or equal the one
