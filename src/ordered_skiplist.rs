@@ -432,14 +432,14 @@ impl<T> OrderedSkipList<T> {
             .rev()
             .fold(self.head.as_ref(), |node, level| {
                 let (node, _dis) = node.advance_while_at_level(level, |_curr, next| {
-                    let next = next.value.as_ref().unwrap();
+                    let next = next.item.as_ref().unwrap();
                     (self.compare)(value, next) == Ordering::Greater
                 });
                 node
             });
         parent
             .next_ref()
-            .and_then(|node| node.value.as_ref())
+            .and_then(|node| node.item.as_ref())
             .map_or(false, |node_value| {
                 (self.compare)(value, node_value) == Ordering::Equal
             })
@@ -664,7 +664,7 @@ impl<T> OrderedSkipList<T> {
                     (self.head.as_ref(), 0),
                     |(node, distance), level| {
                         let (node, steps) = node.advance_while_at_level(level, |_, next_node| {
-                            let value = next_node.value.as_ref().unwrap();
+                            let value = next_node.item.as_ref().unwrap();
                             (self.compare)(value, min) == Ordering::Less
                         });
                         (node, distance + steps)
@@ -678,7 +678,7 @@ impl<T> OrderedSkipList<T> {
                     (self.head.as_ref(), 0),
                     |(node, distance), level| {
                         let (node, steps) = node.advance_while_at_level(level, |_, next_node| {
-                            let value = next_node.value.as_ref().unwrap();
+                            let value = next_node.item.as_ref().unwrap();
                             (self.compare)(value, min) != Ordering::Greater
                         });
                         (node, distance + steps)
@@ -695,7 +695,7 @@ impl<T> OrderedSkipList<T> {
                     (self.head.as_ref(), 0),
                     |(node, distance), level| {
                         let (node, steps) = node.advance_while_at_level(level, |_, next_node| {
-                            let value = next_node.value.as_ref().unwrap();
+                            let value = next_node.item.as_ref().unwrap();
                             (self.compare)(value, max) != Ordering::Greater
                         });
                         (node, distance + steps)
@@ -708,7 +708,7 @@ impl<T> OrderedSkipList<T> {
                     (self.head.as_ref(), 0),
                     |(node, distance), level| {
                         let (node, steps) = node.advance_while_at_level(level, |_, next_node| {
-                            let value = next_node.value.as_ref().unwrap();
+                            let value = next_node.item.as_ref().unwrap();
                             (self.compare)(value, max) == Ordering::Less
                         });
                         (node, distance + steps)
@@ -770,10 +770,10 @@ where
         let value = self
             .new_node
             .as_ref()
-            .and_then(|node| node.value.as_ref())
+            .and_then(|node| node.item.as_ref())
             .unwrap();
         let (node, distance) = node.advance_while_at_level_mut(level, |_current, next| {
-            let next_value = next.value.as_ref().unwrap();
+            let next_value = next.item.as_ref().unwrap();
             (self.cmp)(value, next_value) == Ordering::Greater
         });
         Some((node, distance))
@@ -833,12 +833,12 @@ where
         level: usize,
     ) -> Option<(&'a mut SkipNode<T>, usize)> {
         let (target_parent, distance) = node.advance_while_at_level_mut(level, |_, next_node| {
-            (self.cmp)(&self.target_value, next_node.value.as_ref().unwrap()) == Ordering::Greater
+            (self.cmp)(&self.target_value, next_node.item.as_ref().unwrap()) == Ordering::Greater
         });
         if level == 0 {
             let next_value = target_parent
                 .next_ref()
-                .and_then(|node| node.value.as_ref())?;
+                .and_then(|node| node.item.as_ref())?;
             if (self.cmp)(&self.target_value, next_value) != Ordering::Equal {
                 return None;
             }
@@ -906,13 +906,13 @@ where
         if self.target_node.is_null() {
             let (target_parent, distance) =
                 node.advance_while_at_level_mut(level, |_, next_node| {
-                    (self.cmp)(&self.target_value, next_node.value.as_ref().unwrap())
+                    (self.cmp)(&self.target_value, next_node.item.as_ref().unwrap())
                         == Ordering::Greater
                 });
             if level == 0 {
                 if let Some(target_value) = target_parent
                     .next_ref()
-                    .and_then(|node| node.value.as_ref())
+                    .and_then(|node| node.item.as_ref())
                 {
                     if (self.cmp)(self.target_value, target_value) == Ordering::Equal {
                         return Some((target_parent, distance));
@@ -921,7 +921,7 @@ where
                 None
             } else {
                 if let Some(target_node) = unsafe { target_parent.links[level].as_ref() } {
-                    let target_value = target_node.value.as_ref().unwrap();
+                    let target_value = target_node.item.as_ref().unwrap();
                     if (self.cmp)(self.target_value, target_value) == Ordering::Equal {
                         self.target_node = target_node as *const _;
                     }
@@ -963,7 +963,7 @@ impl<T> OrderedSkipList<T> {
         let mut current_node = self.head.as_ref();
         while let Some(next_node) = current_node.next_ref() {
             if let (Some(current_value), Some(next_value)) =
-                (current_node.value.as_ref(), next_node.value.as_ref())
+                (current_node.item.as_ref(), next_node.item.as_ref())
             {
                 if (cmp)(current_value, next_value) == Ordering::Greater {
                     return false;
@@ -1019,7 +1019,7 @@ where
                 .collect();
 
             loop {
-                let value = if let Some(ref v) = (*node).value {
+                let value = if let Some(ref v) = (*node).item {
                     format!("> [{:?}]", v)
                 } else {
                     "> []".to_string()
@@ -1135,7 +1135,7 @@ impl<T> ops::Index<usize> for OrderedSkipList<T> {
 
     fn index(&self, index: usize) -> &T {
         self.get_index(index)
-            .and_then(|node| node.value.as_ref())
+            .and_then(|node| node.item.as_ref())
             .expect("Index out of range")
     }
 }

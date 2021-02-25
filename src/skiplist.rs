@@ -298,7 +298,7 @@ impl<T> SkipList<T> {
     /// ```
     #[inline]
     pub fn get(&self, index: usize) -> Option<&T> {
-        self.get_index(index).and_then(|node| node.value.as_ref())
+        self.get_index(index).and_then(|node| node.item.as_ref())
     }
 
     /// Provides a mutable reference to the element at the given index, or
@@ -318,7 +318,7 @@ impl<T> SkipList<T> {
     #[inline]
     pub fn get_mut(&mut self, index: usize) -> Option<&mut T> {
         self.get_index_mut(index)
-            .and_then(|node| node.value.as_mut())
+            .and_then(|node| node.item.as_mut())
     }
 
     /// Removes the first element and returns it, or `None` if the sequence is
@@ -711,7 +711,7 @@ where
                 .collect();
 
             loop {
-                let value = if let Some(ref v) = node.value {
+                let value = if let Some(ref v) = node.item {
                     format!("> [{:?}]", v)
                 } else {
                     "> []".to_string()
