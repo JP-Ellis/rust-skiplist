@@ -34,9 +34,8 @@ pub fn levels_required(n: usize) -> usize {
 /// one needs to parse the list backwards.
 #[derive(Clone, Debug)]
 pub struct SkipNode<V> {
-    // key and value should never be None, with the sole exception being the
-    // head node.
-    pub value: Option<V>,
+    // item should never be None, unless the node is a head.
+    pub item: Option<V>,
     // how high the node reaches.
     pub level: usize,
     // The immediately previous element.
@@ -59,7 +58,7 @@ impl<V> SkipNode<V> {
     /// Create a new head node.
     pub fn head(total_levels: usize) -> Self {
         SkipNode {
-            value: None,
+            item: None,
             level: total_levels - 1,
             prev: ptr::null_mut(),
             links: iter::repeat(ptr::null_mut()).take(total_levels).collect(),
@@ -68,11 +67,11 @@ impl<V> SkipNode<V> {
         }
     }
 
-    /// Create a new SkipNode with the given value.
+    /// Create a new SkipNode with the given item..
     /// All pointers default to null.
-    pub fn new(value: V, level: usize) -> Self {
+    pub fn new(item: V, level: usize) -> Self {
         SkipNode {
-            value: Some(value),
+            item: Some(item),
             level,
             prev: ptr::null_mut(),
             links: iter::repeat(ptr::null_mut()).take(level + 1).collect(),
@@ -81,9 +80,9 @@ impl<V> SkipNode<V> {
         }
     }
 
-    /// Consumes the node returning the value it contains.
+    /// Consumes the node returning the item it contains.
     pub fn into_inner(mut self) -> Option<V> {
-        self.value.take()
+        self.item.take()
     }
 
     /// Returns `true` is the node is a head-node.
@@ -135,7 +134,7 @@ impl<V> SkipNode<V> {
     // Value Manipulation
     // /////////////////////////////
     //
-    // Methods that care about values carried by the nodes.
+    // Methods that care about items carried by the nodes.
 
     #[must_use]
     pub fn retain<F>(&mut self, mut pred: F) -> usize
@@ -153,8 +152,8 @@ impl<V> SkipNode<V> {
         unsafe {
             while let Some(mut next_node) = (*current_node).take_tail() {
                 if pred(
-                    (*current_node).value.as_ref(),
-                    next_node.value.as_ref().unwrap(),
+                    (*current_node).item.as_ref(),
+                    next_node.item.as_ref().unwrap(),
                 ) {
                     for x in &mut level_head[0..=next_node.level] {
                         *x = next_node.as_mut() as *mut _;
@@ -430,7 +429,7 @@ impl<V> SkipNode<V> {
     ///
     pub fn check(&self) {
         assert!(self.is_head());
-        assert!(self.value.is_none());
+        assert!(self.item.is_none());
         let mut current_node = Some(self);
         let mut len = 0;
         while let Some(node) = current_node {
@@ -438,7 +437,7 @@ impl<V> SkipNode<V> {
             assert_eq!(node.level + 1, node.links.len());
             assert_eq!(node.level + 1, node.links_len.len());
             if !node.is_head() {
-                assert!(node.value.is_some());
+                assert!(node.item.is_some());
             }
             // Check link at level 0
             if let Some(next_node) = node.next_ref() {
@@ -496,7 +495,7 @@ where
     V: fmt::Display,
 {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        if let Some(ref v) = self.value {
+        if let Some(ref v) = self.item {
             write!(f, "{}", v)
         } else {
             Ok(())
@@ -800,7 +799,7 @@ impl<T> AsPtrMut<T> for Option<&mut T> {
 // /////////////////////////////////
 // Since Iterators (currently) only pop from front and back,
 // they can be shared by some data structures.
-// There's no need for a dummy head (that contains no value) in the iterator.
+// There's no need for a dummy head (that contains no item) in the iterator.
 // so the members are named first and last instaed of head/end to avoid confusion.
 
 /// Iterator by reference
@@ -822,7 +821,7 @@ impl<'a, T> Iterator for Iter<'a, T> {
             self.first = current_node.next_ref();
         }
         self.size -= 1;
-        current_node.value.as_ref()
+        current_node.item.as_ref()
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
@@ -844,7 +843,7 @@ impl<'a, T> DoubleEndedIterator for Iter<'a, T> {
             }
         }
         self.size -= 1;
-        last_node.value.as_ref()
+        last_node.item.as_ref()
     }
 }
 
@@ -874,7 +873,7 @@ impl<'a, T> Iterator for IterMut<'a, T> {
             }
         }
         self.size -= 1;
-        current_node.value.as_mut()
+        current_node.item.as_mut()
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
@@ -910,7 +909,7 @@ impl<'a, T> DoubleEndedIterator for IterMut<'a, T> {
             }
         };
         self.size -= 1;
-        popped.value.as_mut()
+        popped.item.as_mut()
     }
 }
 
