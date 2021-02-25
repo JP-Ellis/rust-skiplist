@@ -2,7 +2,7 @@
 
 use crate::{
     level_generator::{GeometricalLevelGenerator, LevelGenerator},
-    skipnode::{IntoIter, Iter, SkipNode},
+    skipnode::{insertion_fixup, removal_fixup, IntoIter, Iter, SkipListAction, SkipNode},
 };
 use std::{cmp, cmp::Ordering, default, fmt, hash, hash::Hash, iter, mem, ops, ops::Bound, ptr};
 
@@ -285,7 +285,10 @@ impl<T> OrderedSkipList<T> {
     /// assert!(!skiplist.is_empty());
     /// ```
     pub fn insert(&mut self, value: T) {
-        todo!()
+        let new_node = Box::new(SkipNode::new(value, self.level_generator.random()));
+        let inserter = OrdInserter::new(self.compare.as_ref(), new_node);
+        let _ = inserter.act(self.head.as_mut());
+        self.len += 1;
     }
 
     /// Provides a reference to the front element, or `None` if the skiplist is
@@ -425,20 +428,20 @@ impl<T> OrderedSkipList<T> {
     /// assert!(!skiplist.contains(&15));
     /// ```
     pub fn contains(&self, value: &T) -> bool {
-        let expected_node = (0..=self.head.level)
+        let parent = (0..=self.head.level)
             .rev()
             .fold(self.head.as_ref(), |node, level| {
-                let (node, _dis) = node.advance_while_at_level(level, |curr, next| {
+                let (node, _dis) = node.advance_while_at_level(level, |_curr, next| {
                     let next = next.value.as_ref().unwrap();
-                    (self.compare)(value, next) != Ordering::Greater
+                    (self.compare)(value, next) == Ordering::Greater
                 });
                 node
             });
-        expected_node
-            .value
-            .as_ref()
-            .map_or(false, |expected_value| {
-                (self.compare)(value, expected_value) == Ordering::Equal
+        parent
+            .next_ref()
+            .and_then(|node| node.value.as_ref())
+            .map_or(false, |node_value| {
+                (self.compare)(value, node_value) == Ordering::Equal
             })
     }
 
@@ -462,7 +465,11 @@ impl<T> OrderedSkipList<T> {
     /// assert!(skiplist.remove(&4).is_none()); // No more '4' left
     /// ```
     pub fn remove(&mut self, value: &T) -> Option<T> {
-        todo!()
+        let remover = OrdEagerRemover::new(self.compare.as_ref(), value);
+        remover.act(self.head.as_mut()).ok().and_then(|node| {
+            self.len -= 1;
+            node.into_inner()
+        })
     }
 
     /// Removes and returns an element with the same value or None if there are
@@ -492,7 +499,11 @@ impl<T> OrderedSkipList<T> {
     /// assert!(skiplist.remove_first(&4).is_none()); // No more '4' left
     /// ```
     pub fn remove_first(&mut self, value: &T) -> Option<T> {
-        todo!()
+        let remover = OrdRemover::new(self.compare.as_ref(), value);
+        remover.act(self.head.as_mut()).ok().and_then(|node| {
+            self.len -= 1;
+            node.into_inner()
+        })
     }
 
     /// Removes and returns an element with the given index.
@@ -641,6 +652,234 @@ impl<T> OrderedSkipList<T> {
 }
 
 // ///////////////////////////////////////////////
+// List Actions
+// ///////////////////////////////////////////////
+
+struct OrdInserter<F, T>
+where
+    F: Fn(&T, &T) -> Ordering,
+{
+    cmp: F,
+    new_node: Option<Box<SkipNode<T>>>,
+}
+
+impl<F, T> OrdInserter<F, T>
+where
+    F: Fn(&T, &T) -> Ordering,
+{
+    fn new(cmp: F, new_node: Box<SkipNode<T>>) -> Self {
+        Self {
+            cmp,
+            new_node: Some(new_node),
+        }
+    }
+}
+
+impl<'a, F, T: 'a> SkipListAction<'a, T> for OrdInserter<F, T>
+where
+    F: Fn(&T, &T) -> Ordering,
+{
+    type Ok = &'a mut SkipNode<T>;
+
+    type Err = Box<SkipNode<T>>;
+
+    fn fail(&mut self) -> Self::Err {
+        self.new_node.take().unwrap()
+    }
+
+    fn seek(
+        &mut self,
+        node: &'a mut SkipNode<T>,
+        level: usize,
+    ) -> Option<(&'a mut SkipNode<T>, usize)> {
+        let value = self
+            .new_node
+            .as_ref()
+            .and_then(|node| node.value.as_ref())
+            .unwrap();
+        let (node, distance) = node.advance_while_at_level_mut(level, |_current, next| {
+            let next_value = next.value.as_ref().unwrap();
+            (self.cmp)(value, next_value) == Ordering::Greater
+        });
+        Some((node, distance))
+    }
+
+    // SAEFTY: The new node may never alias with the old nodes.
+    unsafe fn act_on_node(&mut self, node: &'a mut SkipNode<T>) -> Result<Self::Ok, Self::Err> {
+        let new_node = self.new_node.take().unwrap();
+        // SAFETY: links will be fixed by the caller.
+        Ok(node.insert_next(new_node))
+    }
+
+    fn fixup(
+        &mut self,
+        level: usize,
+        level_head: &'a mut SkipNode<T>,
+        distance_to_target: usize,
+        action_result: &mut Self::Ok,
+    ) {
+        insertion_fixup(level, level_head, distance_to_target, action_result)
+    }
+}
+
+struct OrdRemover<'a, F, T>
+where
+    F: Fn(&T, &T) -> Ordering,
+{
+    cmp: F,
+    target_value: &'a T,
+}
+
+impl<'a, F, T> OrdRemover<'a, F, T>
+where
+    F: Fn(&T, &T) -> Ordering,
+{
+    fn new(cmp: F, target_value: &'a T) -> Self {
+        Self { cmp, target_value }
+    }
+}
+
+impl<'a, F, T: 'a> SkipListAction<'a, T> for OrdRemover<'a, F, T>
+where
+    F: Fn(&T, &T) -> Ordering,
+{
+    type Ok = Box<SkipNode<T>>;
+
+    type Err = ();
+
+    #[allow(clippy::unused_unit)]
+    fn fail(&mut self) -> Self::Err {
+        ()
+    }
+
+    fn seek(
+        &mut self,
+        node: &'a mut SkipNode<T>,
+        level: usize,
+    ) -> Option<(&'a mut SkipNode<T>, usize)> {
+        let (target_parent, distance) = node.advance_while_at_level_mut(level, |_, next_node| {
+            (self.cmp)(&self.target_value, next_node.value.as_ref().unwrap()) == Ordering::Greater
+        });
+        if level == 0 {
+            let next_value = target_parent
+                .next_ref()
+                .and_then(|node| node.value.as_ref())?;
+            if (self.cmp)(&self.target_value, next_value) != Ordering::Equal {
+                return None;
+            }
+        }
+        Some((target_parent, distance))
+    }
+
+    // SAFETY: The removed node will never alias with nodes in the list.
+    unsafe fn act_on_node(&mut self, node: &'a mut SkipNode<T>) -> Result<Self::Ok, Self::Err> {
+        // SAFETY: Links will be fixed by the caller.
+        node.take_next().ok_or(())
+    }
+
+    fn fixup(
+        &mut self,
+        level: usize,
+        level_head: &'a mut SkipNode<T>,
+        _distance_to_target: usize,
+        action_result: &mut Self::Ok,
+    ) {
+        removal_fixup(level, level_head, action_result)
+    }
+}
+
+struct OrdEagerRemover<'a, F, T>
+where
+    F: Fn(&T, &T) -> Ordering,
+{
+    target_node: *const SkipNode<T>,
+    target_value: &'a T,
+    cmp: F,
+}
+
+impl<'a, F, T> OrdEagerRemover<'a, F, T>
+where
+    F: Fn(&T, &T) -> Ordering,
+{
+    fn new(cmp: F, target_value: &'a T) -> Self {
+        Self {
+            target_node: ptr::null(),
+            target_value,
+            cmp,
+        }
+    }
+}
+
+impl<'a, F, T: 'a> SkipListAction<'a, T> for OrdEagerRemover<'a, F, T>
+where
+    F: Fn(&T, &T) -> Ordering,
+{
+    type Ok = Box<SkipNode<T>>;
+
+    type Err = ();
+
+    #[allow(clippy::unused_unit)]
+    fn fail(&mut self) -> Self::Err {
+        ()
+    }
+
+    fn seek(
+        &mut self,
+        node: &'a mut SkipNode<T>,
+        level: usize,
+    ) -> Option<(&'a mut SkipNode<T>, usize)> {
+        if self.target_node.is_null() {
+            let (target_parent, distance) =
+                node.advance_while_at_level_mut(level, |_, next_node| {
+                    (self.cmp)(&self.target_value, next_node.value.as_ref().unwrap())
+                        == Ordering::Greater
+                });
+            if level == 0 {
+                if let Some(target_value) = target_parent
+                    .next_ref()
+                    .and_then(|node| node.value.as_ref())
+                {
+                    if (self.cmp)(self.target_value, target_value) == Ordering::Equal {
+                        return Some((target_parent, distance));
+                    }
+                }
+                None
+            } else {
+                if let Some(target_node) = unsafe { target_parent.links[level].as_ref() } {
+                    let target_value = target_node.value.as_ref().unwrap();
+                    if (self.cmp)(self.target_value, target_value) == Ordering::Equal {
+                        self.target_node = target_node as *const _;
+                    }
+                }
+                Some((target_parent, distance))
+            }
+        } else {
+            let (target_parent, distance) = node
+                .advance_while_at_level_mut(level, |_, next_node| {
+                    !ptr::eq(next_node, self.target_node)
+                });
+            Some((target_parent, distance))
+        }
+    }
+
+    // SAFETY: The removed node will never alias with nodes in the list.
+    unsafe fn act_on_node(&mut self, node: &'a mut SkipNode<T>) -> Result<Self::Ok, Self::Err> {
+        // SAFETY: Links will be fixed by the caller.
+        node.take_next().ok_or(())
+    }
+
+    fn fixup(
+        &mut self,
+        level: usize,
+        level_head: &'a mut SkipNode<T>,
+        _distance_to_target: usize,
+        action_result: &mut Self::Ok,
+    ) {
+        removal_fixup(level, level_head, action_result)
+    }
+}
+
+// ///////////////////////////////////////////////
 // Internal methods
 // ///////////////////////////////////////////////
 
@@ -651,7 +890,7 @@ impl<T> OrderedSkipList<T> {
             if let (Some(current_value), Some(next_value)) =
                 (current_node.value.as_ref(), next_node.value.as_ref())
             {
-                if (cmp)(current_value, next_value) != Ordering::Greater {
+                if (cmp)(current_value, next_value) == Ordering::Greater {
                     return false;
                 }
             }
@@ -921,7 +1160,6 @@ mod tests {
         ops::Bound::{self, Excluded, Included, Unbounded},
     };
 
-    #[ignore]
     #[test]
     fn basic_small() {
         let mut sl: OrderedSkipList<i64> = OrderedSkipList::new();
@@ -944,7 +1182,6 @@ mod tests {
         sl.check();
     }
 
-    #[ignore]
     #[test]
     fn basic_large() {
         let size = 10_000;
@@ -964,7 +1201,6 @@ mod tests {
         sl.check();
     }
 
-    #[ignore]
     #[test]
     fn iter() {
         let size = 10000;
@@ -986,7 +1222,6 @@ mod tests {
         test(size, sl.into_iter());
     }
 
-    #[ignore]
     #[test]
     fn iter_rev() {
         let size = 10000;
@@ -1008,7 +1243,6 @@ mod tests {
         test(size, sl.into_iter().rev());
     }
 
-    #[ignore]
     #[test]
     fn iter_mixed() {
         let size = 10000;
@@ -1035,7 +1269,6 @@ mod tests {
         test(size, sl.into_iter());
     }
 
-    #[ignore]
     #[test]
     fn with_comp() {
         let mut sl = unsafe {
@@ -1064,7 +1297,6 @@ mod tests {
         }
     }
 
-    #[ignore]
     #[test]
     fn sort_by() {
         // Change sort_by when empty
@@ -1121,7 +1353,6 @@ mod tests {
         }
     }
 
-    #[ignore]
     #[test]
     #[should_panic]
     fn sort_by_panic() {
@@ -1142,7 +1373,6 @@ mod tests {
         };
     }
 
-    #[ignore]
     #[test]
     fn clear() {
         let mut sl: OrderedSkipList<i64> = (0..100).collect();
@@ -1229,7 +1459,6 @@ mod tests {
         }
     }
 
-    #[ignore]
     #[test]
     fn index_pop() {
         let size = 1000;
@@ -1260,7 +1489,6 @@ mod tests {
         assert!(sl.is_empty());
     }
 
-    #[ignore]
     #[test]
     fn contains() {
         let (min, max) = (25, 75);
@@ -1275,7 +1503,6 @@ mod tests {
         }
     }
 
-    #[ignore]
     #[test]
     fn remove() {
         let size = 100;
@@ -1308,7 +1535,6 @@ mod tests {
         }
     }
 
-    #[ignore]
     #[test]
     fn dedup() {
         let size = 1000;
@@ -1334,7 +1560,6 @@ mod tests {
         }
     }
 
-    #[ignore]
     #[test]
     fn retain() {
         let repeats = 10;
@@ -1368,7 +1593,6 @@ mod tests {
         assert!(sl.is_empty());
     }
 
-    #[ignore]
     #[test]
     fn remove_index() {
         let size = 100;
@@ -1388,7 +1612,6 @@ mod tests {
         assert!(sl.is_empty());
     }
 
-    #[ignore]
     #[test]
     fn pop() {
         let size = 1000;
@@ -1402,7 +1625,6 @@ mod tests {
         assert!(sl.is_empty());
     }
 
-    #[ignore]
     #[test]
     fn debug_display() {
         let sl: OrderedSkipList<_> = (0..10).collect();
@@ -1411,7 +1633,6 @@ mod tests {
         println!("{}", sl);
     }
 
-    #[ignore]
     #[test]
     fn equality() {
         let a: OrderedSkipList<i64> = (0..100).collect();
