@@ -644,13 +644,24 @@ impl<K, V> SkipMap<K, V> {
 // Internal methods
 // ///////////////////////////////////////////////
 
-impl<K, V> SkipMap<K, V> {
+impl<K: Ord, V> SkipMap<K, V> {
     /// Checks the integrity of the skipmap.
     #[allow(dead_code)]
     fn check(&self) {
-        self.head.check()
+        self.head.check();
+        if let Some(mut node) = self.head.next_ref() {
+            let mut key = node.key_ref().unwrap();
+            while let Some(next_node) = node.next_ref() {
+                let next_key = next_node.key_ref().unwrap();
+                assert!(key <= next_key);
+                node = next_node;
+                key = next_key;
+            }
+        }
     }
+}
 
+impl<K, V> SkipMap<K, V> {
     /// Find the reference to the node equal to the given key.
     fn find_key<Q: ?Sized>(&self, key: &Q) -> Option<&SkipNode<K, V>>
     where
