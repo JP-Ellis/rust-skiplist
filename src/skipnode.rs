@@ -520,7 +520,7 @@ pub trait SkipListAction<'a, T>: Sized {
     type Ok;
     /// Return type when this action fails.
     type Err;
-    fn fail(&mut self) -> Self::Err;
+    fn fail(self) -> Self::Err;
     /// Find the target node at the given level.
     /// Return some node and distance travelled.
     /// Return None when target node does not exist anywhere in the list.
@@ -536,7 +536,7 @@ pub trait SkipListAction<'a, T>: Sized {
 
     /// Do something on the node.
     /// SAFETY: If `Self::Ok` is a reference, it shall not alias with any node that needs fixup.
-    unsafe fn act_on_node(&mut self, node: &'a mut SkipNode<T>) -> Result<Self::Ok, Self::Err>;
+    unsafe fn act_on_node(self, node: &'a mut SkipNode<T>) -> Result<Self::Ok, Self::Err>;
 
     /// Usually SkipListAction breaks links between nodes.
     /// This method should fix that up.
@@ -545,7 +545,6 @@ pub trait SkipListAction<'a, T>: Sized {
     /// `action_result` is a mutable reference to the return value of act_no_node (if it succeeds).
     /// `distance_to_target` is distance from `level_head` to `target`.
     fn fixup(
-        &mut self,
         level: usize,
         level_head: &'a mut SkipNode<T>,
         distance_to_target: usize,
@@ -556,7 +555,7 @@ pub trait SkipListAction<'a, T>: Sized {
     /// It's unlikely one will need to override this.
     /// Override act() instead.
     unsafe fn _traverse(
-        &mut self,
+        mut self,
         node: &'a mut SkipNode<T>,
         level: usize,
     ) -> Result<(Self::Ok, usize), Self::Err> {
@@ -567,18 +566,18 @@ pub trait SkipListAction<'a, T>: Sized {
         let level_head_p = level_head as *mut SkipNode<T>;
         if level == 0 {
             let mut res = self.act_on_node(level_head)?;
-            self.fixup(0, &mut *level_head_p, 0, &mut res);
+            Self::fixup(0, &mut *level_head_p, 0, &mut res);
             Ok((res, distance_this_level))
         } else {
             let (mut res, distance_after_head) = self._traverse(level_head, level - 1)?;
             let level_head = &mut *level_head_p;
-            self.fixup(level, level_head, distance_after_head, &mut res);
+            Self::fixup(level, level_head, distance_after_head, &mut res);
             Ok((res, distance_this_level + distance_after_head))
         }
     }
 
     /// Perform the action.
-    fn act(mut self, list_head: &'a mut SkipNode<T>) -> Result<Self::Ok, Self::Err> {
+    fn act(self, list_head: &'a mut SkipNode<T>) -> Result<Self::Ok, Self::Err> {
         let (res, _distance) = unsafe { self._traverse(list_head, list_head.level)? };
         Ok(res)
     }
@@ -748,14 +747,14 @@ pub fn removal_fixup<T>(
 
 struct IndexInserter<V> {
     seeker: DistanceSeeker,
-    new_node: Option<Box<SkipNode<V>>>,
+    new_node: Box<SkipNode<V>>,
 }
 
 impl<V> IndexInserter<V> {
     fn new(distance: usize, new_node: Box<SkipNode<V>>) -> Self {
         IndexInserter {
             seeker: DistanceSeeker(distance),
-            new_node: Some(new_node),
+            new_node,
         }
     }
 }
@@ -765,8 +764,8 @@ impl<'a, V: 'a> SkipListAction<'a, V> for IndexInserter<V> {
 
     type Err = Box<SkipNode<V>>;
 
-    fn fail(&mut self) -> Self::Err {
-        self.new_node.take().unwrap()
+    fn fail(self) -> Self::Err {
+        self.new_node
     }
 
     // Finds the parent of the new node.
@@ -779,14 +778,12 @@ impl<'a, V: 'a> SkipListAction<'a, V> for IndexInserter<V> {
     }
 
     // SAFETY: This returns a new node, which should never alias with any old nodes.
-    unsafe fn act_on_node(&mut self, node: &'a mut SkipNode<V>) -> Result<Self::Ok, Self::Err> {
-        let new_node = self.new_node.take().unwrap();
+    unsafe fn act_on_node(self, node: &'a mut SkipNode<V>) -> Result<Self::Ok, Self::Err> {
         // SAFETY: Links will be fixed by the caller.
-        Ok(node.insert_next(new_node))
+        Ok(node.insert_next(self.new_node))
     }
 
     fn fixup(
-        &mut self,
         level: usize,
         level_head: &'a mut SkipNode<V>,
         distance_to_parent: usize,
@@ -814,7 +811,7 @@ impl<'a, V> SkipListAction<'a, V> for IndexRemover {
     type Err = ();
 
     #[allow(clippy::unused_unit)]
-    fn fail(&mut self) -> Self::Err {
+    fn fail(self) -> Self::Err {
         ()
     }
 
@@ -827,13 +824,12 @@ impl<'a, V> SkipListAction<'a, V> for IndexRemover {
     }
 
     // SAFETY: Self::Ok is not a reference type
-    unsafe fn act_on_node(&mut self, node: &'a mut SkipNode<V>) -> Result<Self::Ok, Self::Err> {
+    unsafe fn act_on_node(self, node: &'a mut SkipNode<V>) -> Result<Self::Ok, Self::Err> {
         // SAFETY: links will be fixed by the caller.
         node.take_next().ok_or(())
     }
 
     fn fixup(
-        &mut self,
         level: usize,
         level_head: &'a mut SkipNode<V>,
         _distance_to_parent: usize,

@@ -684,7 +684,7 @@ where
     F: Fn(&T, &T) -> Ordering,
 {
     cmp: F,
-    new_node: Option<Box<SkipNode<T>>>,
+    new_node: Box<SkipNode<T>>,
 }
 
 impl<F, T> OrdInserter<F, T>
@@ -692,10 +692,7 @@ where
     F: Fn(&T, &T) -> Ordering,
 {
     fn new(cmp: F, new_node: Box<SkipNode<T>>) -> Self {
-        Self {
-            cmp,
-            new_node: Some(new_node),
-        }
+        Self { cmp, new_node }
     }
 }
 
@@ -707,8 +704,8 @@ where
 
     type Err = Box<SkipNode<T>>;
 
-    fn fail(&mut self) -> Self::Err {
-        self.new_node.take().unwrap()
+    fn fail(self) -> Self::Err {
+        self.new_node
     }
 
     fn seek(
@@ -716,11 +713,7 @@ where
         node: &'a mut SkipNode<T>,
         level: usize,
     ) -> Option<(&'a mut SkipNode<T>, usize)> {
-        let value = self
-            .new_node
-            .as_ref()
-            .and_then(|node| node.item.as_ref())
-            .unwrap();
+        let value = self.new_node.item.as_ref().unwrap();
         let (node, distance) = node.advance_while_at_level_mut(level, |_current, next| {
             let next_value = next.item.as_ref().unwrap();
             (self.cmp)(value, next_value) == Ordering::Greater
@@ -729,14 +722,12 @@ where
     }
 
     // SAEFTY: The new node may never alias with the old nodes.
-    unsafe fn act_on_node(&mut self, node: &'a mut SkipNode<T>) -> Result<Self::Ok, Self::Err> {
-        let new_node = self.new_node.take().unwrap();
+    unsafe fn act_on_node(self, node: &'a mut SkipNode<T>) -> Result<Self::Ok, Self::Err> {
         // SAFETY: links will be fixed by the caller.
-        Ok(node.insert_next(new_node))
+        Ok(node.insert_next(self.new_node))
     }
 
     fn fixup(
-        &mut self,
         level: usize,
         level_head: &'a mut SkipNode<T>,
         distance_to_target: usize,
@@ -772,7 +763,7 @@ where
     type Err = ();
 
     #[allow(clippy::unused_unit)]
-    fn fail(&mut self) -> Self::Err {
+    fn fail(self) -> Self::Err {
         ()
     }
 
@@ -796,13 +787,12 @@ where
     }
 
     // SAFETY: The removed node will never alias with nodes in the list.
-    unsafe fn act_on_node(&mut self, node: &'a mut SkipNode<T>) -> Result<Self::Ok, Self::Err> {
+    unsafe fn act_on_node(self, node: &'a mut SkipNode<T>) -> Result<Self::Ok, Self::Err> {
         // SAFETY: Links will be fixed by the caller.
         node.take_next().ok_or(())
     }
 
     fn fixup(
-        &mut self,
         level: usize,
         level_head: &'a mut SkipNode<T>,
         _distance_to_target: usize,
@@ -843,7 +833,7 @@ where
     type Err = ();
 
     #[allow(clippy::unused_unit)]
-    fn fail(&mut self) -> Self::Err {
+    fn fail(self) -> Self::Err {
         ()
     }
 
@@ -886,13 +876,12 @@ where
     }
 
     // SAFETY: The removed node will never alias with nodes in the list.
-    unsafe fn act_on_node(&mut self, node: &'a mut SkipNode<T>) -> Result<Self::Ok, Self::Err> {
+    unsafe fn act_on_node(self, node: &'a mut SkipNode<T>) -> Result<Self::Ok, Self::Err> {
         // SAFETY: Links will be fixed by the caller.
         node.take_next().ok_or(())
     }
 
     fn fixup(
-        &mut self,
         level: usize,
         level_head: &'a mut SkipNode<T>,
         _distance_to_target: usize,
@@ -929,17 +918,6 @@ impl<T> OrderedSkipList<T> {
             self.is_sort(self.compare.as_ref()),
             "The list isn't properly sorted!"
         );
-    }
-
-    /// Returns the last node whose value is less than or equal the one
-    /// specified.  If there are multiple nodes with the desired value, one of
-    /// them at random will be returned.
-    ///
-    /// If the skiplist is empty or if the value being searched for is smaller
-    /// than all the values contained in the skiplist, the head node will be
-    /// returned.
-    fn find_value(&self, value: &T) -> &SkipNode<T> {
-        todo!()
     }
 
     /// Gets a pointer to the node with the given index.
