@@ -2,7 +2,7 @@
 //! sorted.
 
 use crate::level_generator::{GeometricalLevelGenerator, LevelGenerator};
-use crate::skipnode::{self, IntoIter};
+use crate::skipnode::{self, insertion_fixup, IntoIter, SkipListAction};
 use std::{
     borrow::Borrow, cmp, cmp::Ordering, default, fmt, hash, hash::Hash, iter, mem, ops, ops::Bound,
     ptr,
@@ -600,14 +600,10 @@ impl<K, V> SkipMap<K, V> {
         K: Borrow<Q>,
         Q: Ord,
     {
-        let level = self.level_generator.total();
-        let last_le = (0..level).rev().fold(self.head.as_ref(), |node, level| {
-            let (node, _) = node.advance_while_at_level(level, |_, next_node| {
-                let next_key = next_node.key_ref().unwrap();
-                next_key.borrow() <= key
-            });
-            node
-        });
+        let (last_le, _) = self.head.find_last_le_with(
+            |(node_key, _), target| Ord::cmp(node_key.borrow(), target),
+            key,
+        );
         let node_key = last_le.key_ref()?;
         if node_key.borrow() == key {
             Some(last_le)
@@ -622,14 +618,10 @@ impl<K, V> SkipMap<K, V> {
         K: Borrow<Q>,
         Q: Ord,
     {
-        let level = self.level_generator.total();
-        let last_le = (0..level).rev().fold(self.head.as_mut(), |node, level| {
-            let (node, _) = node.advance_while_at_level_mut(level, |_, next_node| {
-                let next_key = next_node.key_ref().unwrap();
-                next_key.borrow() <= key
-            });
-            node
-        });
+        let (last_le, _) = self.head.find_last_le_with_mut(
+            |(node_key, _), target| Ord::cmp(node_key.borrow(), target),
+            key,
+        );
         let node_key = last_le.key_ref()?;
         if node_key.borrow() == key {
             Some(last_le)
