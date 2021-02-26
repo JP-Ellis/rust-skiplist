@@ -18,7 +18,7 @@ use crate::{
 /// find a particular index.
 pub struct SkipList<T> {
     // Storage, this is not sorted
-    pub(crate) head: Box<SkipNode<T>>,
+    head: Box<SkipNode<T>>,
     len: usize,
     level_generator: GeometricalLevelGenerator,
 }
