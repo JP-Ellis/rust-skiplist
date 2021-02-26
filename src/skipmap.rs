@@ -597,7 +597,46 @@ impl<K, V> SkipMap<K, V> {
         K: Borrow<Q>,
         Q: Ord,
     {
-        todo!()
+        let iter_inner = self._range(min, max).unwrap_or(skipnode::Iter {
+            first: None,
+            last: None,
+            size: 0,
+        });
+        Iter(iter_inner)
+    }
+
+    fn _range<Q>(&self, min: Bound<&Q>, max: Bound<&Q>) -> Option<skipnode::Iter<(K, V)>>
+    where
+        K: Borrow<Q>,
+        Q: Ord,
+    {
+        fn cmp<Q: Ord, K: Borrow<Q>, V>(node_item: &(K, V), target: &Q) -> Ordering {
+            node_item.0.borrow().cmp(target)
+        }
+        let (first, first_distance_from_head) = match min {
+            Bound::Unbounded => (self.head.next_ref()?, 1usize),
+            Bound::Included(min) => {
+                let (last_lt, last_lt_from_head) = self.head.find_last_lt_with(cmp, min);
+                let first_ge = last_lt.next_ref()?;
+                (first_ge, last_lt_from_head + 1)
+            }
+            Bound::Excluded(min) => {
+                let (last_le, last_le_from_head) = self.head.find_last_le_with(cmp, min);
+                let first_gt = last_le.next_ref()?;
+                (first_gt, last_le_from_head + 1)
+            }
+        };
+        let (last, last_distance_from_head) = match max {
+            Bound::Unbounded => (self.head.last(), self.len()),
+            Bound::Included(max) => self.head.find_last_le_with(cmp, max),
+            Bound::Excluded(max) => self.head.find_last_lt_with(cmp, max),
+        };
+        let size = last_distance_from_head.checked_sub(first_distance_from_head)? + 1;
+        Some(skipnode::Iter {
+            first: Some(first),
+            last: Some(last),
+            size,
+        })
     }
 }
 
@@ -1292,7 +1331,6 @@ mod tests {
         assert!(vals.next().is_none());
     }
 
-    #[ignore]
     #[test]
     fn range_small() {
         let size = 5;
@@ -1308,7 +1346,6 @@ mod tests {
         assert_eq!(j, size - 2);
     }
 
-    #[ignore]
     #[test]
     fn range_1000() {
         let size = 1000;
@@ -1350,7 +1387,6 @@ mod tests {
         test(&sm, Unbounded, Unbounded);
     }
 
-    #[ignore]
     #[test]
     fn range() {
         let size = 200;
