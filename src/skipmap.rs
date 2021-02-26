@@ -119,7 +119,18 @@ where
     /// assert!(!skipmap.is_empty());
     /// ```
     pub fn insert(&mut self, key: K, value: V) -> Option<V> {
-        todo!()
+        let level_gen = &mut self.level_generator;
+        let inserter = InsertOrReplace::new(key, value, |k, v| {
+            Box::new(SkipNode::new((k, v), level_gen.random()))
+        });
+        let insert_res = inserter.act(self.head.as_mut());
+        match insert_res {
+            Ok(_) => {
+                self.len += 1;
+                None
+            }
+            Err(old_val) => Some(old_val),
+        }
     }
 }
 
@@ -403,7 +414,14 @@ impl<K, V> SkipMap<K, V> {
         K: Borrow<Q>,
         Q: Ord,
     {
-        todo!()
+        let remover = Remover(key);
+        match remover.act(self.head.as_mut()) {
+            Ok(node) => {
+                self.len -= 1;
+                node.into_inner().map(|(_key, val)| val)
+            }
+            Err(_) => None,
+        }
     }
 
     /// Removes and returns an element with the given index.
@@ -705,6 +723,128 @@ where
 }
 
 // ///////////////////////////////////////////////
+// List Actions
+// ///////////////////////////////////////////////
+
+struct InsertOrReplace<K, V, MakeNode>
+where
+    K: Ord,
+    MakeNode: FnOnce(K, V) -> Box<SkipNode<K, V>>,
+{
+    key: K,
+    value: V,
+    make_node: MakeNode,
+}
+
+impl<K, V, MakeNode> InsertOrReplace<K, V, MakeNode>
+where
+    K: Ord,
+    MakeNode: FnOnce(K, V) -> Box<SkipNode<K, V>>,
+{
+    fn new(key: K, value: V, make_node: MakeNode) -> Self {
+        Self {
+            key,
+            value,
+            make_node,
+        }
+    }
+}
+
+impl<'a, K: 'a, V: 'a, MakeNode> SkipListAction<'a, (K, V)> for InsertOrReplace<K, V, MakeNode>
+where
+    K: Ord,
+    MakeNode: FnOnce(K, V) -> Box<SkipNode<K, V>>,
+{
+    type Ok = &'a mut SkipNode<K, V>;
+    type Err = V;
+    fn fail(self) -> Self::Err {
+        panic!("This action should never fail")
+    }
+    fn seek(
+        &mut self,
+        node: &'a mut SkipNode<K, V>,
+        level: usize,
+    ) -> Option<(&'a mut SkipNode<K, V>, usize)> {
+        Some(node.advance_while_at_level_mut(level, |_, next_node| {
+            let next_key = next_node.key_ref().unwrap();
+            let target_key = &self.key;
+            next_key < target_key
+        }))
+    }
+
+    unsafe fn act_on_node(self, node: &'a mut SkipNode<K, V>) -> Result<Self::Ok, Self::Err> {
+        let target_key = &self.key;
+        if let Some(target_node) = node.next_mut() {
+            if let Some(node_key) = target_node.key_ref() {
+                if target_key == node_key {
+                    let old_value = mem::replace(target_node.value_mut().unwrap(), self.value);
+                    return Err(old_value);
+                }
+            }
+        }
+        let new_node = (self.make_node)(self.key, self.value);
+        node.insert_next(new_node);
+        Ok(node.next_mut().unwrap())
+    }
+    fn fixup(
+        level: usize,
+        level_head: &'a mut SkipNode<K, V>,
+        distance_to_target: usize,
+        action_result: &mut Self::Ok,
+    ) {
+        insertion_fixup(level, level_head, distance_to_target, action_result)
+    }
+}
+
+struct Remover<'a, Q>(&'a Q);
+
+impl<'a, Q: Ord, K: Borrow<Q>, V> SkipListAction<'a, (K, V)> for Remover<'a, Q> {
+    type Ok = Box<SkipNode<K, V>>;
+    type Err = ();
+    #[allow(clippy::unused_unit)]
+    fn fail(self) -> Self::Err {
+        ()
+    }
+
+    fn seek(
+        &mut self,
+        node: &'a mut SkipNode<K, V>,
+        level: usize,
+    ) -> Option<(&'a mut SkipNode<K, V>, usize)> {
+        Some(node.advance_while_at_level_mut(level, |_, next_node| {
+            let next_key = next_node.key_ref().unwrap().borrow();
+            let target_key = self.0;
+            next_key < target_key
+        }))
+    }
+
+    unsafe fn act_on_node(
+        self,
+        target_parent: &'a mut SkipNode<K, V>,
+    ) -> Result<Self::Ok, Self::Err> {
+        let node_key = target_parent
+            .next_mut()
+            .and_then(|node| node.key_ref())
+            .ok_or(())?
+            .borrow();
+        let target_key = self.0;
+        if node_key == target_key {
+            Ok(target_parent.take_next().unwrap())
+        } else {
+            Err(())
+        }
+    }
+    fn fixup(
+        level: usize,
+        level_head: &'a mut SkipNode<K, V>,
+        _distance: usize,
+        action_result: &mut Self::Ok,
+    ) {
+        skipnode::removal_fixup(level, level_head, action_result)
+    }
+}
+
+// ///////////////////////////////////////////////
 // Trait implementation
 // ///////////////////////////////////////////////
 
@@ -989,7 +1129,6 @@ mod tests {
     use super::SkipMap;
     use std::collections::Bound::{self, Excluded, Included, Unbounded};
 
-    #[ignore]
     #[test]
     fn basic_small() {
         let mut sm: SkipMap<i64, i64> = SkipMap::new();
@@ -1014,7 +1153,6 @@ mod tests {
         sm.check();
     }
 
-    #[ignore]
     #[test]
     fn basic_large() {
         let size = 10_000;
@@ -1034,7 +1172,6 @@ mod tests {
         sm.check();
     }
 
-    #[ignore]
     #[test]
     fn insert_existing() {
         let size = 100;
@@ -1052,7 +1189,6 @@ mod tests {
         }
     }
 
-    #[ignore]
     #[test]
     fn clear() {
         let mut sm: SkipMap<_, _> = (0..100).map(|x| (x, x)).collect();
@@ -1062,7 +1198,6 @@ mod tests {
         assert!(sm.is_empty());
     }
 
-    #[ignore]
     #[test]
     fn iter() {
         let size = 10000;
@@ -1085,7 +1220,6 @@ mod tests {
         test(size, sm.into_iter());
     }
 
-    #[ignore]
     #[test]
     fn iter_rev() {
         let size = 1000;
@@ -1108,7 +1242,6 @@ mod tests {
         test(size, sm.into_iter().rev());
     }
 
-    #[ignore]
     #[test]
     fn iter_mixed() {
         let size = 1000;
@@ -1135,7 +1268,6 @@ mod tests {
         test(size, sm.into_iter());
     }
 
-    #[ignore]
     #[test]
     fn iter_key_val() {
         let size = 1000;
@@ -1244,7 +1376,6 @@ mod tests {
         // assert!(values.next().is_none());
     }
 
-    #[ignore]
     #[test]
     fn index_pop() {
         let size = 1000;
@@ -1278,7 +1409,6 @@ mod tests {
         assert!(sm.is_empty());
     }
 
-    #[ignore]
     #[test]
     fn remove_index() {
         let size = 100;
@@ -1298,7 +1428,6 @@ mod tests {
         assert!(sm.is_empty());
     }
 
-    #[ignore]
     #[test]
     fn contains() {
         let (min, max) = (25, 75);
@@ -1314,7 +1443,6 @@ mod tests {
         }
     }
 
-    #[ignore]
     #[test]
     fn debug_display() {
         let sl: SkipMap<_, _> = (0..10).map(|x| (x, x)).collect();
@@ -1323,7 +1451,6 @@ mod tests {
         println!("{}", sl);
     }
 
-    #[ignore]
     #[test]
     fn equality() {
         let a: SkipMap<i64, i64> = (0..100).map(|x| (x, x)).collect();
