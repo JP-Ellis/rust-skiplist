@@ -2,15 +2,6 @@ use std::cmp::Ordering;
 use std::marker::PhantomData;
 use std::{fmt, iter, ptr};
 
-/// Minimum levels required for a list of size n.
-pub fn levels_required(n: usize) -> usize {
-    if n == 0 {
-        1
-    } else {
-        let num_bits = std::mem::size_of::<usize>() * 8;
-        num_bits - n.leading_zeros() as usize
-    }
-}
 
 // ////////////////////////////////////////////////////////////////////////////
 // SkipNode
@@ -1058,6 +1049,17 @@ impl<T> DoubleEndedIterator for IntoIter<T> {
 #[cfg(test)]
 mod test {
     use super::*;
+
+    /// Minimum levels required for a list of size n.
+    fn levels_required(n: usize) -> usize {
+        if n == 0 {
+            1
+        } else {
+            let num_bits = std::mem::size_of::<usize>() * 8;
+            num_bits - n.leading_zeros() as usize
+        }
+    }
+
     #[test]
     fn test_level_required() {
         assert_eq!(levels_required(0), 1);
