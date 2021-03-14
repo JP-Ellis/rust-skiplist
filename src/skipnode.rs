@@ -1,10 +1,16 @@
 use std::cmp::Ordering;
-use std::marker::PhantomData;
-use std::{fmt, iter, ptr};
+use std::{
+    fmt, iter,
+    ptr::{self, NonNull},
+};
 
 // ////////////////////////////////////////////////////////////////////////////
 // SkipNode
 // ////////////////////////////////////////////////////////////////////////////
+
+/// A covariant pointer to a SkipNode.
+/// (See Rustonomicon for details on covariance)
+type Link<T> = Option<NonNull<SkipNode<T>>>;
 
 /// SkipNodes are make up the SkipList.  The SkipList owns the first head-node
 /// (which has no value) and each node has ownership of the next node through
@@ -30,15 +36,13 @@ pub struct SkipNode<V> {
     // how high the node reaches.
     pub level: usize,
     // The immediately previous element.
-    pub prev: *mut SkipNode<V>,
+    pub prev: Link<V>,
     // Vector of links to the next node at the respective level.  This vector
     // *must* be of length `self.level + 1`.  links[0] stores a pointer to the
     // next node, which will have to be dropped.
-    pub links: Vec<*mut SkipNode<V>>,
+    pub links: Vec<Link<V>>,
     // The corresponding length of each link
     pub links_len: Vec<usize>,
-    // Owns self.link[0]
-    _phantom_link: PhantomData<SkipNode<V>>,
 }
 
 // ///////////////////////////////////////////////
@@ -51,10 +55,9 @@ impl<V> SkipNode<V> {
         SkipNode {
             item: None,
             level: total_levels - 1,
-            prev: ptr::null_mut(),
-            links: iter::repeat(ptr::null_mut()).take(total_levels).collect(),
+            prev: None,
+            links: iter::repeat(None).take(total_levels).collect(),
             links_len: iter::repeat(0).take(total_levels).collect(),
-            _phantom_link: PhantomData,
         }
     }
 
@@ -64,10 +67,9 @@ impl<V> SkipNode<V> {
         SkipNode {
             item: Some(item),
             level,
-            prev: ptr::null_mut(),
-            links: iter::repeat(ptr::null_mut()).take(level + 1).collect(),
+            prev: None,
+            links: iter::repeat(None).take(level + 1).collect(),
             links_len: iter::repeat(0).take(level + 1).collect(),
-            _phantom_link: PhantomData,
         }
     }
 
@@ -78,33 +80,29 @@ impl<V> SkipNode<V> {
 
     /// Returns `true` is the node is a head-node.
     pub fn is_head(&self) -> bool {
-        self.prev.is_null()
+        self.prev.is_none()
     }
 
     pub fn next_ref(&self) -> Option<&Self> {
         // SAFETY: all links either points to something or is null.
-        unsafe { self.links[0].as_ref() }
+        unsafe { self.links[0].as_ref().map(|p| p.as_ref()) }
     }
 
     pub fn next_mut(&mut self) -> Option<&mut Self> {
         // SAFETY: all links either points to something or is null.
-        unsafe { self.links[0].as_mut() }
+        unsafe { self.links[0].as_mut().map(|p| p.as_mut()) }
     }
 
     /// Takes the next node and set next_node.prev as null.
     ///
     /// SAFETY: please make sure no link at level 1 or greater becomes dangling.
     pub unsafe fn take_tail(&mut self) -> Option<Box<Self>> {
-        let next = self.links[0];
-        if next.is_null() {
-            None
-        } else {
-            let mut next = Box::from_raw(next);
-            next.prev = ptr::null_mut();
-            self.links[0] = ptr::null_mut();
+        self.links[0].take().map(|p| {
+            let mut next = Box::from_raw(p.as_ptr());
+            next.prev = None;
             self.links_len[0] = 0;
-            Some(next)
-        }
+            next
+        })
     }
 
     /// Replace the next node.
@@ -114,10 +112,10 @@ impl<V> SkipNode<V> {
     pub unsafe fn replace_tail(&mut self, mut new_next: Box<Self>) -> Option<Box<Self>> {
         let mut old_next = self.take_tail();
         if let Some(old_next) = old_next.as_mut() {
-            old_next.prev = ptr::null_mut();
+            old_next.prev = None;
         }
-        new_next.prev = self as *mut _;
-        self.links[0] = Box::into_raw(new_next);
+        new_next.prev = Some(NonNull::new_unchecked(self as *mut _));
+        self.links[0] = Some(NonNull::new_unchecked(Box::into_raw(new_next)));
         self.links_len[0] = 1;
         old_next
     }
@@ -161,7 +159,10 @@ impl<V> SkipNode<V> {
                     // should use take_next()/replace_next() to manage 0th level.
                     {
                         if level <= next_node.level {
-                            assert_eq!(head.links[level], next_node.as_mut() as *mut _);
+                            assert!(ptr::eq(
+                                head.links[level].unwrap().as_ptr(),
+                                next_node.as_mut()
+                            ));
                             head.links_len[level] += next_node.links_len[level];
                             head.links_len[level] -= 1;
                             head.links[level] = next_node.links[level];
@@ -362,8 +363,8 @@ impl<V> SkipNode<V> {
         level: usize,
         predicate: impl FnOnce(&Self, &Self) -> bool,
     ) -> Result<(&mut Self, usize), &mut Self> {
-        // SAFETY: all links either points to something or is null.
-        let next = unsafe { self.links[level].as_mut() };
+        // SAFETY: If a link contains Some(p), then p always points to something.
+        let next = unsafe { self.links[level].and_then(|p| p.as_ptr().as_mut()) };
         match next {
             Some(next) if predicate(self, next) => Ok((next, self.links_len[level])),
             _ => Err(self),
@@ -377,8 +378,8 @@ impl<V> SkipNode<V> {
         level: usize,
         predicate: impl FnOnce(&Self, &Self) -> bool,
     ) -> Result<(&Self, usize), &Self> {
-        // SAFETY: all links either points to something or is null.
-        let next = unsafe { self.links[level].as_ref() };
+        // SAFETY: If a link contains Some(p), then p always points to something.
+        let next = unsafe { self.links[level].as_ref().map(|p| p.as_ref()) };
         match next {
             Some(next) if predicate(self, next) => Ok((next, self.links_len[level])),
             _ => Err(self),
@@ -396,7 +397,7 @@ impl<V> SkipNode<V> {
         new_node: Box<Self>,
         distance_to_parent: usize,
     ) -> Result<&mut Self, Box<Self>> {
-        assert!(self.prev.is_null(), "Only the head may insert nodes!");
+        assert!(self.prev.is_none(), "Only the head may insert nodes!");
         assert!(
             self.level >= new_node.level,
             "You may not insert nodes with level higher than the head!"
@@ -411,7 +412,7 @@ impl<V> SkipNode<V> {
     ///
     /// If that node exists, remove that node and retrun it.
     pub fn remove_at(&mut self, distance_to_parent: usize) -> Option<Box<Self>> {
-        assert!(self.prev.is_null(), "Only the head may remove nodes!");
+        assert!(self.prev.is_none(), "Only the head may remove nodes!");
         let remover = IndexRemover::new(distance_to_parent);
         remover.act(self).ok()
     }
@@ -433,7 +434,7 @@ impl<V> SkipNode<V> {
             // Check link at level 0
             if let Some(next_node) = node.next_ref() {
                 len += 1;
-                assert!(ptr::eq(next_node.prev, node));
+                assert!(ptr::eq(next_node.prev.unwrap().as_ptr(), node));
             }
             current_node = node.next_ref();
         }
@@ -445,9 +446,8 @@ impl<V> SkipNode<V> {
             let mut current_node = Some(self);
             while let Some(node) = current_node {
                 length_sum += node.links_len[lvl];
-                // SAFETY: Assuming the invariant is not broken, all links should either points to a
-                // valid arrivable node or none.
-                let next_node = unsafe { node.links[lvl].as_ref() };
+                // SAFETY: all links are either None or should points to something.
+                let next_node = unsafe { node.links[lvl].as_ref().map(|p| p.as_ref()) };
                 assert_eq!(
                     node.links_len[lvl],
                     node.distance_at_level(lvl - 1, next_node).unwrap(),
@@ -706,8 +706,8 @@ pub fn insertion_fixup<T>(
         return;
     }
     if level <= new_node.level {
-        new_node.links[level] = level_head.links[level] as *mut _;
-        level_head.links[level] = *new_node as *mut _;
+        new_node.links[level] = level_head.links[level];
+        level_head.links[level] = NonNull::new(*new_node);
         let old_len = level_head.links_len[level];
         // SkipListAction defines the distance by the node which you mutate.
         // It's different from the old _insert implementation.
@@ -926,7 +926,7 @@ impl<'a, T> DoubleEndedIterator for Iter<'a, T> {
         } else {
             // SAFETY: The iterator is not empty yet.
             unsafe {
-                self.last = last_node.prev.as_ref();
+                self.last = last_node.prev.as_ref().map(|p| p.as_ref());
             }
         }
         self.size -= 1;
@@ -937,7 +937,7 @@ impl<'a, T> DoubleEndedIterator for Iter<'a, T> {
 /// Iterator by mutable reference
 pub struct IterMut<'a, T> {
     pub(crate) first: Option<&'a mut SkipNode<T>>,
-    pub(crate) last: *mut SkipNode<T>,
+    pub(crate) last: Option<NonNull<SkipNode<T>>>,
     pub(crate) size: usize,
 }
 
@@ -947,11 +947,11 @@ impl<'a, T> IterMut<'a, T> {
         if len == 0 {
             IterMut {
                 first: None,
-                last: ptr::null_mut(),
+                last: None,
                 size: 0,
             }
         } else {
-            let last = head.last_mut() as *mut SkipNode<T>;
+            let last = NonNull::new(head.last_mut());
             let first = head.next_mut();
             IterMut {
                 first,
@@ -967,11 +967,12 @@ impl<'a, T> Iterator for IterMut<'a, T> {
 
     fn next(&mut self) -> Option<Self::Item> {
         let current_node = self.first.take()?;
-        if ptr::eq(current_node, self.last) {
+        if ptr::eq(current_node, self.last.unwrap().as_ptr()) {
             self.first = None;
-            self.last = ptr::null_mut();
+            self.last = None;
         } else {
-            // calling current_node.next_mut() borrows it, so we need to use a pointer.
+            // calling current_node.next_mut() borrows it, transforming the reference to a pointer
+            // unborrows that.
             let p = current_node.next_mut().unwrap() as *mut SkipNode<T>;
             // SAFETY: p.as_mut() is safe because it points to a valid object.
             // There's no aliasing issue since nobody else holds a reference to current_node
@@ -991,20 +992,21 @@ impl<'a, T> Iterator for IterMut<'a, T> {
 
 impl<'a, T> DoubleEndedIterator for IterMut<'a, T> {
     fn next_back(&mut self) -> Option<Self::Item> {
-        if self.last.is_null() {
+        if self.last.is_none() {
             return None;
         }
+        assert!(self.last.is_some());
         // There can be at most one mutable reference to the first node.
         // We need to take it from self.first before doing anything,
         // including simple comparison.
         let first = self.first.take().unwrap();
-        let popped = if ptr::eq(first, self.last) {
-            self.last = ptr::null_mut();
+        let popped = if ptr::eq(first, self.last.unwrap().as_ptr()) {
+            self.last = None;
             first
         } else {
             // SAFETY: self.last isn't null and doesn't alias first
-            let new_last = unsafe { (*self.last).prev };
-            if ptr::eq(first, new_last) {
+            let new_last = unsafe { self.last.unwrap().as_mut().prev };
+            if ptr::eq(first, new_last.unwrap().as_ptr()) {
                 self.last = new_last;
                 let popped_p = first.next_mut().unwrap() as *mut SkipNode<T>;
                 self.first.replace(first);
@@ -1013,7 +1015,7 @@ impl<'a, T> DoubleEndedIterator for IterMut<'a, T> {
                 self.first.replace(first);
                 let last = self.last;
                 self.last = new_last;
-                unsafe { &mut *last }
+                unsafe { last.unwrap().as_ptr().as_mut().unwrap() }
             }
         };
         self.size -= 1;
@@ -1024,7 +1026,7 @@ impl<'a, T> DoubleEndedIterator for IterMut<'a, T> {
 /// Consuming iterator.  
 pub struct IntoIter<T> {
     pub(crate) first: Option<Box<SkipNode<T>>>,
-    pub(crate) last: *mut SkipNode<T>,
+    pub(crate) last: Option<NonNull<SkipNode<T>>>,
     pub(crate) size: usize,
 }
 
@@ -1034,11 +1036,11 @@ impl<T> IntoIter<T> {
         if len == 0 {
             IntoIter {
                 first: None,
-                last: ptr::null_mut(),
+                last: None,
                 size: 0,
             }
         } else {
-            let last = head.last_mut() as *mut SkipNode<T>;
+            let last = NonNull::new(head.last_mut());
             let first = head.take_tail();
             IntoIter {
                 first,
@@ -1058,7 +1060,7 @@ impl<T> Iterator for IntoIter<T> {
         // SAFETY: no need to fix links at upper levels inside iterators.
         self.first = unsafe { popped_node.take_tail() };
         if self.first.is_none() {
-            self.last = ptr::null_mut();
+            self.last = None;
         }
         popped_node.into_inner()
     }
@@ -1075,16 +1077,16 @@ impl<T> DoubleEndedIterator for IntoIter<T> {
             return None;
         }
         assert!(
-            !self.last.is_null(),
+            !self.last.is_none(),
             "The IntoIter should be empty but IntoIter.last somehow still contains something"
         );
-        let popped_node = if ptr::eq(self.first.as_deref().as_ptr(), self.last) {
-            self.last = ptr::null_mut();
+        let popped_node = if ptr::eq(self.first.as_deref().as_ptr(), self.last.unwrap().as_ptr()) {
+            self.last = None;
             self.first.take()?
         } else {
             // SAFETY: we checked that self.last points to somewhere and does not alias to self.first
-            let new_last = unsafe { (*self.last).prev };
-            if ptr::eq(self.first.as_deref().as_ptr(), new_last) {
+            let new_last = unsafe { self.last.unwrap().as_mut().prev };
+            if ptr::eq(self.first.as_deref().as_ptr(), new_last.unwrap().as_ptr()) {
                 // SAFETY: take_tail() is always safe in IntoIter.
                 let popped = unsafe {
                     self.first
@@ -1096,7 +1098,7 @@ impl<T> DoubleEndedIterator for IntoIter<T> {
                 popped
             } else {
                 // SAFETY: we checked new_last points to somewhere and do not alias to self.first.
-                let popped = unsafe { (*new_last).take_tail().unwrap() };
+                let popped = unsafe { new_last.unwrap().as_mut().take_tail().unwrap() };
                 self.last = new_last;
                 popped
             }
@@ -1118,6 +1120,41 @@ mod test {
         } else {
             let num_bits = std::mem::size_of::<usize>() * 8;
             num_bits - n.leading_zeros() as usize
+        }
+    }
+
+    /// Test test_covariance for SkipNode.
+    /// Those functions should compile if our data structures is covariant.
+    /// Read Rustonomicon for details.
+    #[test]
+    fn test_covariance() {
+        #[allow(dead_code)]
+        fn shorten_lifetime<'min, 'max: 'min>(v: SkipNode<&'max ()>) -> SkipNode<&'min ()> {
+            v
+        }
+
+        #[allow(dead_code)]
+        fn shorten_lifetime_into_iter<'min, 'max: 'min>(
+            v: IntoIter<&'max ()>,
+        ) -> IntoIter<&'min ()> {
+            v
+        }
+
+        // IterMut is covariant on the value type.
+        // This is consistent with Rust reference &'a T.
+        #[allow(dead_code)]
+        fn shorten_lifetime_iter<'min, 'max: 'min>(
+            v: Iter<'max, &'max ()>,
+        ) -> Iter<'min, &'min ()> {
+            v
+        }
+
+        // IterMut is not covariant on the value type.
+        // This is consistent with Rust mutable reference type &mut T.
+        // TODO: write a test that can't compile
+        #[allow(dead_code)]
+        fn shorten_lifetime_iter_mut<'min, 'max: 'min>(v: Iter<'max, ()>) -> Iter<'min, ()> {
+            v
         }
     }
 
@@ -1181,9 +1218,9 @@ mod test {
                     .filter(|&&mut node_ptr| level <= (*node_ptr).level)
                 {
                     if level == 0 {
-                        (*node_ptr).prev = last_node;
+                        (*node_ptr).prev = NonNull::new(last_node);
                     }
-                    (*last_node).links[level] = node_ptr;
+                    (*last_node).links[level] = NonNull::new(node_ptr);
                     (*last_node).links_len[level] = 1 << level;
                     last_node = node_ptr;
                     len_left -= 1 << level;
@@ -1247,7 +1284,8 @@ mod test {
         fn test_iter_mut(size: usize) {
             let mut list = new_list_for_test(size);
             let mut first = list.next_mut();
-            let last = first.as_mut().unwrap().last_mut() as *mut SkipNode<usize>;
+            let last = first.as_mut().unwrap().last_mut();
+            let last = NonNull::new(last);
             let mut iter = IterMut { first, last, size };
             for _ in 0..(size + 1) / 2 {
                 let _ = iter.next();
@@ -1264,7 +1302,8 @@ mod test {
         fn test_into_iter(size: usize) {
             let mut list = new_list_for_test(size);
             let mut first = unsafe { Some(list.take_tail().unwrap()) };
-            let last = first.as_mut().unwrap().last_mut() as *mut SkipNode<usize>;
+            let last = first.as_mut().unwrap().last_mut();
+            let last = NonNull::new(last);
             let mut iter = IntoIter { first, last, size };
             for _ in 0..(size + 1) / 2 {
                 let _ = iter.next();

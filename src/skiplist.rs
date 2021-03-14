@@ -1,6 +1,8 @@
 //! A skiplist implementation which allows faster random access than a standard linked list.
 
-use std::{cmp, cmp::Ordering, default, fmt, hash, hash::Hash, iter, ops, ops::Bound, ptr};
+use std::{
+    cmp, cmp::Ordering, default, fmt, hash, hash::Hash, iter, ops, ops::Bound, ptr::NonNull,
+};
 
 use crate::{
     level_generator::{GeometricalLevelGenerator, LevelGenerator},
@@ -624,15 +626,13 @@ impl<T> SkipList<T> {
         if first_idx > last_idx {
             return IterMut {
                 first: None,
-                last: ptr::null_mut(),
+                last: None,
                 size: 0,
             };
         }
-        let last = self
-            .get_index_mut(last_idx)
-            .map_or(ptr::null_mut(), |node| node as *mut SkipNode<_>);
+        let last = self.get_index_mut(last_idx).and_then(|p| NonNull::new(p));
         let first = self.get_index_mut(first_idx);
-        if first.is_some() && !last.is_null() {
+        if first.is_some() && last.is_some() {
             IterMut {
                 first,
                 last,
@@ -641,7 +641,7 @@ impl<T> SkipList<T> {
         } else {
             IterMut {
                 first: None,
-                last: ptr::null_mut(),
+                last: None,
                 size: 0,
             }
         }
@@ -713,7 +713,7 @@ where
                     }
                 }
 
-                if let Some(next) = node.links[0].as_ref() {
+                if let Some(next) = node.links[0].and_then(|p| p.as_ptr().as_ref()) {
                     node = next;
                 } else {
                     break;
