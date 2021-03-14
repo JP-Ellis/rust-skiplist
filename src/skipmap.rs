@@ -725,7 +725,7 @@ where
                     }
                 }
 
-                if let Some(next) = (*node).links[0].as_ref() {
+                if let Some(next) = (*node).links[0].and_then(|p| p.as_ptr().as_ref()) {
                     node = next;
                 } else {
                     break;

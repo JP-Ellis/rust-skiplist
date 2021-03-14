@@ -841,7 +841,9 @@ where
                 }
                 None
             } else {
-                if let Some(target_node) = unsafe { target_parent.links[level].as_ref() } {
+                if let Some(target_node) =
+                    unsafe { target_parent.links[level].and_then(|p| p.as_ptr().as_ref()) }
+                {
                     let target_value = target_node.item.as_ref().unwrap();
                     if (self.cmp)(self.target_value, target_value) == Ordering::Equal {
                         self.target_node = target_node as *const _;
@@ -961,7 +963,7 @@ where
                     }
                 }
 
-                if let Some(next) = (*node).links[0].as_ref() {
+                if let Some(next) = (*node).links[0].and_then(|p| p.as_ptr().as_ref()) {
                     node = next;
                 } else {
                     break;
