@@ -580,14 +580,8 @@ impl<T> OrderedSkipList<T> {
     /// ```
     #[allow(clippy::should_implement_trait)]
     pub fn into_iter(mut self) -> IntoIter<T> {
-        let mut last = self.head.last_mut() as *mut SkipNode<T>;
-        if ptr::eq(last, self.head.as_ref()) {
-            last = ptr::null_mut();
-        }
-        let size = self.len();
-        // SAFETY: self.head is no longer used; it's okay that its links become dangling.
-        let first = unsafe { self.head.take_tail() };
-        IntoIter { first, last, size }
+        let len = self.len();
+        unsafe { IntoIter::from_head(&mut self.head, len) }
     }
 
     /// Creates an iterator over the entries of the skiplist.
@@ -604,19 +598,8 @@ impl<T> OrderedSkipList<T> {
     /// }
     /// ```
     pub fn iter(&self) -> Iter<T> {
-        if !self.is_empty() {
-            Iter {
-                first: self.get_index(0),
-                last: Some(self.head.last()),
-                size: self.len(),
-            }
-        } else {
-            Iter {
-                first: None,
-                last: None,
-                size: 0,
-            }
-        }
+        let len = self.len();
+        unsafe { Iter::from_head(&self.head, len) }
     }
 
     /// Constructs a double-ended iterator over a sub-range of elements in the

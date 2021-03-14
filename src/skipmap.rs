@@ -5,7 +5,6 @@ use crate::level_generator::{GeometricalLevelGenerator, LevelGenerator};
 use crate::skipnode::{self, insertion_fixup, IntoIter, SkipListAction};
 use std::{
     borrow::Borrow, cmp, cmp::Ordering, default, fmt, hash, hash::Hash, iter, mem, ops, ops::Bound,
-    ptr,
 };
 
 type SkipNode<K, V> = skipnode::SkipNode<(K, V)>;
@@ -465,14 +464,8 @@ impl<K, V> SkipMap<K, V> {
     /// ```
     #[allow(clippy::should_implement_trait)]
     pub fn into_iter(mut self) -> IntoIter<(K, V)> {
-        let mut last = self.head.last_mut() as *mut SkipNode<K, V>;
-        if ptr::eq(last, self.head.as_ref()) {
-            last = ptr::null_mut();
-        }
-        let size = self.len();
-        // SAFETY: self.head is no longer used; it's okay that its links become dangling.
-        let first = unsafe { self.head.take_tail() };
-        IntoIter { first, last, size }
+        let len = self.len();
+        unsafe { IntoIter::from_head(&mut self.head, len) }
     }
 
     /// Creates an iterator over the entries of the skipmap.
@@ -489,20 +482,8 @@ impl<K, V> SkipMap<K, V> {
     /// }
     /// ```
     pub fn iter(&self) -> Iter<K, V> {
-        let iter = if !self.is_empty() {
-            skipnode::Iter {
-                first: self.get_index(0),
-                last: Some(self.head.last()),
-                size: self.len(),
-            }
-        } else {
-            skipnode::Iter {
-                first: None,
-                last: None,
-                size: 0,
-            }
-        };
-        Iter(iter)
+        let len = self.len();
+        unsafe { Iter::from_head(&self.head, len) }
     }
 
     /// Creates an mutable iterator over the entries of the skipmap.
@@ -521,22 +502,8 @@ impl<K, V> SkipMap<K, V> {
     /// }
     /// ```
     pub fn iter_mut(&mut self) -> IterMut<K, V> {
-        let iter_mut = if !self.is_empty() {
-            let size = self.len();
-            let last = self.head.last_mut() as *mut _;
-            skipnode::IterMut {
-                first: self.get_index_mut(0),
-                last,
-                size,
-            }
-        } else {
-            skipnode::IterMut {
-                first: None,
-                last: ptr::null_mut(),
-                size: 0,
-            }
-        };
-        IterMut(iter_mut)
+        let len = self.len();
+        unsafe { IterMut::from_head(&mut self.head, len) }
     }
 
     /// Creates an iterator over the keys of the skipmap.
@@ -1098,6 +1065,13 @@ impl<K: Hash, V: Hash> Hash for SkipMap<K, V> {
 //
 pub struct Iter<'a, K: 'a, V: 'a>(skipnode::Iter<'a, (K, V)>);
 
+impl<'a, K: 'a, V: 'a> Iter<'a, K, V> {
+    /// SAFETY: There must be `len` nodes after head.
+    unsafe fn from_head(head: &'a SkipNode<K, V>, len: usize) -> Self {
+        Self(skipnode::Iter::from_head(head, len))
+    }
+}
+
 impl<'a, K: 'a, V: 'a> Iterator for Iter<'a, K, V> {
     type Item = (&'a K, &'a V);
     fn next(&mut self) -> Option<Self::Item> {
@@ -1115,6 +1089,13 @@ impl<'a, K: 'a, V: 'a> DoubleEndedIterator for Iter<'a, K, V> {
 }
 
 pub struct IterMut<'a, K: 'a, V: 'a>(skipnode::IterMut<'a, (K, V)>);
+
+impl<'a, K: 'a, V: 'a> IterMut<'a, K, V> {
+    /// SAFETY: There must be `len` nodes after head.
+    unsafe fn from_head(head: &'a mut SkipNode<K, V>, len: usize) -> Self {
+        Self(skipnode::IterMut::from_head(head, len))
+    }
+}
 
 impl<'a, K: 'a, V: 'a> Iterator for IterMut<'a, K, V> {
     type Item = (&'a K, &'a mut V);

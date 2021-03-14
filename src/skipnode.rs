@@ -875,6 +875,26 @@ pub struct Iter<'a, T> {
     pub(crate) last: Option<&'a SkipNode<T>>,
     pub(crate) size: usize,
 }
+impl<'a, T> Iter<'a, T> {
+    /// SAFETY: There must be `len` nodes after head.
+    pub(crate) unsafe fn from_head(head: &'a SkipNode<T>, len: usize) -> Self {
+        if len == 0 {
+            Iter {
+                first: None,
+                last: None,
+                size: 0,
+            }
+        } else {
+            let first = head.next_ref();
+            let last = first.as_ref().map(|n| n.last());
+            Iter {
+                first,
+                last,
+                size: len,
+            }
+        }
+    }
+}
 
 impl<'a, T> Iterator for Iter<'a, T> {
     type Item = &'a T;
@@ -919,6 +939,27 @@ pub struct IterMut<'a, T> {
     pub(crate) first: Option<&'a mut SkipNode<T>>,
     pub(crate) last: *mut SkipNode<T>,
     pub(crate) size: usize,
+}
+
+impl<'a, T> IterMut<'a, T> {
+    /// SAFETY: There must be `len` nodes after head.
+    pub(crate) unsafe fn from_head(head: &'a mut SkipNode<T>, len: usize) -> Self {
+        if len == 0 {
+            IterMut {
+                first: None,
+                last: ptr::null_mut(),
+                size: 0,
+            }
+        } else {
+            let last = head.last_mut() as *mut SkipNode<T>;
+            let first = head.next_mut();
+            IterMut {
+                first,
+                last,
+                size: len,
+            }
+        }
+    }
 }
 
 impl<'a, T> Iterator for IterMut<'a, T> {
@@ -985,6 +1026,27 @@ pub struct IntoIter<T> {
     pub(crate) first: Option<Box<SkipNode<T>>>,
     pub(crate) last: *mut SkipNode<T>,
     pub(crate) size: usize,
+}
+
+impl<T> IntoIter<T> {
+    /// SAFETY: There must be `len` nodes after head.
+    pub(crate) unsafe fn from_head(head: &mut SkipNode<T>, len: usize) -> Self {
+        if len == 0 {
+            IntoIter {
+                first: None,
+                last: ptr::null_mut(),
+                size: 0,
+            }
+        } else {
+            let last = head.last_mut() as *mut SkipNode<T>;
+            let first = head.take_tail();
+            IntoIter {
+                first,
+                last,
+                size: len,
+            }
+        }
+    }
 }
 
 impl<T> Iterator for IntoIter<T> {
