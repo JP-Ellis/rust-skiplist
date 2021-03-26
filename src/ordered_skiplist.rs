@@ -2,9 +2,11 @@
 
 use crate::{
     level_generator::{GeometricalLevelGenerator, LevelGenerator},
-    skipnode::{insertion_fixup, removal_fixup, IntoIter, Iter, SkipListAction, SkipNode},
+    skipnode::{insertion_fixup, removal_fixup, SkipListAction, SkipNode},
 };
 use std::{cmp, cmp::Ordering, default, fmt, hash, hash::Hash, iter, mem, ops, ops::Bound, ptr};
+
+pub use crate::skipnode::{IntoIter, Iter, IterMut};
 
 // ////////////////////////////////////////////////////////////////////////////
 // OrderedSkipList
