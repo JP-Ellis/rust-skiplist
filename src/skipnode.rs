@@ -9,7 +9,13 @@ use std::{
 // ////////////////////////////////////////////////////////////////////////////
 
 /// A covariant pointer to a SkipNode.
-/// (See Rustonomicon for details on covariance)
+///
+/// SkipNode<V> should contain mutable pointers to other nodes,
+/// but mutable pointers are not covariant in Rust.
+/// The appropriate pointer type is std::ptr::NonNull.
+///
+/// See [`std::ptr::NonNull`] and Rustonomicon for details on covariance.
+/// https://doc.rust-lang.org/nomicon/subtyping.html
 type Link<T> = Option<NonNull<SkipNode<T>>>;
 
 /// SkipNodes are make up the SkipList.  The SkipList owns the first head-node
