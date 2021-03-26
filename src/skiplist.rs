@@ -6,8 +6,10 @@ use std::{
 
 use crate::{
     level_generator::{GeometricalLevelGenerator, LevelGenerator},
-    skipnode::{IntoIter, Iter, IterMut, SkipNode},
+    skipnode::SkipNode,
 };
+
+pub use crate::skipnode::{IntoIter, Iter, IterMut};
 
 // ////////////////////////////////////////////////////////////////////////////
 // SkipList

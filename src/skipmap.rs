@@ -2,10 +2,12 @@
 //! sorted.
 
 use crate::level_generator::{GeometricalLevelGenerator, LevelGenerator};
-use crate::skipnode::{self, insertion_fixup, IntoIter, SkipListAction};
+use crate::skipnode::{self, insertion_fixup, SkipListAction};
 use std::{
     borrow::Borrow, cmp, cmp::Ordering, default, fmt, hash, hash::Hash, iter, mem, ops, ops::Bound,
 };
+
+pub use crate::skipnode::IntoIter;
 
 type SkipNode<K, V> = skipnode::SkipNode<(K, V)>;
 
@@ -1063,6 +1065,8 @@ impl<K: Hash, V: Hash> Hash for SkipMap<K, V> {
 // Extra structs
 // ///////////////////////////////////////////////
 //
+
+/// An iterator for [SkipMap]
 pub struct Iter<'a, K: 'a, V: 'a>(skipnode::Iter<'a, (K, V)>);
 
 impl<'a, K: 'a, V: 'a> Iter<'a, K, V> {
@@ -1088,6 +1092,7 @@ impl<'a, K: 'a, V: 'a> DoubleEndedIterator for Iter<'a, K, V> {
     }
 }
 
+/// A mutable iterator for [SkipMap]
 pub struct IterMut<'a, K: 'a, V: 'a>(skipnode::IterMut<'a, (K, V)>);
 
 impl<'a, K: 'a, V: 'a> IterMut<'a, K, V> {
