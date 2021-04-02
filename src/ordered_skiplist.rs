@@ -614,7 +614,7 @@ impl<T> OrderedSkipList<T> {
     ///
     /// ```
     /// use skiplist::OrderedSkipList;
-    /// use std::collections::Bound::{Included, Unbounded};
+    /// use std::ops::Bound::{Included, Unbounded};
     ///
     /// let mut skiplist = OrderedSkipList::new();
     /// skiplist.extend(0..10);

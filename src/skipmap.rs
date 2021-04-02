@@ -552,7 +552,7 @@ impl<K, V> SkipMap<K, V> {
     ///
     /// ```
     /// use skiplist::SkipMap;
-    /// use std::collections::Bound::{Included, Unbounded};
+    /// use std::ops::Bound::{Included, Unbounded};
     ///
     /// let mut skipmap = SkipMap::new();
     /// skipmap.extend((0..10).map(|x| (x, x)));
@@ -1163,7 +1163,7 @@ impl<'a, K, V: 'a> DoubleEndedIterator for Values<'a, K, V> {
 #[cfg(test)]
 mod tests {
     use super::SkipMap;
-    use std::collections::Bound::{self, Excluded, Included, Unbounded};
+    use std::ops::Bound::{self, Excluded, Included, Unbounded};
 
     #[test]
     fn basic_small() {

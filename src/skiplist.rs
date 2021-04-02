@@ -487,7 +487,7 @@ impl<T> SkipList<T> {
     ///
     /// ```
     /// use skiplist::SkipList;
-    /// use std::collections::Bound::{Included, Unbounded};
+    /// use std::ops::Bound::{Included, Unbounded};
     ///
     /// let mut skiplist = SkipList::new();
     /// skiplist.extend(0..10);
@@ -520,7 +520,7 @@ impl<T> SkipList<T> {
     ///
     /// ```
     /// use skiplist::SkipList;
-    /// use std::collections::Bound::{Included, Unbounded};
+    /// use std::ops::Bound::{Included, Unbounded};
     ///
     /// let mut skiplist = SkipList::new();
     /// skiplist.extend(0..10);
@@ -894,7 +894,7 @@ impl<T: Hash> Hash for SkipList<T> {
 #[cfg(test)]
 mod tests {
     use super::SkipList;
-    use std::collections::Bound::{self, Excluded, Included, Unbounded};
+    use std::ops::Bound::{self, Excluded, Included, Unbounded};
 
     #[test]
     fn push_front() {
