@@ -1,49 +1,67 @@
 use criterion::{black_box, AxisScale, BenchmarkId, Criterion, PlotConfiguration};
 use rand::prelude::*;
-use skiplist::SkipList;
 
 const STEPS: [usize; 6] = [1, 10, 100, 1000, 10_000, 100_000];
 
 pub fn push_front(c: &mut Criterion) {
-    let mut group = c.benchmark_group("SkipList Push Front");
+    let mut group = c.benchmark_group("Vec Push Front");
     group.plot_config(PlotConfiguration::default().summary_scale(AxisScale::Logarithmic));
 
     for i in STEPS {
         group.bench_function(BenchmarkId::from_parameter(i), |b| {
             let mut rng = StdRng::seed_from_u64(0x1234abcd);
-            let mut sl: SkipList<usize> = std::iter::repeat_with(|| rng.gen()).take(i).collect();
+            let mut sl: Vec<usize> = std::iter::repeat_with(|| rng.gen()).take(i).collect();
 
             b.iter(|| {
-                sl.push_front(rng.gen());
+                sl.insert(0, rng.gen());
             })
         });
     }
 }
 
 pub fn push_back(c: &mut Criterion) {
-    let mut group = c.benchmark_group("SkipList Push Back");
+    let mut group = c.benchmark_group("Vec Push Back");
     group.plot_config(PlotConfiguration::default().summary_scale(AxisScale::Logarithmic));
 
     for i in STEPS {
         group.bench_function(BenchmarkId::from_parameter(i), |b| {
             let mut rng = StdRng::seed_from_u64(0x1234abcd);
-            let mut sl: SkipList<usize> = std::iter::repeat_with(|| rng.gen()).take(i).collect();
+            let mut sl: Vec<usize> = std::iter::repeat_with(|| rng.gen()).take(i).collect();
 
             b.iter(|| {
-                sl.push_back(rng.gen());
+                sl.push(rng.gen());
             })
         });
     }
 }
 
-pub fn rand_access(c: &mut Criterion) {
-    let mut group = c.benchmark_group("SkipList Random Access");
+pub fn insert(c: &mut Criterion) {
+    let mut group = c.benchmark_group("Vec Insert");
     group.plot_config(PlotConfiguration::default().summary_scale(AxisScale::Logarithmic));
 
     for i in STEPS {
         group.bench_function(BenchmarkId::from_parameter(i), |b| {
             let mut rng = StdRng::seed_from_u64(0x1234abcd);
-            let sl: SkipList<usize> = std::iter::repeat_with(|| rng.gen()).take(i).collect();
+            let mut sl: Vec<usize> = std::iter::repeat_with(|| rng.gen()).take(i).collect();
+
+            b.iter(|| {
+                let v = rng.gen();
+                match sl.binary_search(&v) {
+                    Ok(i) => sl.insert(i, v),
+                    Err(i) => sl.insert(i, v),
+                }
+            })
+        });
+    }
+}
+pub fn rand_access(c: &mut Criterion) {
+    let mut group = c.benchmark_group("Vec Random Access");
+    group.plot_config(PlotConfiguration::default().summary_scale(AxisScale::Logarithmic));
+
+    for i in STEPS {
+        group.bench_function(BenchmarkId::from_parameter(i), |b| {
+            let mut rng = StdRng::seed_from_u64(0x1234abcd);
+            let sl: Vec<usize> = std::iter::repeat_with(|| rng.gen()).take(i).collect();
             let indices: Vec<_> = std::iter::repeat_with(|| rng.gen_range(0..sl.len()))
                 .take(10)
                 .collect();
@@ -58,9 +76,9 @@ pub fn rand_access(c: &mut Criterion) {
 }
 
 pub fn iter(c: &mut Criterion) {
-    c.bench_function("SkipList Iter", |b| {
+    c.bench_function("Vec Iter", |b| {
         let mut rng = StdRng::seed_from_u64(0x1234abcd);
-        let sl: SkipList<usize> = std::iter::repeat_with(|| rng.gen()).take(100_000).collect();
+        let sl: Vec<usize> = std::iter::repeat_with(|| rng.gen()).take(100_000).collect();
 
         b.iter(|| {
             for el in &sl {

@@ -1,93 +1,59 @@
-use criterion::{black_box, Bencher, Criterion};
+use criterion::{black_box, AxisScale, BenchmarkId, Criterion, PlotConfiguration};
 use rand::prelude::*;
 use skiplist::SkipMap;
+const STEPS: [usize; 6] = [1, 10, 100, 1000, 10_000, 100_000];
 
-fn bench_insert(b: &mut Bencher, base: usize, inserts: usize) {
-    let mut sm: SkipMap<u32, u32> = SkipMap::with_capacity(base + inserts);
-    let mut rng = SmallRng::from_rng(thread_rng()).unwrap();
+pub fn insert(c: &mut Criterion) {
+    let mut group = c.benchmark_group("SkipMap Insert");
+    group.plot_config(PlotConfiguration::default().summary_scale(AxisScale::Logarithmic));
 
-    for _ in 0..base {
-        sm.insert(rng.gen(), rng.gen());
+    for i in STEPS {
+        group.bench_function(BenchmarkId::from_parameter(i), |b| {
+            let mut rng = StdRng::seed_from_u64(0x1234abcd);
+            let mut sl: SkipMap<usize, usize> =
+                std::iter::repeat_with(|| rng.gen()).take(i).collect();
+
+            b.iter(|| {
+                sl.insert(rng.gen(), rng.gen());
+            })
+        });
     }
-
-    b.iter(|| {
-        for _ in 0..inserts {
-            sm.insert(rng.gen(), rng.gen());
-        }
-    });
 }
 
-fn bench_iter(b: &mut Bencher, size: usize) {
-    let mut sm: SkipMap<usize, usize> = SkipMap::with_capacity(size);
-    let mut rng = SmallRng::from_rng(thread_rng()).unwrap();
+pub fn rand_access(c: &mut Criterion) {
+    let mut group = c.benchmark_group("SkipMap Random Access");
+    group.plot_config(PlotConfiguration::default().summary_scale(AxisScale::Logarithmic));
 
-    for _ in 0..size {
-        sm.insert(rng.gen(), rng.gen());
+    for i in STEPS {
+        group.bench_function(BenchmarkId::from_parameter(i), |b| {
+            let mut rng = StdRng::seed_from_u64(0x1234abcd);
+            let sl: SkipMap<usize, usize> = std::iter::repeat_with(|| rng.gen())
+                .enumerate()
+                .take(i)
+                .collect();
+            let indices: Vec<_> = std::iter::repeat_with(|| rng.gen_range(0..sl.len()))
+                .take(10)
+                .collect();
+
+            b.iter(|| {
+                for &i in &indices {
+                    black_box(sl[i]);
+                }
+            })
+        });
     }
-
-    b.iter(|| {
-        for entry in &sm {
-            black_box(entry);
-        }
-    });
 }
 
-pub fn benchmark(c: &mut Criterion) {
-    c.bench_function("SkipMap index", |b| {
-        let size = 100_000;
-        let sm: SkipMap<_, _> = (0..size).map(|x| (x, x)).collect();
+pub fn iter(c: &mut Criterion) {
+    c.bench_function("SkipMap Iter", |b| {
+        let mut rng = StdRng::seed_from_u64(0x1234abcd);
+        let sl: SkipMap<usize, usize> =
+            std::iter::repeat_with(|| rng.gen()).take(100_000).collect();
+
         b.iter(|| {
-            for i in 0..size {
-                assert_eq!(sm[i], i)
+            for el in &sl {
+                black_box(el);
             }
         })
-    });
-
-    c.bench_function("SkipMap insert 1 (empty)", |b| {
-        bench_insert(b, 0, 1);
-    });
-    c.bench_function("SkipMap insert 10 (empty)", |b| {
-        bench_insert(b, 0, 10);
-    });
-    c.bench_function("SkipMap insert 100 (empty)", |b| {
-        bench_insert(b, 0, 100);
-    });
-    c.bench_function("SkipMap insert 1000 (empty)", |b| {
-        bench_insert(b, 0, 1_000);
-    });
-    c.bench_function("SkipMap insert 10000 (empty)", |b| {
-        bench_insert(b, 0, 10_000);
-    });
-
-    c.bench_function("SkipMap insert 1 (filled)", |b| {
-        bench_insert(b, 100_000, 1);
-    });
-    c.bench_function("SkipMap insert 10 (filled)", |b| {
-        bench_insert(b, 100_000, 10);
-    });
-    c.bench_function("SkipMap insert 100 (filled)", |b| {
-        bench_insert(b, 100_000, 100);
-    });
-    c.bench_function("SkipMap insert 1000 (filled)", |b| {
-        bench_insert(b, 100_000, 1_000);
-    });
-    c.bench_function("SkipMap insert 10000 (filled)", |b| {
-        bench_insert(b, 100_000, 10_000);
-    });
-
-    c.bench_function("SkipMap iter 1", |b| {
-        bench_iter(b, 1);
-    });
-    c.bench_function("SkipMap iter 10", |b| {
-        bench_iter(b, 10);
-    });
-    c.bench_function("SkipMap iter 100", |b| {
-        bench_iter(b, 100);
-    });
-    c.bench_function("SkipMap iter 1000", |b| {
-        bench_iter(b, 1000);
-    });
-    c.bench_function("SkipMap iter 10000", |b| {
-        bench_iter(b, 10_000);
     });
 }
