@@ -1,7 +1,4 @@
-use criterion::Criterion;
-
-#[macro_use]
-extern crate criterion;
+use criterion::{criterion_group, criterion_main, Criterion};
 
 mod btreemap;
 mod hashmap;
@@ -12,6 +9,7 @@ mod skipmap;
 mod vec;
 mod vecdeque;
 
+/// Group Benchmarks
 criterion_group!(
     name = benches;
     config = Criterion::default();
@@ -46,4 +44,6 @@ criterion_group!(
     crate::vecdeque::push_front,
     crate::vecdeque::rand_access,
 );
+
+/// Benchmarks
 criterion_main!(benches);

@@ -1485,6 +1485,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::eq_op, clippy::many_single_char_names)]
     fn equality() {
         let a: SkipMap<i64, i64> = (0..100).map(|x| (x, x)).collect();
         let b: SkipMap<i64, i64> = (0..100).map(|x| (x, x)).collect();

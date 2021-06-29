@@ -808,10 +808,8 @@ pub fn removal_fixup<T>(
         ));
         level_head.links[level] = removed_node.links[level];
         level_head.links_len[level] += removed_node.links_len[level];
-        level_head.links_len[level] -= 1;
-    } else {
-        level_head.links_len[level] -= 1;
     }
+    level_head.links_len[level] -= 1;
 }
 
 // helpers for ordered types.
@@ -1057,10 +1055,8 @@ impl<'a, T> Iterator for IterMut<'a, T> {
 
 impl<'a, T> DoubleEndedIterator for IterMut<'a, T> {
     fn next_back(&mut self) -> Option<Self::Item> {
-        if self.last.is_none() {
-            return None;
-        }
-        assert!(self.last.is_some());
+        self.last?;
+        debug_assert!(self.last.is_some());
         // There can be at most one mutable reference to the first node.
         // We need to take it from self.first before doing anything,
         // including simple comparison.
@@ -1293,7 +1289,7 @@ mod test {
                 (*last_node).links_len[level] = len_left;
             }
         }
-        return head;
+        head
     }
 
     /////////////////////////////////////////////////////////

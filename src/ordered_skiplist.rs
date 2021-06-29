@@ -758,13 +758,13 @@ where
         level: usize,
     ) -> Option<(&'a mut SkipNode<T>, usize)> {
         let (target_parent, distance) = node.advance_while_at_level_mut(level, |_, next_node| {
-            (self.cmp)(&self.target_value, next_node.item.as_ref().unwrap()) == Ordering::Greater
+            (self.cmp)(self.target_value, next_node.item.as_ref().unwrap()) == Ordering::Greater
         });
         if level == 0 {
             let next_value = target_parent
                 .next_ref()
                 .and_then(|node| node.item.as_ref())?;
-            if (self.cmp)(&self.target_value, next_value) != Ordering::Equal {
+            if (self.cmp)(self.target_value, next_value) != Ordering::Equal {
                 return None;
             }
         }
@@ -830,7 +830,7 @@ where
         if self.target_node.is_null() {
             let (target_parent, distance) =
                 node.advance_while_at_level_mut(level, |_, next_node| {
-                    (self.cmp)(&self.target_value, next_node.item.as_ref().unwrap())
+                    (self.cmp)(self.target_value, next_node.item.as_ref().unwrap())
                         == Ordering::Greater
                 });
             if level == 0 {
@@ -1619,6 +1619,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::eq_op, clippy::many_single_char_names)]
     fn equality() {
         let a: OrderedSkipList<i64> = (0..100).collect();
         let b: OrderedSkipList<i64> = (0..100).collect();

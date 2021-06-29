@@ -1356,6 +1356,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::eq_op, clippy::many_single_char_names)]
     fn equality() {
         let a: SkipList<i64> = (0..100).collect();
         let b: SkipList<i64> = (0..100).collect();
