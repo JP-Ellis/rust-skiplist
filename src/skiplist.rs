@@ -497,16 +497,8 @@ impl<T> SkipList<T> {
     /// assert_eq!(Some(&4), skiplist.range(Included(4), Unbounded).next());
     /// ```
     pub fn range(&self, min: Bound<usize>, max: Bound<usize>) -> Iter<T> {
-        let first = match min {
-            Bound::Included(i) => i,
-            Bound::Excluded(i) => i + 1,
-            Bound::Unbounded => 0,
-        };
-        let last = match max {
-            Bound::Included(i) => i,
-            Bound::Excluded(i) => i - 1,
-            Bound::Unbounded => self.len() - 1,
-        };
+        let first = Self::_lower_bound(min);
+        let last = self._upper_bound(max);
         self.iter_range(first, last)
     }
 
@@ -541,6 +533,67 @@ impl<T> SkipList<T> {
             Bound::Unbounded => self.len() - 1,
         };
         self.iter_range_mut(first, last)
+    }
+
+    /// Returns an `Option<&T>` pointing to the lowest element whose key is above
+    /// the given bound. If no such element is found then `None` is
+    /// returned.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use skiplist::SkipList;
+    /// use std::ops::Bound::{Included, Excluded, Unbounded};
+    ///
+    /// let mut skiplist = SkipList::new();
+    /// skiplist.extend(0..10);
+    ///
+    /// assert_eq!(skiplist.lower_bound(Unbounded), Some(&0));
+    /// assert_eq!(skiplist.lower_bound(Excluded(0)), Some(&1));
+    /// assert_eq!(skiplist.lower_bound(Included(0)), Some(&0));
+    /// assert_eq!(skiplist.lower_bound(Excluded(10)), None);
+    /// ```
+    pub fn lower_bound(&self, min: Bound<usize>) -> Option<&T> {
+        self.get_index(Self::_lower_bound(min))
+            .and_then(|node| node.item.as_ref())
+    }
+
+    /// Returns an `Option<&T>` pointing to the highest element whose key is above
+    /// the given bound. If no such element is found then `None` is
+    /// returned.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use skiplist::SkipList;
+    /// use std::ops::Bound::{Included, Excluded, Unbounded};
+    ///
+    /// let mut skiplist = SkipList::new();
+    /// skiplist.extend(0..10);
+    ///
+    /// assert_eq!(skiplist.upper_bound(Unbounded), Some(&9));
+    /// assert_eq!(skiplist.upper_bound(Excluded(9)), Some(&8));
+    /// assert_eq!(skiplist.upper_bound(Included(9)), Some(&9));
+    /// ```
+    pub fn upper_bound(&self, max: Bound<usize>) -> Option<&T> {
+        self.get_index(self._upper_bound(max))
+            .and_then(|node| node.item.as_ref())
+    }
+
+    fn _lower_bound(min: Bound<usize>) -> usize {
+        match min {
+            Bound::Included(i) => i,
+            Bound::Excluded(i) => i + 1,
+            Bound::Unbounded => 0,
+        }
+    }
+
+    fn _upper_bound(&self, max: Bound<usize>) -> usize {
+        match max {
+            Bound::Included(i) => i,
+            Bound::Excluded(i) => i - 1,
+            Bound::Unbounded => self.len() - 1,
+        }
     }
 }
 
@@ -1218,6 +1271,22 @@ mod tests {
                 assert!(expects.next().is_none());
             }
         }
+    }
+
+    #[test]
+    fn bound() {
+        let sl: SkipList<_> = (0..2).collect();
+
+        assert_eq!(sl.lower_bound(Unbounded), Some(&0));
+        assert_eq!(sl.lower_bound(Excluded(0)), Some(&1));
+        assert_eq!(sl.lower_bound(Included(0)), Some(&0));
+
+        assert_eq!(sl.lower_bound(Excluded(2)), None);
+        assert_eq!(sl.lower_bound(Included(2)), None);
+
+        assert_eq!(sl.upper_bound(Unbounded), Some(&1));
+        assert_eq!(sl.upper_bound(Excluded(1)), Some(&0));
+        assert_eq!(sl.upper_bound(Included(1)), Some(&1));
     }
 
     #[test]
