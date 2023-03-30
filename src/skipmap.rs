@@ -579,10 +579,74 @@ impl<K, V> SkipMap<K, V> {
         K: Borrow<Q>,
         Q: Ord,
     {
-        fn cmp<Q: Ord, K: Borrow<Q>, V>(node_item: &(K, V), target: &Q) -> Ordering {
-            node_item.0.borrow().cmp(target)
-        }
-        let (first, first_distance_from_head) = match min {
+        let (first, first_distance_from_head) = self._lower_bound(min)?;
+        let (last, last_distance_from_head) = self._upper_bound(max);
+        let size = last_distance_from_head.checked_sub(first_distance_from_head)? + 1;
+        Some(skipnode::Iter {
+            first: Some(first),
+            last: Some(last),
+            size,
+        })
+    }
+
+    /// Returns an `Option<&V>` pointing to the lowest element whose key is above
+    /// the given bound. If no such element is found then `None` is
+    /// returned.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use skiplist::SkipMap;
+    /// use std::ops::Bound::{Included, Excluded, Unbounded};
+    ///
+    /// let mut skipmap = SkipMap::new();
+    /// skipmap.extend((0..10).map(|x| (x, x)));
+    ///
+    /// assert_eq!(skipmap.lower_bound(Unbounded), Some(&0));
+    /// assert_eq!(skipmap.lower_bound(Excluded(&0)), Some(&1));
+    /// assert_eq!(skipmap.lower_bound(Included(&0)), Some(&0));
+    /// assert_eq!(skipmap.lower_bound(Included(&10)), None);
+    /// ```
+    pub fn lower_bound<Q>(&self, min: Bound<&Q>) -> Option<&V>
+    where
+        K: Borrow<Q>,
+        Q: Ord,
+    {
+        self._lower_bound(min).and_then(|(node, _)| node.value_ref())
+    }
+
+    /// Returns an `Option<&V>` pointing to the highest element whose key is above
+    /// the given bound. If no such element is found then `None` is
+    /// returned.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use skiplist::SkipMap;
+    /// use std::ops::Bound::{Included, Excluded, Unbounded};
+    ///
+    /// let mut skipmap = SkipMap::new();
+    /// skipmap.extend((0..10).map(|x| (x, x)));
+    ///
+    /// assert_eq!(skipmap.upper_bound(Unbounded), Some(&9));
+    /// assert_eq!(skipmap.upper_bound(Excluded(&9)), Some(&8));
+    /// assert_eq!(skipmap.upper_bound(Included(&9)), Some(&9));
+    /// assert_eq!(skipmap.upper_bound(Excluded(&0)), None);
+    /// ```
+    pub fn upper_bound<Q>(&self, max: Bound<&Q>) -> Option<&V>
+    where
+        K: Borrow<Q>,
+        Q: Ord,
+    {
+        self._upper_bound(max).0.value_ref()
+    }
+
+    fn _lower_bound<Q>(&self, min: Bound<&Q>) -> Option<(&SkipNode<K, V>, usize)>
+    where
+        K: Borrow<Q>,
+        Q: Ord,
+    {
+        Some(match min {
             Bound::Unbounded => (self.head.next_ref()?, 1usize),
             Bound::Included(min) => {
                 let (last_lt, last_lt_from_head) = self.head.find_last_lt_with(cmp, min);
@@ -594,19 +658,24 @@ impl<K, V> SkipMap<K, V> {
                 let first_gt = last_le.next_ref()?;
                 (first_gt, last_le_from_head + 1)
             }
-        };
-        let (last, last_distance_from_head) = match max {
+        })
+    }
+
+    fn _upper_bound<Q>(&self, max: Bound<&Q>) -> (&SkipNode<K, V>, usize)
+    where
+        K: Borrow<Q>,
+        Q: Ord,
+    {
+        match max {
             Bound::Unbounded => (self.head.last(), self.len()),
             Bound::Included(max) => self.head.find_last_le_with(cmp, max),
             Bound::Excluded(max) => self.head.find_last_lt_with(cmp, max),
-        };
-        let size = last_distance_from_head.checked_sub(first_distance_from_head)? + 1;
-        Some(skipnode::Iter {
-            first: Some(first),
-            last: Some(last),
-            size,
-        })
+        }
     }
+}
+
+fn cmp<Q: Ord, K: Borrow<Q>, V>(node_item: &(K, V), target: &Q) -> Ordering {
+    node_item.0.borrow().cmp(target)
 }
 
 // ///////////////////////////////////////////////
@@ -1407,6 +1476,25 @@ mod tests {
 
         // let mut values = sm.range(Included(&10), Included(&5)).map(|(&a, &b)| (a, b));
         // assert!(values.next().is_none());
+    }
+
+    #[test]
+    fn bound() {
+        let sm: SkipMap<_, _> = (1..3).map(|x| (x, x)).collect();
+
+        assert_eq!(sm.lower_bound(Unbounded), Some(&1));
+        assert_eq!(sm.lower_bound(Excluded(&1)), Some(&2));
+        assert_eq!(sm.lower_bound(Included(&1)), Some(&1));
+
+        assert_eq!(sm.lower_bound(Excluded(&3)), None);
+        assert_eq!(sm.lower_bound(Included(&3)), None);
+
+        assert_eq!(sm.upper_bound(Unbounded), Some(&2));
+        assert_eq!(sm.upper_bound(Excluded(&2)), Some(&1));
+        assert_eq!(sm.upper_bound(Included(&2)), Some(&2));
+
+        assert_eq!(sm.upper_bound(Excluded(&0)), None);
+        assert_eq!(sm.upper_bound(Included(&0)), None);
     }
 
     #[test]

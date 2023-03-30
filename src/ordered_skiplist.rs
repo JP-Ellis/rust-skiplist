@@ -633,7 +633,61 @@ impl<T> OrderedSkipList<T> {
 
     /// A helper function to ease error handling.
     fn _range(&self, min: Bound<&T>, max: Bound<&T>) -> Option<Iter<T>> {
-        let (first, first_distance_from_head) = match min {
+        let (first, first_distance_from_head) = self._lower_bound(min)?;
+        let (last, last_distance_from_head) = self._upper_bound(max);
+        let size = last_distance_from_head.checked_sub(first_distance_from_head)? + 1;
+        Some(Iter {
+            first: Some(first),
+            last: Some(last),
+            size,
+        })
+    }
+
+    /// Returns an `Option<&T>` pointing to the lowest element whose key is above
+    /// the given bound. If no such element is found then `None` is
+    /// returned.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use skiplist::OrderedSkipList;
+    /// use std::ops::Bound::{Included, Excluded, Unbounded};
+    ///
+    /// let mut skiplist = OrderedSkipList::new();
+    /// skiplist.extend(0..10);
+    ///
+    /// assert_eq!(skiplist.lower_bound(Unbounded), Some(&0));
+    /// assert_eq!(skiplist.lower_bound(Excluded(&0)), Some(&1));
+    /// assert_eq!(skiplist.lower_bound(Included(&0)), Some(&0));
+    /// assert_eq!(skiplist.lower_bound(Excluded(&10)), None);
+    /// ```
+    pub fn lower_bound(&self, min: Bound<&T>) -> Option<&T> {
+        self._lower_bound(min).and_then(|(node, _)| node.item.as_ref())
+    }
+
+    /// Returns an `Option<&T>` pointing to the highest element whose key is above
+    /// the given bound. If no such element is found then `None` is
+    /// returned.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use skiplist::OrderedSkipList;
+    /// use std::ops::Bound::{Included, Excluded, Unbounded};
+    ///
+    /// let mut skiplist = OrderedSkipList::new();
+    /// skiplist.extend(0..10);
+    ///
+    /// assert_eq!(skiplist.upper_bound(Unbounded), Some(&9));
+    /// assert_eq!(skiplist.upper_bound(Excluded(&9)), Some(&8));
+    /// assert_eq!(skiplist.upper_bound(Included(&9)), Some(&9));
+    /// ```
+    pub fn upper_bound(&self, max: Bound<&T>) -> Option<&T> {
+        self._upper_bound(max).0.item.as_ref()
+    }
+
+    fn _lower_bound(&self, min: Bound<&T>) -> Option<(&SkipNode<T>, usize)> {
+        Some(match min {
             Bound::Unbounded => (self.head.next_ref()?, 1usize),
             Bound::Included(min) => {
                 let (last_lt, last_lt_from_head) = self.head.find_last_lt_with(&self.compare, min);
@@ -645,18 +699,15 @@ impl<T> OrderedSkipList<T> {
                 let first_gt = last_le.next_ref()?;
                 (first_gt, last_le_from_head + 1)
             }
-        };
-        let (last, last_distance_from_head) = match max {
+        })
+    }
+
+    fn _upper_bound(&self, max: Bound<&T>) -> (&SkipNode<T>, usize) {
+        match max {
             Bound::Unbounded => (self.head.last(), self.len()),
             Bound::Included(max) => self.head.find_last_le_with(&self.compare, max),
             Bound::Excluded(max) => self.head.find_last_lt_with(&self.compare, max),
-        };
-        let size = last_distance_from_head.checked_sub(first_distance_from_head)? + 1;
-        Some(Iter {
-            first: Some(first),
-            last: Some(last),
-            size,
-        })
+        }
     }
 }
 
@@ -1442,6 +1493,25 @@ mod tests {
                 assert!(expects.next().is_none());
             }
         }
+    }
+
+    #[test]
+    fn bound() {
+        let sl: OrderedSkipList<_> = (1..3).collect();
+
+        assert_eq!(sl.lower_bound(Unbounded), Some(&1));
+        assert_eq!(sl.lower_bound(Excluded(&1)), Some(&2));
+        assert_eq!(sl.lower_bound(Included(&1)), Some(&1));
+
+        assert_eq!(sl.lower_bound(Excluded(&3)), None);
+        assert_eq!(sl.lower_bound(Included(&3)), None);
+
+        assert_eq!(sl.upper_bound(Unbounded), Some(&2));
+        assert_eq!(sl.upper_bound(Excluded(&2)), Some(&1));
+        assert_eq!(sl.upper_bound(Included(&2)), Some(&2));
+
+        assert_eq!(sl.upper_bound(Excluded(&0)), None);
+        assert_eq!(sl.upper_bound(Included(&0)), None);
     }
 
     #[test]
