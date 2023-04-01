@@ -602,17 +602,17 @@ impl<K, V> SkipMap<K, V> {
     /// let mut skipmap = SkipMap::new();
     /// skipmap.extend((0..10).map(|x| (x, x)));
     ///
-    /// assert_eq!(skipmap.lower_bound(Unbounded), Some(&0));
-    /// assert_eq!(skipmap.lower_bound(Excluded(&0)), Some(&1));
-    /// assert_eq!(skipmap.lower_bound(Included(&0)), Some(&0));
+    /// assert_eq!(skipmap.lower_bound(Unbounded), Some((&0, &0)));
+    /// assert_eq!(skipmap.lower_bound(Excluded(&0)), Some((&1, &1)));
+    /// assert_eq!(skipmap.lower_bound(Included(&0)), Some((&0, &0)));
     /// assert_eq!(skipmap.lower_bound(Included(&10)), None);
     /// ```
-    pub fn lower_bound<Q>(&self, min: Bound<&Q>) -> Option<&V>
+    pub fn lower_bound<Q>(&self, min: Bound<&Q>) -> Option<(&K, &V)>
     where
         K: Borrow<Q>,
         Q: Ord,
     {
-        self._lower_bound(min).and_then(|(node, _)| node.value_ref())
+        self._lower_bound(min).and_then(|(node, _)| node.item_ref())
     }
 
     /// Returns an `Option<&V>` pointing to the highest element whose key is above
@@ -628,17 +628,17 @@ impl<K, V> SkipMap<K, V> {
     /// let mut skipmap = SkipMap::new();
     /// skipmap.extend((0..10).map(|x| (x, x)));
     ///
-    /// assert_eq!(skipmap.upper_bound(Unbounded), Some(&9));
-    /// assert_eq!(skipmap.upper_bound(Excluded(&9)), Some(&8));
-    /// assert_eq!(skipmap.upper_bound(Included(&9)), Some(&9));
+    /// assert_eq!(skipmap.upper_bound(Unbounded), Some((&9, &9)));
+    /// assert_eq!(skipmap.upper_bound(Excluded(&9)), Some((&8, &8)));
+    /// assert_eq!(skipmap.upper_bound(Included(&9)), Some((&9, &9)));
     /// assert_eq!(skipmap.upper_bound(Excluded(&0)), None);
     /// ```
-    pub fn upper_bound<Q>(&self, max: Bound<&Q>) -> Option<&V>
+    pub fn upper_bound<Q>(&self, max: Bound<&Q>) -> Option<(&K, &V)>
     where
         K: Borrow<Q>,
         Q: Ord,
     {
-        self._upper_bound(max).0.value_ref()
+        self._upper_bound(max).0.item_ref()
     }
 
     fn _lower_bound<Q>(&self, min: Bound<&Q>) -> Option<(&SkipNode<K, V>, usize)>
@@ -1482,16 +1482,16 @@ mod tests {
     fn bound() {
         let sm: SkipMap<_, _> = (1..3).map(|x| (x, x)).collect();
 
-        assert_eq!(sm.lower_bound(Unbounded), Some(&1));
-        assert_eq!(sm.lower_bound(Excluded(&1)), Some(&2));
-        assert_eq!(sm.lower_bound(Included(&1)), Some(&1));
+        assert_eq!(sm.lower_bound(Unbounded), Some((&1, &1)));
+        assert_eq!(sm.lower_bound(Excluded(&1)), Some((&2, &2)));
+        assert_eq!(sm.lower_bound(Included(&1)), Some((&1, &1)));
 
         assert_eq!(sm.lower_bound(Excluded(&3)), None);
         assert_eq!(sm.lower_bound(Included(&3)), None);
 
-        assert_eq!(sm.upper_bound(Unbounded), Some(&2));
-        assert_eq!(sm.upper_bound(Excluded(&2)), Some(&1));
-        assert_eq!(sm.upper_bound(Included(&2)), Some(&2));
+        assert_eq!(sm.upper_bound(Unbounded), Some((&2, &2)));
+        assert_eq!(sm.upper_bound(Excluded(&2)), Some((&1, &1)));
+        assert_eq!(sm.upper_bound(Included(&2)), Some((&2, &2)));
 
         assert_eq!(sm.upper_bound(Excluded(&0)), None);
         assert_eq!(sm.upper_bound(Included(&0)), None);
