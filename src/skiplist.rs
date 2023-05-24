@@ -761,7 +761,7 @@ where
                         dashes.push('-');
                     }
 
-                    if lvl <= (*node).level {
+                    if lvl <= node.level {
                         rows[lvl].push_str(value_len.as_ref());
                     } else {
                         rows[lvl].push_str(dashes.as_ref());

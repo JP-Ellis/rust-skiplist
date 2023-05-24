@@ -1027,7 +1027,7 @@ where
     }
 }
 
-impl<'a, K, V> ops::Index<usize> for SkipMap<K, V> {
+impl<K, V> ops::Index<usize> for SkipMap<K, V> {
     type Output = V;
 
     fn index(&self, index: usize) -> &V {
@@ -1037,7 +1037,7 @@ impl<'a, K, V> ops::Index<usize> for SkipMap<K, V> {
     }
 }
 
-impl<'a, K, V> ops::IndexMut<usize> for SkipMap<K, V> {
+impl<K, V> ops::IndexMut<usize> for SkipMap<K, V> {
     fn index_mut(&mut self, index: usize) -> &mut V {
         self.get_index_mut(index)
             .and_then(|node| node.value_mut())

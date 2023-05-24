@@ -39,6 +39,7 @@ pub struct OrderedSkipList<T> {
     head: Box<SkipNode<T>>,
     len: usize,
     level_generator: GeometricalLevelGenerator,
+    #[allow(clippy::type_complexity)]
     compare: Box<dyn Fn(&T, &T) -> Ordering>,
 }
 
