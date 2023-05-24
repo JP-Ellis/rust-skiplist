@@ -663,7 +663,8 @@ impl<T> OrderedSkipList<T> {
     /// assert_eq!(skiplist.lower_bound(Excluded(&10)), None);
     /// ```
     pub fn lower_bound(&self, min: Bound<&T>) -> Option<&T> {
-        self._lower_bound(min).and_then(|(node, _)| node.item.as_ref())
+        self._lower_bound(min)
+            .and_then(|(node, _)| node.item.as_ref())
     }
 
     /// Returns an `Option<&T>` pointing to the highest element whose key is above
