@@ -9,7 +9,7 @@ mod skipmap;
 mod vec;
 mod vecdeque;
 
-/// Group Benchmarks
+// Group Benchmarks
 criterion_group!(
     name = benches;
     config = Criterion::default();
@@ -45,5 +45,5 @@ criterion_group!(
     crate::vecdeque::rand_access,
 );
 
-/// Benchmarks
+// Benchmarks
 criterion_main!(benches);

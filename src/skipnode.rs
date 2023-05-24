@@ -1138,7 +1138,7 @@ impl<T> DoubleEndedIterator for IntoIter<T> {
             return None;
         }
         assert!(
-            !self.last.is_none(),
+            self.last.is_some(),
             "The IntoIter should be empty but IntoIter.last somehow still contains something"
         );
         let popped_node = if ptr::eq(self.first.as_deref().as_ptr(), self.last.unwrap().as_ptr()) {
