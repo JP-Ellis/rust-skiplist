@@ -634,6 +634,30 @@ where
         self.iter().any(|val| val.eq(value))
     }
 
+    /// Returns the index of the value if it's contained in the skiplist or None otherwise.
+    ///
+    /// Since this skip list is not ordered, this method has a complexity of O(n)
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use skiplist::SkipList;
+    ///
+    /// let mut skiplist = SkipList::new();
+    /// skiplist.extend(0..10);
+    /// assert_eq!(skiplist.index_of(&4), 4);
+    /// ```
+    #[inline]
+    pub fn index_of(&self, item: &T) -> Option<usize> {
+        self.iter()
+            .enumerate()
+            .find_map(|(idx, it)| if item.eq(it) {
+                Some(idx)
+            } else {
+                None
+            })
+    }
+
     /// Removes all consecutive repeated elements in the skiplist.
     ///
     /// # Examples
@@ -1290,6 +1314,17 @@ mod tests {
                 assert!(values.next().is_none());
                 assert!(expects.next().is_none());
             }
+        }
+    }
+
+    #[test]
+    fn index_of() {
+        let size = 200;
+        let sl: SkipList<_> = (0..size).collect();
+        for val in 0..size {
+            let i = sl.index_of(&val).expect("Index can't be None");
+            let item_at_index = sl.get(i).expect("Item can't be None");
+            assert_eq!(&val, item_at_index);
         }
     }
 
