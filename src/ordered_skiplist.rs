@@ -5,6 +5,7 @@ use crate::{
     skipnode::{insertion_fixup, removal_fixup, SkipListAction, SkipNode},
 };
 use std::{cmp, cmp::Ordering, default, fmt, hash, hash::Hash, iter, mem, ops, ops::Bound, ptr};
+use std::ops::Range;
 
 pub use crate::skipnode::{IntoIter, Iter, IterMut};
 
@@ -117,6 +118,36 @@ where
                 a.partial_cmp(b).expect("Element cannot be ordered.")
             })) as Box<dyn Fn(&T, &T) -> Ordering>,
         }
+    }
+}
+
+impl<T> OrderedSkipList<T>
+where
+    T: PartialEq,
+{
+    /// Returns the index of the value if it's contained in the skiplist or None otherwise.
+    ///
+    /// Since this skip list is ordered, this method has an average complexity of O(log n)
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use skiplist::OrderedSkipList;
+    ///
+    /// let mut skiplist = OrderedSkipList::new();
+    /// skiplist.extend(0..10);
+    /// assert_eq!(skiplist.index_of(&4), 4);
+    /// ```
+    #[inline]
+    pub fn index_of(&self, item: &T) -> Option<usize> {
+        let cmp = self.compare.as_ref();
+        let (node, idx) = self.head.find_last_le_with(|node_value, target| cmp(node_value, target), item);
+        if let Some(node) = &node.item {
+            if node.eq(item) {
+                return Some(idx - 1)
+            }
+        }
+        None
     }
 }
 
@@ -642,6 +673,51 @@ impl<T> OrderedSkipList<T> {
             last: Some(last),
             size,
         })
+    }
+
+    /// Constructs a double-ended iterator over a sub-range of elements in the
+    /// skiplist, starting at min, and ending at max.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use skiplist::OrderedSkipList;
+    ///
+    /// let mut skiplist = OrderedSkipList::new();
+    /// skiplist.extend(0..10);
+    /// for i in skiplist.index_range(3..8) {
+    ///     println!("Value: {}", i);
+    /// }
+    /// assert_eq!(Some(&4), skiplist.index_range(4..5).next());
+    /// ```
+    pub fn index_range(&self, range: Range<usize>) -> Iter<T> {
+        self.iter_range(range.start, range.end)
+    }
+
+    /// Makes an iterator between [begin, end]
+    fn iter_range(&self, first_idx: usize, last_idx: usize) -> Iter<T> {
+        if first_idx >= last_idx {
+            return Iter {
+                first: None,
+                last: None,
+                size: 0,
+            };
+        }
+        let first = self.get_index(first_idx);
+        let last = self.get_index(last_idx - 1);
+        if first.is_some() && last.is_some() {
+            Iter {
+                first,
+                last,
+                size: last_idx - first_idx,
+            }
+        } else {
+            Iter {
+                first: None,
+                last: None,
+                size: 0,
+            }
+        }
     }
 
     /// Returns an `Option<&T>` pointing to the lowest element whose key is above
@@ -1494,6 +1570,37 @@ mod tests {
                 assert!(values.next().is_none());
                 assert!(expects.next().is_none());
             }
+        }
+    }
+
+    #[test]
+    fn index_range() {
+        let size = 200;
+        let sl: OrderedSkipList<_> = (0..size).collect();
+        for i in 0..size {
+            for j in 0..size {
+                let mut values = sl.index_range(i..j);
+                let mut expects = i..j;
+
+                assert_eq!(values.size_hint(), expects.size_hint());
+
+                for (&v, e) in values.by_ref().zip(expects.by_ref()) {
+                    assert_eq!(v, e);
+                }
+                assert!(values.next().is_none());
+                assert!(expects.next().is_none());
+            }
+        }
+    }
+
+    #[test]
+    fn index_of() {
+        let size = 200;
+        let sl: OrderedSkipList<_> = (0..size).collect();
+        for val in 0..size {
+            let i = sl.index_of(&val).expect("Index can't be None");
+            let item_at_index = sl.get(i).expect("Item can't be None");
+            assert_eq!(&val, item_at_index);
         }
     }
 
