@@ -20,11 +20,11 @@ pub use crate::skipnode::{IntoIter, Iter, IterMut};
 ///
 /// Unlike a standard linked list, the skiplist can skip ahead when trying to
 /// find a particular index.
-pub struct SkipList<T> {
+pub struct SkipList<T, Gen = GeometricalLevelGenerator> {
     // Storage, this is not sorted
     head: Box<SkipNode<T>>,
     len: usize,
-    level_generator: GeometricalLevelGenerator,
+    level_generator: Gen,
 }
 
 // ///////////////////////////////////////////////
@@ -44,11 +44,7 @@ impl<T> SkipList<T> {
     #[inline]
     pub fn new() -> Self {
         let lg = GeometricalLevelGenerator::new(16, 1.0 / 2.0);
-        SkipList {
-            head: Box::new(SkipNode::head(lg.total())),
-            len: 0,
-            level_generator: lg,
-        }
+        Self::new_from_gen(lg)
     }
 
     /// Constructs a new, empty skiplist with the optimal number of levels for
@@ -68,6 +64,26 @@ impl<T> SkipList<T> {
     pub fn with_capacity(capacity: usize) -> Self {
         let levels = cmp::max(1, (capacity as f64).log2().floor() as usize);
         let lg = GeometricalLevelGenerator::new(levels, 1.0 / 2.0);
+        Self::new_from_gen(lg)
+    }
+}
+
+impl<T, G> SkipList<T, G>
+where
+    G: LevelGenerator,
+{
+    /// Constructs a new, empty skip list using a given [LevelGenerator]
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use skiplist::{SkipList, level_generator::GeometricalLevelGenerator};
+    ///
+    /// let lg = GeometricalLevelGenerator::new(10, 0.5);
+    /// let mut skiplist: SkipList<i64> = SkipList::new_from_gen(lg);
+    /// ```
+    #[inline]
+    pub fn new_from_gen(lg: G) -> Self {
         SkipList {
             head: Box::new(SkipNode::head(lg.total())),
             len: 0,
@@ -597,9 +613,10 @@ impl<T> SkipList<T> {
     }
 }
 
-impl<T> SkipList<T>
+impl<T, G> SkipList<T, G>
 where
     T: PartialEq,
+    G: LevelGenerator,
 {
     /// Returns true if the value is contained in the skiplist.
     ///
@@ -643,7 +660,10 @@ where
 // Internal methods
 // ///////////////////////////////////////////////
 
-impl<T> SkipList<T> {
+impl<T, G> SkipList<T, G>
+where
+    G: LevelGenerator,
+{
     /// Checks the integrity of the skiplist.
     #[allow(dead_code)]
     fn check(&self) {
