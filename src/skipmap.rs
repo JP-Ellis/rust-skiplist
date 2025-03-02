@@ -1,13 +1,15 @@
 //! SkipMap stores key-value pairs, with the keys being unique and always
 //! sorted.
 
-use crate::level_generator::{GeometricalLevelGenerator, LevelGenerator};
-use crate::skipnode::{self, insertion_fixup, SkipListAction};
 use std::{
     borrow::Borrow, cmp, cmp::Ordering, default, fmt, hash, hash::Hash, iter, mem, ops, ops::Bound,
 };
 
 pub use crate::skipnode::IntoIter;
+use crate::{
+    level_generator::{Geometric, LevelGenerator},
+    skipnode::{self, insertion_fixup, SkipListAction},
+};
 
 type SkipNode<K, V> = skipnode::SkipNode<(K, V)>;
 
@@ -51,7 +53,7 @@ pub struct SkipMap<K, V> {
     // Storage, this is not sorted
     head: Box<SkipNode<K, V>>,
     len: usize,
-    level_generator: GeometricalLevelGenerator,
+    level_generator: Geometric,
 }
 
 // ///////////////////////////////////////////////
@@ -73,7 +75,8 @@ where
     /// ```
     #[inline]
     pub fn new() -> Self {
-        let lg = GeometricalLevelGenerator::new(16, 1.0 / 2.0);
+        // Parameters are fixed and will produce a valid level generator.
+        let lg = Geometric::new(16, 1.0 / 2.0).expect("Failed to create level generator.");
         SkipMap {
             head: Box::new(SkipNode::head(lg.total())),
             len: 0,
@@ -97,7 +100,8 @@ where
     #[inline]
     pub fn with_capacity(capacity: usize) -> Self {
         let levels = cmp::max(1, (capacity as f64).log2().floor() as usize);
-        let lg = GeometricalLevelGenerator::new(levels, 1.0 / 2.0);
+        // Parameters are safe as levels >= 1 and p is in (0, 1).
+        let lg = Geometric::new(levels, 1.0 / 2.0).expect("Failed to create level generator.");
         SkipMap {
             head: Box::new(SkipNode::head(lg.total())),
             len: 0,
@@ -1231,8 +1235,9 @@ impl<'a, K, V: 'a> DoubleEndedIterator for Values<'a, K, V> {
 
 #[cfg(test)]
 mod tests {
-    use super::SkipMap;
     use std::ops::Bound::{self, Excluded, Included, Unbounded};
+
+    use super::SkipMap;
 
     #[test]
     fn basic_small() {

@@ -22,10 +22,13 @@ repository    = "https://github.com/JP-Ellis/rust-skiplist/"
 edition = "2018"
 
 [dependencies]
-rand = { version = "0.8", features = ["small_rng"] }
+anyhow    = "1.0.96"
+rand      = { version = "0.8", features = ["small_rng"] }
+thiserror = "1.0"
 
 [dev-dependencies]
-criterion = "0.3"
+criterion         = "0.3"
+pretty_assertions = "1.4.1"
 
 ################################################################################
 ## Lints
@@ -56,6 +59,7 @@ criterion = "0.3"
     blanket-clippy-restriction-lints = "allow"
 
     arbitrary_source_item_ordering = "allow"
+    default_numeric_fallback       = "allow"
     else_if_without_else           = "allow"
     impl_trait_in_params           = "allow"
     implicit_return                = "allow"
