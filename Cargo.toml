@@ -15,16 +15,75 @@ documentation = "https://docs.rs/skiplist"
 homepage      = "https://jpellis.me/projects/rust-skiplist/"
 repository    = "https://github.com/JP-Ellis/rust-skiplist/"
 
-edition = "2018"
+################################################################################
+## Dependencies
+################################################################################
 
-[badges]
-codecov = { repository = "JP-Ellis/rust-skiplist", branch = "master", service = "github" }
+edition = "2018"
 
 [dependencies]
 rand = { version = "0.8", features = ["small_rng"] }
 
 [dev-dependencies]
 criterion = "0.3"
+
+################################################################################
+## Lints
+################################################################################
+[lints]
+
+    [lints.rust]
+    future-incompatible = "warn"
+    missing_docs        = "warn"
+    warnings            = "warn"
+
+    [lints.clippy]
+    # Lower the priority of groups to allow overriding individual lints
+    cargo       = { level = "warn", priority = -1 }
+    complexity  = { level = "warn", priority = -1 }
+    correctness = { level = "warn", priority = -1 }
+    pedantic    = { level = "warn", priority = -1 }
+    perf        = { level = "warn", priority = -1 }
+    restriction = { level = "warn", priority = -1 }
+    style       = { level = "warn", priority = -1 }
+    suspicious  = { level = "warn", priority = -1 }
+
+    ########################################
+    # Restriction Lints
+    ########################################
+    # The restriction group contains lints which Clippy deems as opt-in. I prefer
+    # using an opt-out approach.
+    blanket-clippy-restriction-lints = "allow"
+
+    arbitrary_source_item_ordering = "allow"
+    else_if_without_else           = "allow"
+    impl_trait_in_params           = "allow"
+    implicit_return                = "allow"
+    min_ident_chars                = "allow"
+    missing_trait_methods          = "allow"
+    pattern_type_mismatch          = "allow"
+    pub_with_shorthand             = "allow"
+    question_mark_used             = "allow"
+    ref_patterns                   = "allow"
+    self_named_module_files        = "allow"
+    separated_literal_suffix       = "allow"
+    single_call_fn                 = "allow"
+    single_char_lifetime_names     = "allow"
+    std_instead_of_alloc           = "allow"
+    std_instead_of_core            = "allow"
+    string_add                     = "allow"
+    unreachable                    = "allow"
+    unused_trait_names             = "allow"
+
+    # TODO: Revisit this once https://github.com/rust-lang/rust-clippy/issues/14056
+    # is resolved.
+    panic_in_result_fn = "allow"
+
+    [lints.rustdoc]
+    missing-crate-level-docs = "warn"
+
+[badges]
+codecov = { repository = "JP-Ellis/rust-skiplist", branch = "master", service = "github" }
 
 [[bench]]
 harness = false
