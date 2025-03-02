@@ -1,18 +1,14 @@
 //! SkipMap stores key-value pairs, with the keys being unique and always
 //! sorted.
 
-#![allow(warnings)]
-#![allow(clippy)]
-#![allow(unknown_lints)]
-
 use std::{
     borrow::Borrow, cmp, cmp::Ordering, default, fmt, hash, hash::Hash, iter, mem, ops, ops::Bound,
 };
 
 pub use crate::skipnode::IntoIter;
 use crate::{
-    level_generator::{LevelGenerator, geometric::Geometric},
-    skipnode::{self, SkipListAction, insertion_fixup},
+    level_generator::{Geometric, LevelGenerator},
+    skipnode::{self, insertion_fixup, SkipListAction},
 };
 
 type SkipNode<K, V> = skipnode::SkipNode<(K, V)>;
@@ -130,7 +126,7 @@ where
     pub fn insert(&mut self, key: K, value: V) -> Option<V> {
         let level_gen = &mut self.level_generator;
         let inserter = InsertOrReplace::new(key, value, |k, v| {
-            Box::new(SkipNode::new((k, v), level_gen.level()))
+            Box::new(SkipNode::new((k, v), level_gen.random()))
         });
         let insert_res = inserter.act(self.head.as_mut());
         match insert_res {
@@ -764,7 +760,57 @@ where
     /// purposes).
     #[allow(dead_code)]
     fn debug_structure(&self) {
-        unimplemented!()
+        unsafe {
+            let mut node: *const SkipNode<K, V> = mem::transmute_copy(&self.head);
+            let mut rows: Vec<_> = iter::repeat(String::new())
+                .take(self.level_generator.total())
+                .collect();
+
+            loop {
+                let value = if let (Some(k), Some(v)) = ((*node).key_ref(), (*node).value_ref()) {
+                    format!("> ({:?}, {:?})", k, v)
+                } else {
+                    "> ()".to_string()
+                };
+
+                let max_str_len = format!("{} -{}-", value, (*node).links_len[(*node).level]).len();
+
+                let mut lvl = self.level_generator.total();
+                while lvl > 0 {
+                    lvl -= 1;
+
+                    let mut value_len = if lvl <= (*node).level {
+                        format!("{} -{}-", value, (*node).links_len[lvl])
+                    } else {
+                        format!("{} -", value)
+                    };
+                    for _ in 0..(max_str_len - value_len.len()) {
+                        value_len.push('-');
+                    }
+
+                    let mut dashes = String::new();
+                    for _ in 0..value_len.len() {
+                        dashes.push('-');
+                    }
+
+                    if lvl <= (*node).level {
+                        rows[lvl].push_str(value_len.as_ref());
+                    } else {
+                        rows[lvl].push_str(dashes.as_ref());
+                    }
+                }
+
+                if let Some(next) = (*node).links[0].and_then(|p| p.as_ptr().as_ref()) {
+                    node = next;
+                } else {
+                    break;
+                }
+            }
+
+            for row in rows.iter().rev() {
+                println!("{}", row);
+            }
+        }
     }
 }
 
@@ -819,20 +865,18 @@ where
     }
 
     unsafe fn act_on_node(self, node: &'a mut SkipNode<K, V>) -> Result<Self::Ok, Self::Err> {
-        unsafe {
-            let target_key = &self.key;
-            if let Some(target_node) = node.next_mut() {
-                if let Some(node_key) = target_node.key_ref() {
-                    if target_key == node_key {
-                        let old_value = mem::replace(target_node.value_mut().unwrap(), self.value);
-                        return Err(old_value);
-                    }
+        let target_key = &self.key;
+        if let Some(target_node) = node.next_mut() {
+            if let Some(node_key) = target_node.key_ref() {
+                if target_key == node_key {
+                    let old_value = mem::replace(target_node.value_mut().unwrap(), self.value);
+                    return Err(old_value);
                 }
             }
-            let new_node = (self.make_node)(self.key, self.value);
-            node.insert_next(new_node);
-            Ok(node.next_mut().unwrap())
         }
+        let new_node = (self.make_node)(self.key, self.value);
+        node.insert_next(new_node);
+        Ok(node.next_mut().unwrap())
     }
     fn fixup(
         level: usize,
@@ -870,18 +914,16 @@ impl<'a, Q: Ord + ?Sized, K: Borrow<Q>, V> SkipListAction<'a, (K, V)> for Remove
         self,
         target_parent: &'a mut SkipNode<K, V>,
     ) -> Result<Self::Ok, Self::Err> {
-        unsafe {
-            let node_key = target_parent
-                .next_mut()
-                .and_then(|node| node.key_ref())
-                .ok_or(())?
-                .borrow();
-            let target_key = self.0;
-            if node_key == target_key {
-                Ok(target_parent.take_next().unwrap())
-            } else {
-                Err(())
-            }
+        let node_key = target_parent
+            .next_mut()
+            .and_then(|node| node.key_ref())
+            .ok_or(())?
+            .borrow();
+        let target_key = self.0;
+        if node_key == target_key {
+            Ok(target_parent.take_next().unwrap())
+        } else {
+            Err(())
         }
     }
     fn fixup(
@@ -1103,7 +1145,7 @@ pub struct Iter<'a, K: 'a, V: 'a>(skipnode::Iter<'a, (K, V)>);
 impl<'a, K: 'a, V: 'a> Iter<'a, K, V> {
     /// SAFETY: There must be `len` nodes after head.
     unsafe fn from_head(head: &'a SkipNode<K, V>, len: usize) -> Self {
-        unsafe { Self(skipnode::Iter::from_head(head, len)) }
+        Self(skipnode::Iter::from_head(head, len))
     }
 }
 
@@ -1129,7 +1171,7 @@ pub struct IterMut<'a, K: 'a, V: 'a>(skipnode::IterMut<'a, (K, V)>);
 impl<'a, K: 'a, V: 'a> IterMut<'a, K, V> {
     /// SAFETY: There must be `len` nodes after head.
     unsafe fn from_head(head: &'a mut SkipNode<K, V>, len: usize) -> Self {
-        unsafe { Self(skipnode::IterMut::from_head(head, len)) }
+        Self(skipnode::IterMut::from_head(head, len))
     }
 }
 
@@ -1527,13 +1569,13 @@ mod tests {
         }
     }
 
-    // #[test]
-    // fn debug_display() {
-    //     let sl: SkipMap<_, _> = (0..10).map(|x| (x, x)).collect();
-    //     sl.debug_structure();
-    //     println!("{:?}", sl);
-    //     println!("{}", sl);
-    // }
+    #[test]
+    fn debug_display() {
+        let sl: SkipMap<_, _> = (0..10).map(|x| (x, x)).collect();
+        sl.debug_structure();
+        println!("{:?}", sl);
+        println!("{}", sl);
+    }
 
     #[test]
     #[allow(clippy::eq_op, clippy::many_single_char_names)]

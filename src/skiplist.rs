@@ -1,16 +1,12 @@
 //! A skiplist implementation which allows faster random access than a standard linked list.
 
-#![allow(warnings)]
-#![allow(clippy)]
-#![allow(unknown_lints)]
-
 use std::{
     cmp, cmp::Ordering, default, fmt, hash, hash::Hash, iter, ops, ops::Bound, ptr::NonNull,
 };
 
 pub use crate::skipnode::{IntoIter, Iter, IterMut};
 use crate::{
-    level_generator::{LevelGenerator, geometric::Geometric},
+    level_generator::{Geometric, LevelGenerator},
     skipnode::SkipNode,
 };
 
@@ -172,7 +168,7 @@ where
             panic!("Index out of bounds.");
         }
         self.len += 1;
-        let new_node = Box::new(SkipNode::new(value, self.level_generator.level()));
+        let new_node = Box::new(SkipNode::new(value, self.level_generator.random()));
         self.head
             .insert_at(new_node, index)
             .unwrap_or_else(|_| panic!("No insertion position is found!"));
@@ -226,7 +222,11 @@ where
     /// ```
     #[inline]
     pub fn front(&self) -> Option<&T> {
-        if self.is_empty() { None } else { self.get(0) }
+        if self.is_empty() {
+            None
+        } else {
+            self.get(0)
+        }
     }
 
     /// Provides a mutable reference to the front element, or `None` if the
@@ -271,7 +271,11 @@ where
     #[inline]
     pub fn back(&self) -> Option<&T> {
         let len = self.len();
-        if len > 0 { self.get(len - 1) } else { None }
+        if len > 0 {
+            self.get(len - 1)
+        } else {
+            None
+        }
     }
 
     /// Provides a reference to the back element, or `None` if the skiplist is
@@ -292,7 +296,11 @@ where
     #[inline]
     pub fn back_mut(&mut self) -> Option<&mut T> {
         let len = self.len();
-        if len > 0 { self.get_mut(len - 1) } else { None }
+        if len > 0 {
+            self.get_mut(len - 1)
+        } else {
+            None
+        }
     }
 
     /// Provides a reference to the element at the given index, or `None` if the
@@ -768,11 +776,10 @@ where
                 .collect();
 
             loop {
-                let value = match node.item {
-                    Some(ref v) => {
-                        format!("> [{:?}]", v)
-                    }
-                    _ => "> []".to_string(),
+                let value = if let Some(ref v) = node.item {
+                    format!("> [{:?}]", v)
+                } else {
+                    "> []".to_string()
                 };
 
                 let max_str_len = format!("{} -{}-", value, node.links_len[node.level]).len() + 1;
@@ -982,12 +989,6 @@ impl<T: Hash> Hash for SkipList<T> {
 mod tests {
     use std::ops::Bound::{self, Excluded, Included, Unbounded};
 
-    use anyhow::Result;
-    use rand::{
-        Rng,
-        distr::{Uniform, uniform::UniformUsize},
-    };
-
     use super::SkipList;
 
     #[test]
@@ -1010,17 +1011,17 @@ mod tests {
     }
 
     #[test]
-    fn insert_rand() -> Result<()> {
+    fn insert_rand() {
+        use rand::{distributions::Uniform, Rng};
         let mut rng = rand::thread_rng();
         let mut sl: SkipList<usize> = SkipList::new();
         let mut vec: Vec<usize> = Vec::new();
         for i in 0..100 {
-            let idx = rng.sample(Uniform::new_inclusive(0, i)?);
+            let idx = rng.sample(Uniform::new_inclusive(0, i));
             sl.insert(i, idx);
             vec.insert(idx, i);
         }
         assert_eq!(sl.into_iter().collect::<Vec<_>>(), vec);
-        Ok(())
     }
 
     #[test]
@@ -1036,15 +1037,15 @@ mod tests {
     }
 
     #[test]
-    fn remove_rand() -> Result<()> {
+    fn remove_rand() {
+        use rand::{distributions::Uniform, Rng};
         let mut rng = rand::thread_rng();
         let mut v: Vec<i32> = (0..1000).collect();
         let mut sl: SkipList<i32> = (0..1000).collect();
         for i in (0..1000).rev() {
-            let idx = rng.sample(Uniform::new_inclusive(0, i)?);
+            let idx = rng.sample(Uniform::new_inclusive(0, i));
             assert_eq!(sl.remove(idx), v.remove(idx));
         }
-        Ok(())
     }
 
     #[test]

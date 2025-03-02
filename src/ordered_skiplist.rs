@@ -1,9 +1,5 @@
 //! An always-ordered skiplist.
 
-#![allow(warnings)]
-#![allow(clippy)]
-#![allow(unknown_lints)]
-
 use std::{
     cmp,
     cmp::Ordering,
@@ -16,8 +12,8 @@ use std::{
 
 pub use crate::skipnode::{IntoIter, Iter, IterMut};
 use crate::{
-    level_generator::{LevelGenerator, geometric::Geometric},
-    skipnode::{SkipListAction, SkipNode, insertion_fixup, removal_fixup},
+    level_generator::{Geometric, LevelGenerator},
+    skipnode::{insertion_fixup, removal_fixup, SkipListAction, SkipNode},
 };
 
 // ////////////////////////////////////////////////////////////////////////////
@@ -335,7 +331,7 @@ impl<T> OrderedSkipList<T> {
     /// assert!(!skiplist.is_empty());
     /// ```
     pub fn insert(&mut self, value: T) {
-        let new_node = Box::new(SkipNode::new(value, self.level_generator.level()));
+        let new_node = Box::new(SkipNode::new(value, self.level_generator.random()));
         let inserter = OrdInserter::new(self.compare.as_ref(), new_node);
         let _ = inserter.act(self.head.as_mut());
         self.len += 1;
@@ -383,7 +379,11 @@ impl<T> OrderedSkipList<T> {
     #[inline]
     pub fn back(&self) -> Option<&T> {
         let len = self.len();
-        if len > 0 { Some(&self[len - 1]) } else { None }
+        if len > 0 {
+            Some(&self[len - 1])
+        } else {
+            None
+        }
     }
 
     /// Provides a reference to the element at the given index, or `None` if the
@@ -849,10 +849,8 @@ where
 
     // SAEFTY: The new node may never alias with the old nodes.
     unsafe fn act_on_node(self, node: &'a mut SkipNode<T>) -> Result<Self::Ok, Self::Err> {
-        unsafe {
-            // SAFETY: links will be fixed by the caller.
-            Ok(node.insert_next(self.new_node))
-        }
+        // SAFETY: links will be fixed by the caller.
+        Ok(node.insert_next(self.new_node))
     }
 
     fn fixup(
@@ -916,10 +914,8 @@ where
 
     // SAFETY: The removed node will never alias with nodes in the list.
     unsafe fn act_on_node(self, node: &'a mut SkipNode<T>) -> Result<Self::Ok, Self::Err> {
-        unsafe {
-            // SAFETY: Links will be fixed by the caller.
-            node.take_next().ok_or(())
-        }
+        // SAFETY: Links will be fixed by the caller.
+        node.take_next().ok_or(())
     }
 
     fn fixup(
@@ -1009,10 +1005,8 @@ where
 
     // SAFETY: The removed node will never alias with nodes in the list.
     unsafe fn act_on_node(self, node: &'a mut SkipNode<T>) -> Result<Self::Ok, Self::Err> {
-        unsafe {
-            // SAFETY: Links will be fixed by the caller.
-            node.take_next().ok_or(())
-        }
+        // SAFETY: Links will be fixed by the caller.
+        node.take_next().ok_or(())
     }
 
     fn fixup(
@@ -1072,7 +1066,57 @@ where
     /// purposes).
     #[allow(dead_code)]
     fn debug_structure(&self) {
-        unimplemented!()
+        unsafe {
+            let mut node: *const SkipNode<T> = mem::transmute_copy(&self.head);
+            let mut rows: Vec<_> = iter::repeat(String::new())
+                .take(self.level_generator.total())
+                .collect();
+
+            loop {
+                let value = if let Some(ref v) = (*node).item {
+                    format!("> [{:?}]", v)
+                } else {
+                    "> []".to_string()
+                };
+
+                let max_str_len = format!("{} -{}-", value, (*node).links_len[(*node).level]).len();
+
+                let mut lvl = self.level_generator.total();
+                while lvl > 0 {
+                    lvl -= 1;
+
+                    let mut value_len = if lvl <= (*node).level {
+                        format!("{} -{}-", value, (*node).links_len[lvl])
+                    } else {
+                        format!("{} -", value)
+                    };
+                    for _ in 0..(max_str_len - value_len.len()) {
+                        value_len.push('-');
+                    }
+
+                    let mut dashes = String::new();
+                    for _ in 0..value_len.len() {
+                        dashes.push('-');
+                    }
+
+                    if lvl <= (*node).level {
+                        rows[lvl].push_str(value_len.as_ref());
+                    } else {
+                        rows[lvl].push_str(dashes.as_ref());
+                    }
+                }
+
+                if let Some(next) = (*node).links[0].and_then(|p| p.as_ptr().as_ref()) {
+                    node = next;
+                } else {
+                    break;
+                }
+            }
+
+            for row in rows.iter().rev() {
+                println!("{}", row);
+            }
+        }
     }
 }
 
@@ -1758,13 +1802,13 @@ mod tests {
         assert!(sl.is_empty());
     }
 
-    // #[test]
-    // fn debug_display() {
-    //     let sl: OrderedSkipList<_> = (0..10).collect();
-    //     sl.debug_structure();
-    //     println!("{:?}", sl);
-    //     println!("{}", sl);
-    // }
+    #[test]
+    fn debug_display() {
+        let sl: OrderedSkipList<_> = (0..10).collect();
+        sl.debug_structure();
+        println!("{:?}", sl);
+        println!("{}", sl);
+    }
 
     #[test]
     #[allow(clippy::eq_op, clippy::many_single_char_names)]
