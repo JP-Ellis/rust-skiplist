@@ -1,0 +1,18 @@
+#:schema https://json.schemastore.org/any.json
+
+# Clippy's default only allows 2 segments, but I find 3 to be allowable before
+# requiring a 'use' statement.
+absolute-paths-max-segments = 3
+
+# Tweaks specific targeting tests
+allow-expect-in-tests = true
+allow-panic-in-tests  = true
+allow-print-in-tests  = true
+allow-unwrap-in-tests = false
+
+disallowed-methods = [
+    # Prefer the pretty_assertions crate
+    "std::assert_eq",
+    "std::assert_matches::assert_matches",
+    "std::assert_ne",
+]

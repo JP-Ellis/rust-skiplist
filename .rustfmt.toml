@@ -1,0 +1,10 @@
+#:schema https://json.schemastore.org/rustfmt.json
+# Used by `cargo +nightly fmt`, otherwise emits a warning
+unstable_features = true
+
+################################################################################
+## Imports
+################################################################################
+group_imports       = "StdExternalCrate"
+imports_granularity = "Crate"
+reorder_imports     = true
