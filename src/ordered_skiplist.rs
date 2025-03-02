@@ -1,13 +1,20 @@
 //! An always-ordered skiplist.
 
-use crate::{
-    level_generator::{GeometricalLevelGenerator, LevelGenerator},
-    skipnode::{insertion_fixup, removal_fixup, SkipListAction, SkipNode},
+use std::{
+    cmp,
+    cmp::Ordering,
+    default, fmt, hash,
+    hash::Hash,
+    iter, mem, ops,
+    ops::{Bound, Range},
+    ptr,
 };
-use std::ops::Range;
-use std::{cmp, cmp::Ordering, default, fmt, hash, hash::Hash, iter, mem, ops, ops::Bound, ptr};
 
 pub use crate::skipnode::{IntoIter, Iter, IterMut};
+use crate::{
+    level_generator::{Geometric, LevelGenerator},
+    skipnode::{insertion_fixup, removal_fixup, SkipListAction, SkipNode},
+};
 
 // ////////////////////////////////////////////////////////////////////////////
 // OrderedSkipList
@@ -39,7 +46,7 @@ pub struct OrderedSkipList<T> {
     // Storage, this is not sorted
     head: Box<SkipNode<T>>,
     len: usize,
-    level_generator: GeometricalLevelGenerator,
+    level_generator: Geometric,
     #[allow(clippy::type_complexity)]
     compare: Box<dyn Fn(&T, &T) -> Ordering>,
 }
@@ -74,7 +81,8 @@ where
     /// ```
     #[inline]
     pub fn new() -> Self {
-        let lg = GeometricalLevelGenerator::new(16, 1.0 / 2.0);
+        // Parameters are fixed and will produce a valid level generator.
+        let lg = Geometric::new(16, 1.0 / 2.0).expect("Failed to create level generator.");
         OrderedSkipList {
             head: Box::new(SkipNode::head(lg.total())),
             len: 0,
@@ -109,7 +117,8 @@ where
     #[inline]
     pub fn with_capacity(capacity: usize) -> Self {
         let levels = cmp::max(1, (capacity as f64).log2().floor() as usize);
-        let lg = GeometricalLevelGenerator::new(levels, 1.0 / 2.0);
+        // Parameters are safe as levels >= 1 and p is in (0, 1).
+        let lg = Geometric::new(levels, 1.0 / 2.0).expect("Failed to create level generator.");
         OrderedSkipList {
             head: Box::new(SkipNode::head(lg.total())),
             len: 0,
@@ -196,7 +205,8 @@ impl<T> OrderedSkipList<T> {
     where
         F: 'static + Fn(&T, &T) -> Ordering,
     {
-        let lg = GeometricalLevelGenerator::new(16, 1.0 / 2.0);
+        // Parameters are fixed and will produce a valid level generator.
+        let lg = Geometric::new(16, 1.0 / 2.0).expect("Failed to create level generator.");
         OrderedSkipList {
             head: Box::new(SkipNode::head(lg.total())),
             len: 0,
@@ -1273,11 +1283,12 @@ impl<T: Hash> Hash for OrderedSkipList<T> {
 
 #[cfg(test)]
 mod tests {
-    use super::OrderedSkipList;
     use std::{
         cmp::Ordering,
         ops::Bound::{self, Excluded, Included, Unbounded},
     };
+
+    use super::OrderedSkipList;
 
     #[test]
     fn basic_small() {

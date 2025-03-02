@@ -4,12 +4,11 @@ use std::{
     cmp, cmp::Ordering, default, fmt, hash, hash::Hash, iter, ops, ops::Bound, ptr::NonNull,
 };
 
+pub use crate::skipnode::{IntoIter, Iter, IterMut};
 use crate::{
-    level_generator::{GeometricalLevelGenerator, LevelGenerator},
+    level_generator::{Geometric, LevelGenerator},
     skipnode::SkipNode,
 };
-
-pub use crate::skipnode::{IntoIter, Iter, IterMut};
 
 // ////////////////////////////////////////////////////////////////////////////
 // SkipList
@@ -20,7 +19,7 @@ pub use crate::skipnode::{IntoIter, Iter, IterMut};
 ///
 /// Unlike a standard linked list, the skiplist can skip ahead when trying to
 /// find a particular index.
-pub struct SkipList<T, Gen = GeometricalLevelGenerator> {
+pub struct SkipList<T, Gen = Geometric> {
     // Storage, this is not sorted
     head: Box<SkipNode<T>>,
     len: usize,
@@ -43,7 +42,8 @@ impl<T> SkipList<T> {
     /// ```
     #[inline]
     pub fn new() -> Self {
-        let lg = GeometricalLevelGenerator::new(16, 1.0 / 2.0);
+        // Parameters are fixed and will produce a valid level generator.
+        let lg = Geometric::new(16, 1.0 / 2.0).expect("Failed to create level generator.");
         Self::new_from_gen(lg)
     }
 
@@ -63,7 +63,8 @@ impl<T> SkipList<T> {
     #[inline]
     pub fn with_capacity(capacity: usize) -> Self {
         let levels = cmp::max(1, (capacity as f64).log2().floor() as usize);
-        let lg = GeometricalLevelGenerator::new(levels, 1.0 / 2.0);
+        // Parameters are safe as levels >= 1 and p is in (0, 1).
+        let lg = Geometric::new(levels, 1.0 / 2.0).expect("Failed to create level generator.");
         Self::new_from_gen(lg)
     }
 }
@@ -986,8 +987,9 @@ impl<T: Hash> Hash for SkipList<T> {
 
 #[cfg(test)]
 mod tests {
-    use super::SkipList;
     use std::ops::Bound::{self, Excluded, Included, Unbounded};
+
+    use super::SkipList;
 
     #[test]
     fn push_front() {
@@ -1010,8 +1012,7 @@ mod tests {
 
     #[test]
     fn insert_rand() {
-        use rand::distributions::Uniform;
-        use rand::Rng;
+        use rand::{distributions::Uniform, Rng};
         let mut rng = rand::thread_rng();
         let mut sl: SkipList<usize> = SkipList::new();
         let mut vec: Vec<usize> = Vec::new();
@@ -1037,8 +1038,7 @@ mod tests {
 
     #[test]
     fn remove_rand() {
-        use rand::distributions::Uniform;
-        use rand::Rng;
+        use rand::{distributions::Uniform, Rng};
         let mut rng = rand::thread_rng();
         let mut v: Vec<i32> = (0..1000).collect();
         let mut sl: SkipList<i32> = (0..1000).collect();
