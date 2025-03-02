@@ -1,17 +1,20 @@
+#:schema https://json.schemastore.org/cargo.json
 [package]
-name        = "skiplist"
-version     = "0.5.0"
+name    = "skiplist"
+version = "0.5.0"
+
 authors     = ["JP-Ellis <josh@jpellis.me>"]
-description = "Skiplist implementation in rust, providing fast insertion and removal.  A normal skiplist is implemented, as well as an ordered skiplist and a skipmap."
-keywords    = ["collection", "skiplist", "sorted"]
+description = "Skiplist implementation in Rust for fast insertion and removal, including a normal skiplist, ordered skiplist, and skipmap."
+license     = "MIT"
+readme      = "README.md"
+
+categories = ["data-structures"]
+keywords   = ["collection", "skiplist", "sorted"]
 
 documentation = "https://docs.rs/skiplist"
-homepage      = "https://www.jpellis.me/projects/rust-skiplist/"
-repository    = "https://www.github.com/JP-Ellis/rust-skiplist/"
+homepage      = "https://jpellis.me/projects/rust-skiplist/"
+repository    = "https://github.com/JP-Ellis/rust-skiplist/"
 
-readme = "README.md"
-
-license = "MIT"
 edition = "2018"
 
 [badges]
@@ -24,5 +27,5 @@ rand = { version = "0.8", features = ["small_rng"] }
 criterion = "0.3"
 
 [[bench]]
-name    = "main"
 harness = false
+name    = "main"
