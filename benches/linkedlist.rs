@@ -2,14 +2,13 @@
 
 use std::collections::LinkedList;
 
-use criterion::{AxisScale, BenchmarkId, Criterion, PlotConfiguration, black_box};
-use rand::{Rng, SeedableRng, rngs::StdRng};
+use criterion::{black_box, AxisScale, BenchmarkId, Criterion, PlotConfiguration};
+use rand::prelude::*;
 
-/// Benchmarking sizes.
+/// Benchmarking sizes
 const SIZES: [usize; 6] = [1, 10, 100, 1000, 10_000, 100_000];
 
-/// Benchmarking push front.
-#[inline]
+/// Benchmarking push front
 pub fn push_front(c: &mut Criterion) {
     let mut group = c.benchmark_group("LinkedList Push Front");
     group.plot_config(PlotConfiguration::default().summary_scale(AxisScale::Logarithmic));
@@ -17,18 +16,17 @@ pub fn push_front(c: &mut Criterion) {
     for size in SIZES {
         group.bench_function(BenchmarkId::from_parameter(size), |b| {
             let mut rng = StdRng::seed_from_u64(0x1234_abcd);
-            let mut sl: LinkedList<u64> =
-                std::iter::repeat_with(|| rng.random()).take(size).collect();
+            let mut sl: LinkedList<usize> =
+                std::iter::repeat_with(|| rng.gen()).take(size).collect();
 
             b.iter(|| {
-                sl.push_front(rng.random());
+                sl.push_front(rng.gen());
             });
         });
     }
 }
 
-/// Benchmarking push back.
-#[inline]
+/// Benchmarking push back
 pub fn push_back(c: &mut Criterion) {
     let mut group = c.benchmark_group("LinkedList Push Back");
     group.plot_config(PlotConfiguration::default().summary_scale(AxisScale::Logarithmic));
@@ -36,18 +34,17 @@ pub fn push_back(c: &mut Criterion) {
     for size in SIZES {
         group.bench_function(BenchmarkId::from_parameter(size), |b| {
             let mut rng = StdRng::seed_from_u64(0x1234_abcd);
-            let mut sl: LinkedList<u64> =
-                std::iter::repeat_with(|| rng.random()).take(size).collect();
+            let mut sl: LinkedList<usize> =
+                std::iter::repeat_with(|| rng.gen()).take(size).collect();
 
             b.iter(|| {
-                sl.push_back(rng.random());
+                sl.push_back(rng.gen());
             });
         });
     }
 }
 
-/// Benchmarking random access.
-#[inline]
+/// Benchmarking random access
 pub fn rand_access(c: &mut Criterion) {
     let mut group = c.benchmark_group("LinkedList Random Access");
     group.plot_config(PlotConfiguration::default().summary_scale(AxisScale::Logarithmic));
@@ -55,8 +52,8 @@ pub fn rand_access(c: &mut Criterion) {
     for size in SIZES {
         group.bench_function(BenchmarkId::from_parameter(size), |b| {
             let mut rng = StdRng::seed_from_u64(0x1234_abcd);
-            let sl: LinkedList<u64> = std::iter::repeat_with(|| rng.random()).take(size).collect();
-            let indices: Vec<_> = std::iter::repeat_with(|| rng.random_range(0..sl.len()))
+            let sl: LinkedList<usize> = std::iter::repeat_with(|| rng.gen()).take(size).collect();
+            let indices: Vec<_> = std::iter::repeat_with(|| rng.gen_range(0..sl.len()))
                 .take(10)
                 .collect();
 
@@ -71,14 +68,11 @@ pub fn rand_access(c: &mut Criterion) {
     }
 }
 
-/// Benchmarking iteration.
-#[inline]
+/// Benchmarking iteration
 pub fn iter(c: &mut Criterion) {
     c.bench_function("LinkedList Iter", |b| {
         let mut rng = StdRng::seed_from_u64(0x1234_abcd);
-        let sl: LinkedList<u64> = std::iter::repeat_with(|| rng.random())
-            .take(100_000)
-            .collect();
+        let sl: LinkedList<usize> = std::iter::repeat_with(|| rng.gen()).take(100_000).collect();
 
         b.iter(|| {
             for el in &sl {

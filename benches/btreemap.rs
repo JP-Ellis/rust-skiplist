@@ -2,14 +2,13 @@
 
 use std::collections::BTreeMap;
 
-use criterion::{AxisScale, BenchmarkId, Criterion, PlotConfiguration, black_box};
-use rand::{Rng, SeedableRng, rngs::StdRng};
+use criterion::{black_box, AxisScale, BenchmarkId, Criterion, PlotConfiguration};
+use rand::prelude::*;
 
-/// Benchmarking sizes.
+/// Benchmarking sizes
 const SIZES: [usize; 6] = [1, 10, 100, 1000, 10_000, 100_000];
 
-/// Benchmarking insertion.
-#[inline]
+/// Benchmarking insertion
 pub fn insert(c: &mut Criterion) {
     let mut group = c.benchmark_group("BTreeMap Insert");
     group.plot_config(PlotConfiguration::default().summary_scale(AxisScale::Logarithmic));
@@ -17,18 +16,17 @@ pub fn insert(c: &mut Criterion) {
     for size in SIZES {
         group.bench_function(BenchmarkId::from_parameter(size), |b| {
             let mut rng = StdRng::seed_from_u64(0x1234_abcd);
-            let mut sl: BTreeMap<u64, u64> =
-                std::iter::repeat_with(|| rng.random()).take(size).collect();
+            let mut sl: BTreeMap<usize, usize> =
+                std::iter::repeat_with(|| rng.gen()).take(size).collect();
 
             b.iter(|| {
-                sl.insert(rng.random(), rng.random());
+                sl.insert(rng.gen(), rng.gen());
             });
         });
     }
 }
 
-/// Benchmarking random access.
-#[inline]
+/// Benchmarking random access
 pub fn rand_access(c: &mut Criterion) {
     let mut group = c.benchmark_group("BTreeMap Random Access");
     group.plot_config(PlotConfiguration::default().summary_scale(AxisScale::Logarithmic));
@@ -36,11 +34,11 @@ pub fn rand_access(c: &mut Criterion) {
     for size in SIZES {
         group.bench_function(BenchmarkId::from_parameter(size), |b| {
             let mut rng = StdRng::seed_from_u64(0x1234_abcd);
-            let sl: BTreeMap<usize, u64> = std::iter::repeat_with(|| rng.random())
+            let sl: BTreeMap<usize, usize> = std::iter::repeat_with(|| rng.gen())
                 .enumerate()
                 .take(size)
                 .collect();
-            let indices: Vec<usize> = std::iter::repeat_with(|| rng.random_range(0..sl.len()))
+            let indices: Vec<usize> = std::iter::repeat_with(|| rng.gen_range(0..sl.len()))
                 .take(10)
                 .collect();
 
@@ -53,14 +51,12 @@ pub fn rand_access(c: &mut Criterion) {
     }
 }
 
-/// Benchmarking iteration.
-#[inline]
+/// Benchmarking iteration
 pub fn iter(c: &mut Criterion) {
     c.bench_function("BTreeMap Iter", |b| {
         let mut rng = StdRng::seed_from_u64(0x1234_abcd);
-        let sl: BTreeMap<u64, u64> = std::iter::repeat_with(|| rng.random())
-            .take(100_000)
-            .collect();
+        let sl: BTreeMap<usize, usize> =
+            std::iter::repeat_with(|| rng.gen()).take(100_000).collect();
 
         b.iter(|| {
             for el in &sl {
