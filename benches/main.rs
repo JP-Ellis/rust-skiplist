@@ -1,3 +1,13 @@
+//! # Benchmarks
+//!
+//! Setup and configure benchmarks to compare the performance of our skiplist
+//! implementation against the standard library's data structures.
+
+#![expect(
+    missing_docs,
+    reason = "benchmarking and criterion creates boilerplate"
+)]
+
 use criterion::{criterion_group, criterion_main, Criterion};
 
 mod btreemap;
@@ -9,7 +19,6 @@ mod skipmap;
 mod vec;
 mod vecdeque;
 
-// Group Benchmarks
 criterion_group!(
     name = benches;
     config = Criterion::default();
@@ -45,5 +54,4 @@ criterion_group!(
     crate::vecdeque::rand_access,
 );
 
-// Benchmarks
 criterion_main!(benches);
