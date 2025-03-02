@@ -1,4 +1,0 @@
-[submodule "pages"]
-	path = pages
-	url = http://github.com/JP-Ellis/rust-skiplist.git
-	branch = pages
