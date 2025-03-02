@@ -651,11 +651,7 @@ where
     pub fn index_of(&self, item: &T) -> Option<usize> {
         self.iter()
             .enumerate()
-            .find_map(|(idx, it)| if item.eq(it) {
-                Some(idx)
-            } else {
-                None
-            })
+            .find_map(|(idx, it)| if item.eq(it) { Some(idx) } else { None })
     }
 
     /// Removes all consecutive repeated elements in the skiplist.
@@ -675,7 +671,7 @@ where
     pub fn dedup(&mut self) {
         let removed = self
             .head
-            .retain(|prev, current| prev.map_or(true, |prev| !prev.eq(current)));
+            .retain(|prev, current| prev.is_none_or(|prev| !prev.eq(current)));
         self.len -= removed;
     }
 }
@@ -1109,10 +1105,10 @@ mod tests {
     #[test]
     fn last() {
         let mut sl = SkipList::new();
-        assert_eq!(sl.iter().rev().next(), None);
+        assert_eq!(sl.iter().next_back(), None);
         for i in 0..100 {
             sl.push_back(i);
-            assert_eq!(sl.iter().rev().next(), Some(&i));
+            assert_eq!(sl.iter().next_back(), Some(&i));
         }
     }
 

@@ -289,10 +289,10 @@ impl<K, V> SkipMap<K, V> {
     /// assert!(skipmap.get(&10).is_none());
     /// ```
     #[inline]
-    pub fn get<Q: ?Sized>(&self, key: &Q) -> Option<&V>
+    pub fn get<Q>(&self, key: &Q) -> Option<&V>
     where
         K: Borrow<Q>,
-        Q: Ord,
+        Q: Ord + ?Sized,
     {
         self.find_key(key).and_then(|node| node.value_ref())
     }
@@ -318,10 +318,10 @@ impl<K, V> SkipMap<K, V> {
     /// assert_eq!(skipmap.get(&0), Some(&100));
     /// ```
     #[inline]
-    pub fn get_mut<Q: ?Sized>(&mut self, key: &Q) -> Option<&mut V>
+    pub fn get_mut<Q>(&mut self, key: &Q) -> Option<&mut V>
     where
         K: Borrow<Q>,
-        Q: Ord,
+        Q: Ord + ?Sized,
     {
         self.find_key_mut(key).and_then(|node| node.value_mut())
     }
@@ -389,10 +389,10 @@ impl<K, V> SkipMap<K, V> {
     /// assert!(skipmap.contains_key(&4));
     /// assert!(!skipmap.contains_key(&15));
     /// ```
-    pub fn contains_key<Q: ?Sized>(&self, key: &Q) -> bool
+    pub fn contains_key<Q>(&self, key: &Q) -> bool
     where
         K: Borrow<Q>,
-        Q: Ord,
+        Q: Ord + ?Sized,
     {
         self.find_key(key).is_some()
     }
@@ -410,10 +410,10 @@ impl<K, V> SkipMap<K, V> {
     /// assert_eq!(skipmap.remove(&4), Some(4)); // Removes the last one
     /// assert!(skipmap.remove(&4).is_none());    // No more '4' left
     /// ```
-    pub fn remove<Q: ?Sized>(&mut self, key: &Q) -> Option<V>
+    pub fn remove<Q>(&mut self, key: &Q) -> Option<V>
     where
         K: Borrow<Q>,
-        Q: Ord,
+        Q: Ord + ?Sized,
     {
         let remover = Remover(key);
         match remover.act(self.head.as_mut()) {
@@ -701,10 +701,10 @@ impl<K: Ord, V> SkipMap<K, V> {
 
 impl<K, V> SkipMap<K, V> {
     /// Find the reference to the node equal to the given key.
-    fn find_key<Q: ?Sized>(&self, key: &Q) -> Option<&SkipNode<K, V>>
+    fn find_key<Q>(&self, key: &Q) -> Option<&SkipNode<K, V>>
     where
         K: Borrow<Q>,
-        Q: Ord,
+        Q: Ord + ?Sized,
     {
         let (last_le, _) = self.head.find_last_le_with(
             |(node_key, _), target| Ord::cmp(node_key.borrow(), target),
@@ -719,10 +719,10 @@ impl<K, V> SkipMap<K, V> {
     }
 
     /// Find the mutable reference to the node equal to the given key.
-    fn find_key_mut<Q: ?Sized>(&mut self, key: &Q) -> Option<&mut SkipNode<K, V>>
+    fn find_key_mut<Q>(&mut self, key: &Q) -> Option<&mut SkipNode<K, V>>
     where
         K: Borrow<Q>,
-        Q: Ord,
+        Q: Ord + ?Sized,
     {
         let (last_le, _) = self.head.find_last_le_with_mut(
             |(node_key, _), target| Ord::cmp(node_key.borrow(), target),

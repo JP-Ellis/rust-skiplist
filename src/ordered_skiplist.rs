@@ -4,8 +4,8 @@ use crate::{
     level_generator::{GeometricalLevelGenerator, LevelGenerator},
     skipnode::{insertion_fixup, removal_fixup, SkipListAction, SkipNode},
 };
-use std::{cmp, cmp::Ordering, default, fmt, hash, hash::Hash, iter, mem, ops, ops::Bound, ptr};
 use std::ops::Range;
+use std::{cmp, cmp::Ordering, default, fmt, hash, hash::Hash, iter, mem, ops, ops::Bound, ptr};
 
 pub use crate::skipnode::{IntoIter, Iter, IterMut};
 
@@ -141,10 +141,12 @@ where
     #[inline]
     pub fn index_of(&self, item: &T) -> Option<usize> {
         let cmp = self.compare.as_ref();
-        let (node, idx) = self.head.find_last_le_with(|node_value, target| cmp(node_value, target), item);
+        let (node, idx) = self
+            .head
+            .find_last_le_with(|node_value, target| cmp(node_value, target), item);
         if let Some(node) = &node.item {
             if node.eq(item) {
-                return Some(idx - 1)
+                return Some(idx - 1);
             }
         }
         None
