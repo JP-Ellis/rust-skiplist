@@ -19,7 +19,8 @@ repository    = "https://github.com/JP-Ellis/rust-skiplist/"
 ## Dependencies
 ################################################################################
 
-edition = "2018"
+edition      = "2024"
+rust-version = "1.85"
 
 [dependencies]
 anyhow    = "1.0.96"

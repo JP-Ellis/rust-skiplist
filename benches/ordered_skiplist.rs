@@ -1,6 +1,6 @@
 //! Benchmarks for this crate's [`OrderedSkipList`].
 
-use criterion::{black_box, AxisScale, BenchmarkId, Criterion, PlotConfiguration};
+use criterion::{AxisScale, BenchmarkId, Criterion, PlotConfiguration, black_box};
 use rand::prelude::*;
 use skiplist::OrderedSkipList;
 
@@ -16,10 +16,10 @@ pub fn insert(c: &mut Criterion) {
         group.bench_function(BenchmarkId::from_parameter(size), |b| {
             let mut rng = StdRng::seed_from_u64(0x1234_abcd);
             let mut sl: OrderedSkipList<usize> =
-                std::iter::repeat_with(|| rng.gen()).take(size).collect();
+                std::iter::repeat_with(|| rng.r#gen()).take(size).collect();
 
             b.iter(|| {
-                sl.insert(rng.gen());
+                sl.insert(rng.r#gen());
             });
         });
     }
@@ -34,7 +34,7 @@ pub fn rand_access(c: &mut Criterion) {
         group.bench_function(BenchmarkId::from_parameter(size), |b| {
             let mut rng = StdRng::seed_from_u64(0x1234_abcd);
             let sl: OrderedSkipList<usize> =
-                std::iter::repeat_with(|| rng.gen()).take(size).collect();
+                std::iter::repeat_with(|| rng.r#gen()).take(size).collect();
             let indices: Vec<_> = std::iter::repeat_with(|| rng.gen_range(0..sl.len()))
                 .take(10)
                 .collect();
@@ -52,8 +52,9 @@ pub fn rand_access(c: &mut Criterion) {
 pub fn iter(c: &mut Criterion) {
     c.bench_function("OrderedSkipList Iter", |b| {
         let mut rng = StdRng::seed_from_u64(0x123_4abcd);
-        let sl: OrderedSkipList<usize> =
-            std::iter::repeat_with(|| rng.gen()).take(100_000).collect();
+        let sl: OrderedSkipList<usize> = std::iter::repeat_with(|| rng.r#gen())
+            .take(100_000)
+            .collect();
 
         b.iter(|| {
             for el in &sl {

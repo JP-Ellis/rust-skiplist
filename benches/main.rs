@@ -8,7 +8,7 @@
     reason = "benchmarking and criterion creates boilerplate"
 )]
 
-use criterion::{criterion_group, criterion_main, Criterion};
+use criterion::{Criterion, criterion_group, criterion_main};
 
 mod btreemap;
 mod hashmap;

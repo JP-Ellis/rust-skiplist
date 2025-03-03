@@ -91,7 +91,7 @@ impl LevelGenerator for Geometric {
     fn random(&mut self) -> usize {
         let mut h = 0;
         let mut x = self.p;
-        let f = 1.0 - self.rng.gen::<f64>();
+        let f = 1.0 - self.rng.r#gen::<f64>();
         while x > f && h + 1 < self.total {
             h += 1;
             x *= self.p;

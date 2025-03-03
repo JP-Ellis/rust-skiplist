@@ -13,7 +13,7 @@ use std::{
 pub use crate::skipnode::{IntoIter, Iter, IterMut};
 use crate::{
     level_generator::{Geometric, LevelGenerator},
-    skipnode::{insertion_fixup, removal_fixup, SkipListAction, SkipNode},
+    skipnode::{SkipListAction, SkipNode, insertion_fixup, removal_fixup},
 };
 
 // ////////////////////////////////////////////////////////////////////////////
@@ -379,11 +379,7 @@ impl<T> OrderedSkipList<T> {
     #[inline]
     pub fn back(&self) -> Option<&T> {
         let len = self.len();
-        if len > 0 {
-            Some(&self[len - 1])
-        } else {
-            None
-        }
+        if len > 0 { Some(&self[len - 1]) } else { None }
     }
 
     /// Provides a reference to the element at the given index, or `None` if the
@@ -849,8 +845,10 @@ where
 
     // SAEFTY: The new node may never alias with the old nodes.
     unsafe fn act_on_node(self, node: &'a mut SkipNode<T>) -> Result<Self::Ok, Self::Err> {
-        // SAFETY: links will be fixed by the caller.
-        Ok(node.insert_next(self.new_node))
+        unsafe {
+            // SAFETY: links will be fixed by the caller.
+            Ok(node.insert_next(self.new_node))
+        }
     }
 
     fn fixup(
@@ -914,8 +912,10 @@ where
 
     // SAFETY: The removed node will never alias with nodes in the list.
     unsafe fn act_on_node(self, node: &'a mut SkipNode<T>) -> Result<Self::Ok, Self::Err> {
-        // SAFETY: Links will be fixed by the caller.
-        node.take_next().ok_or(())
+        unsafe {
+            // SAFETY: Links will be fixed by the caller.
+            node.take_next().ok_or(())
+        }
     }
 
     fn fixup(
@@ -1005,8 +1005,10 @@ where
 
     // SAFETY: The removed node will never alias with nodes in the list.
     unsafe fn act_on_node(self, node: &'a mut SkipNode<T>) -> Result<Self::Ok, Self::Err> {
-        // SAFETY: Links will be fixed by the caller.
-        node.take_next().ok_or(())
+        unsafe {
+            // SAFETY: Links will be fixed by the caller.
+            node.take_next().ok_or(())
+        }
     }
 
     fn fixup(
@@ -1073,10 +1075,11 @@ where
                 .collect();
 
             loop {
-                let value = if let Some(ref v) = (*node).item {
-                    format!("> [{:?}]", v)
-                } else {
-                    "> []".to_string()
+                let value = match (*node).item {
+                    Some(ref v) => {
+                        format!("> [{:?}]", v)
+                    }
+                    _ => "> []".to_string(),
                 };
 
                 let max_str_len = format!("{} -{}-", value, (*node).links_len[(*node).level]).len();
@@ -1106,10 +1109,13 @@ where
                     }
                 }
 
-                if let Some(next) = (*node).links[0].and_then(|p| p.as_ptr().as_ref()) {
-                    node = next;
-                } else {
-                    break;
+                match (*node).links[0].and_then(|p| p.as_ptr().as_ref()) {
+                    Some(next) => {
+                        node = next;
+                    }
+                    _ => {
+                        break;
+                    }
                 }
             }
 
