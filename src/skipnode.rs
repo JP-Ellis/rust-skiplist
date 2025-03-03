@@ -1,5 +1,5 @@
-use std::cmp::Ordering;
 use std::{
+    cmp::Ordering,
     fmt, iter,
     ptr::{self, NonNull},
 };
@@ -103,12 +103,14 @@ impl<V> SkipNode<V> {
     ///
     /// SAFETY: please make sure no link at level 1 or greater becomes dangling.
     pub unsafe fn take_tail(&mut self) -> Option<Box<Self>> {
-        self.links[0].take().map(|p| {
-            let mut next = Box::from_raw(p.as_ptr());
-            next.prev = None;
-            self.links_len[0] = 0;
-            next
-        })
+        unsafe {
+            self.links[0].take().map(|p| {
+                let mut next = Box::from_raw(p.as_ptr());
+                next.prev = None;
+                self.links_len[0] = 0;
+                next
+            })
+        }
     }
 
     /// Replace the next node.
@@ -116,14 +118,16 @@ impl<V> SkipNode<V> {
     ///
     /// SAFETY: please makes sure all links are fixed.
     pub unsafe fn replace_tail(&mut self, mut new_next: Box<Self>) -> Option<Box<Self>> {
-        let mut old_next = self.take_tail();
-        if let Some(old_next) = old_next.as_mut() {
-            old_next.prev = None;
+        unsafe {
+            let mut old_next = self.take_tail();
+            if let Some(old_next) = old_next.as_mut() {
+                old_next.prev = None;
+            }
+            new_next.prev = Some(NonNull::new_unchecked(self as *mut _));
+            self.links[0] = Some(NonNull::new_unchecked(Box::into_raw(new_next)));
+            self.links_len[0] = 1;
+            old_next
         }
-        new_next.prev = Some(NonNull::new_unchecked(self as *mut _));
-        self.links[0] = Some(NonNull::new_unchecked(Box::into_raw(new_next)));
-        self.links_len[0] = 1;
-        old_next
     }
     // /////////////////////////////
     // Value Manipulation
@@ -241,11 +245,7 @@ impl<V> SkipNode<V> {
             distance_left -= steps;
             node = new_node;
         }
-        if distance_left == 0 {
-            Some(node)
-        } else {
-            None
-        }
+        if distance_left == 0 { Some(node) } else { None }
     }
 
     /// Move for max_distance units.
@@ -259,11 +259,7 @@ impl<V> SkipNode<V> {
             distance_left -= steps;
             node = new_node;
         }
-        if distance_left == 0 {
-            Some(node)
-        } else {
-            None
-        }
+        if distance_left == 0 { Some(node) } else { None }
     }
 
     /// Move to the last node reachable from this node.
@@ -508,10 +504,11 @@ where
     V: fmt::Display,
 {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        if let Some(ref v) = self.item {
-            write!(f, "{}", v)
-        } else {
-            Ok(())
+        match self.item {
+            Some(ref v) => {
+                write!(f, "{}", v)
+            }
+            _ => Ok(()),
         }
     }
 }
@@ -591,20 +588,22 @@ pub trait SkipListAction<'a, T>: Sized {
         node: &'a mut SkipNode<T>,
         level: usize,
     ) -> Result<(Self::Ok, usize), Self::Err> {
-        let (level_head, distance_this_level) = match self.seek(node, level) {
-            Some(res) => res,
-            None => return Err(self.fail()),
-        };
-        let level_head_p = level_head as *mut SkipNode<T>;
-        if level == 0 {
-            let mut res = self.act_on_node(level_head)?;
-            Self::fixup(0, &mut *level_head_p, 0, &mut res);
-            Ok((res, distance_this_level))
-        } else {
-            let (mut res, distance_after_head) = self._traverse(level_head, level - 1)?;
-            let level_head = &mut *level_head_p;
-            Self::fixup(level, level_head, distance_after_head, &mut res);
-            Ok((res, distance_this_level + distance_after_head))
+        unsafe {
+            let (level_head, distance_this_level) = match self.seek(node, level) {
+                Some(res) => res,
+                None => return Err(self.fail()),
+            };
+            let level_head_p = level_head as *mut SkipNode<T>;
+            if level == 0 {
+                let mut res = self.act_on_node(level_head)?;
+                Self::fixup(0, &mut *level_head_p, 0, &mut res);
+                Ok((res, distance_this_level))
+            } else {
+                let (mut res, distance_after_head) = self._traverse(level_head, level - 1)?;
+                let level_head = &mut *level_head_p;
+                Self::fixup(level, level_head, distance_after_head, &mut res);
+                Ok((res, distance_this_level + distance_after_head))
+            }
         }
     }
 
@@ -621,22 +620,26 @@ impl<T> SkipNode<T> {
     ///
     /// SAFETY: This doesn't fix links at level 1 or higher.
     pub unsafe fn insert_next(&mut self, mut new_node: Box<SkipNode<T>>) -> &mut SkipNode<T> {
-        if let Some(tail) = self.take_tail() {
-            new_node.replace_tail(tail);
+        unsafe {
+            if let Some(tail) = self.take_tail() {
+                new_node.replace_tail(tail);
+            }
+            self.replace_tail(new_node);
+            self.next_mut().unwrap()
         }
-        self.replace_tail(new_node);
-        self.next_mut().unwrap()
     }
 
     /// Take the node immediatly after this node.
     ///
     /// SAFETY: This doesn't fix links at level 1 or higher.
     pub unsafe fn take_next(&mut self) -> Option<Box<SkipNode<T>>> {
-        let mut ret = self.take_tail()?;
-        if let Some(new_tail) = ret.take_tail() {
-            self.replace_tail(new_tail);
+        unsafe {
+            let mut ret = self.take_tail()?;
+            if let Some(new_tail) = ret.take_tail() {
+                self.replace_tail(new_tail);
+            }
+            Some(ret)
         }
-        Some(ret)
     }
 }
 
@@ -702,8 +705,10 @@ impl<'a, V: 'a> SkipListAction<'a, V> for IndexInserter<V> {
 
     /// SAFETY: This returns a new node, which should never alias with any old nodes.
     unsafe fn act_on_node(self, node: &'a mut SkipNode<V>) -> Result<Self::Ok, Self::Err> {
-        // SAFETY: Links will be fixed by the caller.
-        Ok(node.insert_next(self.new_node))
+        unsafe {
+            // SAFETY: Links will be fixed by the caller.
+            Ok(node.insert_next(self.new_node))
+        }
     }
 
     fn fixup(
@@ -753,8 +758,10 @@ impl<'a, V> SkipListAction<'a, V> for IndexRemover {
 
     // SAFETY: Self::Ok is not a reference type
     unsafe fn act_on_node(self, node: &'a mut SkipNode<V>) -> Result<Self::Ok, Self::Err> {
-        // SAFETY: links will be fixed by the caller.
-        node.take_next().ok_or(())
+        unsafe {
+            // SAFETY: links will be fixed by the caller.
+            node.take_next().ok_or(())
+        }
     }
 
     fn fixup(
@@ -1094,19 +1101,21 @@ pub struct IntoIter<T> {
 impl<T> IntoIter<T> {
     /// SAFETY: There must be `len` nodes after head.
     pub(crate) unsafe fn from_head(head: &mut SkipNode<T>, len: usize) -> Self {
-        if len == 0 {
-            IntoIter {
-                first: None,
-                last: None,
-                size: 0,
-            }
-        } else {
-            let last = NonNull::new(head.last_mut());
-            let first = head.take_tail();
-            IntoIter {
-                first,
-                last,
-                size: len,
+        unsafe {
+            if len == 0 {
+                IntoIter {
+                    first: None,
+                    last: None,
+                    size: 0,
+                }
+            } else {
+                let last = NonNull::new(head.last_mut());
+                let first = head.take_tail();
+                IntoIter {
+                    first,
+                    last,
+                    size: len,
+                }
             }
         }
     }

@@ -1,6 +1,6 @@
 //! Benchmarks for this crate's [`SkipList`].
 
-use criterion::{black_box, AxisScale, BenchmarkId, Criterion, PlotConfiguration};
+use criterion::{AxisScale, BenchmarkId, Criterion, PlotConfiguration, black_box};
 use rand::prelude::*;
 use skiplist::SkipList;
 
@@ -15,10 +15,11 @@ pub fn push_front(c: &mut Criterion) {
     for size in SIZES {
         group.bench_function(BenchmarkId::from_parameter(size), |b| {
             let mut rng = StdRng::seed_from_u64(0x1234_abcd);
-            let mut sl: SkipList<usize> = std::iter::repeat_with(|| rng.gen()).take(size).collect();
+            let mut sl: SkipList<usize> =
+                std::iter::repeat_with(|| rng.r#gen()).take(size).collect();
 
             b.iter(|| {
-                sl.push_front(rng.gen());
+                sl.push_front(rng.r#gen());
             });
         });
     }
@@ -32,10 +33,11 @@ pub fn push_back(c: &mut Criterion) {
     for size in SIZES {
         group.bench_function(BenchmarkId::from_parameter(size), |b| {
             let mut rng = StdRng::seed_from_u64(0x1234_abcd);
-            let mut sl: SkipList<usize> = std::iter::repeat_with(|| rng.gen()).take(size).collect();
+            let mut sl: SkipList<usize> =
+                std::iter::repeat_with(|| rng.r#gen()).take(size).collect();
 
             b.iter(|| {
-                sl.push_back(rng.gen());
+                sl.push_back(rng.r#gen());
             });
         });
     }
@@ -49,7 +51,7 @@ pub fn rand_access(c: &mut Criterion) {
     for size in SIZES {
         group.bench_function(BenchmarkId::from_parameter(size), |b| {
             let mut rng = StdRng::seed_from_u64(0x1234_abcd);
-            let sl: SkipList<usize> = std::iter::repeat_with(|| rng.gen()).take(size).collect();
+            let sl: SkipList<usize> = std::iter::repeat_with(|| rng.r#gen()).take(size).collect();
             let indices: Vec<_> = std::iter::repeat_with(|| rng.gen_range(0..sl.len()))
                 .take(10)
                 .collect();
@@ -67,7 +69,9 @@ pub fn rand_access(c: &mut Criterion) {
 pub fn iter(c: &mut Criterion) {
     c.bench_function("SkipList Iter", |b| {
         let mut rng = StdRng::seed_from_u64(0x1234_abcd);
-        let sl: SkipList<usize> = std::iter::repeat_with(|| rng.gen()).take(100_000).collect();
+        let sl: SkipList<usize> = std::iter::repeat_with(|| rng.r#gen())
+            .take(100_000)
+            .collect();
 
         b.iter(|| {
             for el in &sl {
