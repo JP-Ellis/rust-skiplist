@@ -1,7 +1,3 @@
-#![allow(warnings)]
-#![allow(clippy)]
-#![allow(unknown_lints)]
-
 use std::{
     cmp::Ordering,
     fmt, iter,
@@ -410,10 +406,10 @@ impl<V> SkipNode<V> {
 
     /// Insert a node after given distance after the list head.
     ///
-    /// Requires that there's nothing before the node and the new node can't be at a higher level.
+    /// Requries that there's nothing before the node and the new node can't be at a higher level.
     ///
     /// Return the reference to the new node if successful.
-    /// Give back the input node if not successful.
+    /// Give back the input node if not succssful.
     pub fn insert_at(
         &mut self,
         new_node: Box<Self>,
@@ -430,9 +426,9 @@ impl<V> SkipNode<V> {
 
     /// Move for distance units, and remove the node after it.
     ///
-    /// Requires that there's nothing before the node and the new node can't be at a higher level.
+    /// Requries that there's nothing before the node and the new node can't be at a higher level.
     ///
-    /// If that node exists, remove that node and return it.
+    /// If that node exists, remove that node and retrun it.
     pub fn remove_at(&mut self, distance_to_parent: usize) -> Option<Box<Self>> {
         assert!(self.prev.is_none(), "Only the head may remove nodes!");
         let remover = IndexRemover::new(distance_to_parent);
@@ -620,7 +616,7 @@ pub trait SkipListAction<'a, T>: Sized {
 
 // helpers for ListActions.
 impl<T> SkipNode<T> {
-    /// Insert the new node immediately after this node.
+    /// Insert the new node immediatly after this node.
     ///
     /// SAFETY: This doesn't fix links at level 1 or higher.
     pub unsafe fn insert_next(&mut self, mut new_node: Box<SkipNode<T>>) -> &mut SkipNode<T> {
@@ -633,7 +629,7 @@ impl<T> SkipNode<T> {
         }
     }
 
-    /// Take the node immediately after this node.
+    /// Take the node immediatly after this node.
     ///
     /// SAFETY: This doesn't fix links at level 1 or higher.
     pub unsafe fn take_next(&mut self) -> Option<Box<SkipNode<T>>> {
@@ -941,7 +937,7 @@ impl<T> AsPtrMut<T> for Option<&mut T> {
 // Since Iterators (currently) only pop from front and back,
 // they can be shared by some data structures.
 // There's no need for a dummy head (that contains no item) in the iterator.
-// so the members are named first and last instead of head/end to avoid confusion.
+// so the members are named first and last instaed of head/end to avoid confusion.
 
 /// An iterator for [SkipList](super::SkipList) and [OrderedSkipList](super::OrderedSkipList).
 pub struct Iter<'a, T> {
@@ -1270,7 +1266,39 @@ mod test {
     /// Make a list of size n
     /// levels are evenly spread out
     fn new_list_for_test(n: usize) -> Box<SkipNode<usize>> {
-        unimplemented!()
+        let max_level = levels_required(n);
+        let mut head = Box::new(SkipNode::<usize>::head(max_level));
+        assert_eq!(head.links.len(), max_level);
+        let mut nodes: Vec<_> = (0..n)
+            .map(|n| {
+                let new_node = Box::new(SkipNode::new(n, level_for_index(n)));
+                Box::into_raw(new_node)
+            })
+            .collect();
+        unsafe {
+            let node_max_level = nodes.iter().map(|&node| (*node).level).max();
+            if let Some(node_max_level) = node_max_level {
+                assert_eq!(node_max_level + 1, max_level);
+            }
+            for level in 0..max_level {
+                let mut last_node = head.as_mut() as *mut SkipNode<usize>;
+                let mut len_left = n;
+                for &mut node_ptr in nodes
+                    .iter_mut()
+                    .filter(|&&mut node_ptr| level <= (*node_ptr).level)
+                {
+                    if level == 0 {
+                        (*node_ptr).prev = NonNull::new(last_node);
+                    }
+                    (*last_node).links[level] = NonNull::new(node_ptr);
+                    (*last_node).links_len[level] = 1 << level;
+                    last_node = node_ptr;
+                    len_left -= 1 << level;
+                }
+                (*last_node).links_len[level] = len_left;
+            }
+        }
+        head
     }
 
     /////////////////////////////////////////////////////////
@@ -1278,95 +1306,95 @@ mod test {
     // The size of those test are limited since Miri doesn't run very fast.
     /////////////////////////////////////////////////////////
 
-    // #[test]
-    // fn miri_test_insert() {
-    //     let mut list = new_list_for_test(50);
-    //     list.insert_at(Box::new(SkipNode::new(100, 0)), 25).unwrap();
-    //     list.insert_at(Box::new(SkipNode::new(101, 1)), 25).unwrap();
-    //     list.insert_at(Box::new(SkipNode::new(102, 2)), 25).unwrap();
-    //     list.insert_at(Box::new(SkipNode::new(103, 3)), 25).unwrap();
-    //     list.insert_at(Box::new(SkipNode::new(104, 4)), 25).unwrap();
-    // }
+    #[test]
+    fn miri_test_insert() {
+        let mut list = new_list_for_test(50);
+        list.insert_at(Box::new(SkipNode::new(100, 0)), 25).unwrap();
+        list.insert_at(Box::new(SkipNode::new(101, 1)), 25).unwrap();
+        list.insert_at(Box::new(SkipNode::new(102, 2)), 25).unwrap();
+        list.insert_at(Box::new(SkipNode::new(103, 3)), 25).unwrap();
+        list.insert_at(Box::new(SkipNode::new(104, 4)), 25).unwrap();
+    }
 
-    // #[test]
-    // fn miri_test_remove() {
-    //     let mut list = new_list_for_test(50);
-    //     for i in (0..50).rev() {
-    //         list.remove_at(i).unwrap();
-    //     }
-    // }
+    #[test]
+    fn miri_test_remove() {
+        let mut list = new_list_for_test(50);
+        for i in (0..50).rev() {
+            list.remove_at(i).unwrap();
+        }
+    }
 
-    // #[test]
-    // fn miri_test_distance() {
-    //     let list = new_list_for_test(50);
-    //     for i in 0..=list.level {
-    //         let _ = list.distance_at_level(i, None);
-    //     }
-    // }
+    #[test]
+    fn miri_test_distance() {
+        let list = new_list_for_test(50);
+        for i in 0..=list.level {
+            let _ = list.distance_at_level(i, None);
+        }
+    }
 
-    // #[test]
-    // fn miri_test_iter() {
-    //     fn test_iter(size: usize) {
-    //         let list = new_list_for_test(size);
-    //         let first = list.next_ref();
-    //         let last = Some(list.last());
-    //         let mut iter = Iter { first, last, size };
-    //         for _ in 0..(size + 1) / 2 {
-    //             let _ = iter.next();
-    //             let _ = iter.next_back();
-    //         }
-    //         assert!(iter.next().is_none());
-    //     }
-    //     test_iter(9);
-    //     test_iter(10);
-    // }
+    #[test]
+    fn miri_test_iter() {
+        fn test_iter(size: usize) {
+            let list = new_list_for_test(size);
+            let first = list.next_ref();
+            let last = Some(list.last());
+            let mut iter = Iter { first, last, size };
+            for _ in 0..(size + 1) / 2 {
+                let _ = iter.next();
+                let _ = iter.next_back();
+            }
+            assert!(iter.next().is_none());
+        }
+        test_iter(9);
+        test_iter(10);
+    }
 
-    // #[test]
-    // fn miri_test_iter_mut() {
-    //     fn test_iter_mut(size: usize) {
-    //         let mut list = new_list_for_test(size);
-    //         let mut first = list.next_mut();
-    //         let last = first.as_mut().unwrap().last_mut();
-    //         let last = NonNull::new(last);
-    //         let mut iter = IterMut { first, last, size };
-    //         for _ in 0..(size + 1) / 2 {
-    //             let _ = iter.next();
-    //             let _ = iter.next_back();
-    //         }
-    //         assert!(iter.next().is_none());
-    //     }
-    //     test_iter_mut(9);
-    //     test_iter_mut(10);
-    // }
+    #[test]
+    fn miri_test_iter_mut() {
+        fn test_iter_mut(size: usize) {
+            let mut list = new_list_for_test(size);
+            let mut first = list.next_mut();
+            let last = first.as_mut().unwrap().last_mut();
+            let last = NonNull::new(last);
+            let mut iter = IterMut { first, last, size };
+            for _ in 0..(size + 1) / 2 {
+                let _ = iter.next();
+                let _ = iter.next_back();
+            }
+            assert!(iter.next().is_none());
+        }
+        test_iter_mut(9);
+        test_iter_mut(10);
+    }
 
-    // #[test]
-    // fn miri_test_into_iter() {
-    //     fn test_into_iter(size: usize) {
-    //         let mut list = new_list_for_test(size);
-    //         let mut first = unsafe { Some(list.take_tail().unwrap()) };
-    //         let last = first.as_mut().unwrap().last_mut();
-    //         let last = NonNull::new(last);
-    //         let mut iter = IntoIter { first, last, size };
-    //         for _ in 0..(size + 1) / 2 {
-    //             let _ = iter.next();
-    //             let _ = iter.next_back();
-    //         }
-    //         assert!(iter.next().is_none());
-    //     }
+    #[test]
+    fn miri_test_into_iter() {
+        fn test_into_iter(size: usize) {
+            let mut list = new_list_for_test(size);
+            let mut first = unsafe { Some(list.take_tail().unwrap()) };
+            let last = first.as_mut().unwrap().last_mut();
+            let last = NonNull::new(last);
+            let mut iter = IntoIter { first, last, size };
+            for _ in 0..(size + 1) / 2 {
+                let _ = iter.next();
+                let _ = iter.next_back();
+            }
+            assert!(iter.next().is_none());
+        }
 
-    //     test_into_iter(9);
-    //     test_into_iter(10);
-    // }
+        test_into_iter(9);
+        test_into_iter(10);
+    }
 
-    // #[test]
-    // fn miri_test_retain() {
-    //     let mut list = new_list_for_test(50);
-    //     let _ = list.retain(|_, val| val % 2 == 0);
-    // }
+    #[test]
+    fn miri_test_retain() {
+        let mut list = new_list_for_test(50);
+        let _ = list.retain(|_, val| val % 2 == 0);
+    }
 
-    // #[test]
-    // fn miri_test_check() {
-    //     let list = new_list_for_test(100);
-    //     list.check();
-    // }
+    #[test]
+    fn miri_test_check() {
+        let list = new_list_for_test(100);
+        list.check();
+    }
 }

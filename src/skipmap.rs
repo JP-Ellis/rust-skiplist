@@ -8,7 +8,7 @@ use std::{
 pub use crate::skipnode::IntoIter;
 use crate::{
     level_generator::{Geometric, LevelGenerator},
-    skipnode::{self, insertion_fixup, SkipListAction},
+    skipnode::{self, SkipListAction, insertion_fixup},
 };
 
 type SkipNode<K, V> = skipnode::SkipNode<(K, V)>;
@@ -767,10 +767,11 @@ where
                 .collect();
 
             loop {
-                let value = if let (Some(k), Some(v)) = ((*node).key_ref(), (*node).value_ref()) {
-                    format!("> ({:?}, {:?})", k, v)
-                } else {
-                    "> ()".to_string()
+                let value = match ((*node).key_ref(), (*node).value_ref()) {
+                    (Some(k), Some(v)) => {
+                        format!("> ({:?}, {:?})", k, v)
+                    }
+                    _ => "> ()".to_string(),
                 };
 
                 let max_str_len = format!("{} -{}-", value, (*node).links_len[(*node).level]).len();
@@ -800,10 +801,13 @@ where
                     }
                 }
 
-                if let Some(next) = (*node).links[0].and_then(|p| p.as_ptr().as_ref()) {
-                    node = next;
-                } else {
-                    break;
+                match (*node).links[0].and_then(|p| p.as_ptr().as_ref()) {
+                    Some(next) => {
+                        node = next;
+                    }
+                    _ => {
+                        break;
+                    }
                 }
             }
 
@@ -865,18 +869,20 @@ where
     }
 
     unsafe fn act_on_node(self, node: &'a mut SkipNode<K, V>) -> Result<Self::Ok, Self::Err> {
-        let target_key = &self.key;
-        if let Some(target_node) = node.next_mut() {
-            if let Some(node_key) = target_node.key_ref() {
-                if target_key == node_key {
-                    let old_value = mem::replace(target_node.value_mut().unwrap(), self.value);
-                    return Err(old_value);
+        unsafe {
+            let target_key = &self.key;
+            if let Some(target_node) = node.next_mut() {
+                if let Some(node_key) = target_node.key_ref() {
+                    if target_key == node_key {
+                        let old_value = mem::replace(target_node.value_mut().unwrap(), self.value);
+                        return Err(old_value);
+                    }
                 }
             }
+            let new_node = (self.make_node)(self.key, self.value);
+            node.insert_next(new_node);
+            Ok(node.next_mut().unwrap())
         }
-        let new_node = (self.make_node)(self.key, self.value);
-        node.insert_next(new_node);
-        Ok(node.next_mut().unwrap())
     }
     fn fixup(
         level: usize,
@@ -914,16 +920,18 @@ impl<'a, Q: Ord + ?Sized, K: Borrow<Q>, V> SkipListAction<'a, (K, V)> for Remove
         self,
         target_parent: &'a mut SkipNode<K, V>,
     ) -> Result<Self::Ok, Self::Err> {
-        let node_key = target_parent
-            .next_mut()
-            .and_then(|node| node.key_ref())
-            .ok_or(())?
-            .borrow();
-        let target_key = self.0;
-        if node_key == target_key {
-            Ok(target_parent.take_next().unwrap())
-        } else {
-            Err(())
+        unsafe {
+            let node_key = target_parent
+                .next_mut()
+                .and_then(|node| node.key_ref())
+                .ok_or(())?
+                .borrow();
+            let target_key = self.0;
+            if node_key == target_key {
+                Ok(target_parent.take_next().unwrap())
+            } else {
+                Err(())
+            }
         }
     }
     fn fixup(
@@ -1145,7 +1153,7 @@ pub struct Iter<'a, K: 'a, V: 'a>(skipnode::Iter<'a, (K, V)>);
 impl<'a, K: 'a, V: 'a> Iter<'a, K, V> {
     /// SAFETY: There must be `len` nodes after head.
     unsafe fn from_head(head: &'a SkipNode<K, V>, len: usize) -> Self {
-        Self(skipnode::Iter::from_head(head, len))
+        unsafe { Self(skipnode::Iter::from_head(head, len)) }
     }
 }
 
@@ -1171,7 +1179,7 @@ pub struct IterMut<'a, K: 'a, V: 'a>(skipnode::IterMut<'a, (K, V)>);
 impl<'a, K: 'a, V: 'a> IterMut<'a, K, V> {
     /// SAFETY: There must be `len` nodes after head.
     unsafe fn from_head(head: &'a mut SkipNode<K, V>, len: usize) -> Self {
-        Self(skipnode::IterMut::from_head(head, len))
+        unsafe { Self(skipnode::IterMut::from_head(head, len)) }
     }
 }
 
