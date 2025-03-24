@@ -406,10 +406,10 @@ impl<V> SkipNode<V> {
 
     /// Insert a node after given distance after the list head.
     ///
-    /// Requries that there's nothing before the node and the new node can't be at a higher level.
+    /// Requires that there's nothing before the node and the new node can't be at a higher level.
     ///
     /// Return the reference to the new node if successful.
-    /// Give back the input node if not succssful.
+    /// Give back the input node if not successful.
     pub fn insert_at(
         &mut self,
         new_node: Box<Self>,
@@ -426,9 +426,9 @@ impl<V> SkipNode<V> {
 
     /// Move for distance units, and remove the node after it.
     ///
-    /// Requries that there's nothing before the node and the new node can't be at a higher level.
+    /// Requires that there's nothing before the node and the new node can't be at a higher level.
     ///
-    /// If that node exists, remove that node and retrun it.
+    /// If that node exists, remove that node and return it.
     pub fn remove_at(&mut self, distance_to_parent: usize) -> Option<Box<Self>> {
         assert!(self.prev.is_none(), "Only the head may remove nodes!");
         let remover = IndexRemover::new(distance_to_parent);
@@ -616,7 +616,7 @@ pub trait SkipListAction<'a, T>: Sized {
 
 // helpers for ListActions.
 impl<T> SkipNode<T> {
-    /// Insert the new node immediatly after this node.
+    /// Insert the new node immediately after this node.
     ///
     /// SAFETY: This doesn't fix links at level 1 or higher.
     pub unsafe fn insert_next(&mut self, mut new_node: Box<SkipNode<T>>) -> &mut SkipNode<T> {
@@ -629,7 +629,7 @@ impl<T> SkipNode<T> {
         }
     }
 
-    /// Take the node immediatly after this node.
+    /// Take the node immediately after this node.
     ///
     /// SAFETY: This doesn't fix links at level 1 or higher.
     pub unsafe fn take_next(&mut self) -> Option<Box<SkipNode<T>>> {
@@ -937,7 +937,7 @@ impl<T> AsPtrMut<T> for Option<&mut T> {
 // Since Iterators (currently) only pop from front and back,
 // they can be shared by some data structures.
 // There's no need for a dummy head (that contains no item) in the iterator.
-// so the members are named first and last instaed of head/end to avoid confusion.
+// so the members are named first and last instead of head/end to avoid confusion.
 
 /// An iterator for [SkipList](super::SkipList) and [OrderedSkipList](super::OrderedSkipList).
 pub struct Iter<'a, T> {

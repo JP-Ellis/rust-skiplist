@@ -13,7 +13,7 @@ default_stages:
 repos:
   # Generic hooks that apply to a lot of files
   - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v6.0.0
+    rev: v5.0.0
     hooks:
       - id: check-added-large-files
       - id: check-case-conflict
@@ -41,7 +41,7 @@ repos:
       - id: check-xml
 
   - repo: https://github.com/lyz-code/yamlfix/
-    rev: 1.19.1
+    rev: 1.17.0
     hooks:
       - id: yamlfix
         args:
@@ -49,31 +49,37 @@ repos:
           - .yamlfix.toml
 
   - repo: https://gitlab.com/bmares/check-json5
-    rev: v1.0.1
+    rev: v1.0.0
     hooks:
       # As above, this only checks for valid JSON files. This implementation
       # allows for comments within JSON files.
       - id: check-json5
 
   - repo: https://github.com/biomejs/pre-commit
-    rev: v2.4.5
+    rev: v1.9.4
     hooks:
       - id: biome-check
 
+  - repo: https://github.com/ComPWA/taplo-pre-commit
+    rev: v0.9.3
+    hooks:
+      - id: taplo-format
+      - id: taplo-lint
+
   - repo: https://github.com/crate-ci/committed
-    rev: v1.1.11
+    rev: v1.1.7
     hooks:
       - id: committed
 
   - repo: https://github.com/DavidAnson/markdownlint-cli2
-    rev: v0.21.0
+    rev: v0.17.2
     hooks:
       - id: markdownlint-cli2
         args:
           - --fix
 
   - repo: https://github.com/crate-ci/typos
-    rev: v1.44.0
+    rev: v1.30.2
     hooks:
       - id: typos
 
@@ -85,7 +91,7 @@ repos:
           - --external-sources
 
   - repo: https://github.com/scop/pre-commit-shfmt
-    rev: v3.11.0-1
+    rev: v3.9.0-1
     hooks:
       - id: shfmt
 

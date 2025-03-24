@@ -6,7 +6,7 @@ use std::{
 
 pub use crate::skipnode::{IntoIter, Iter, IterMut};
 use crate::{
-    level_generator::{geometric::Geometric, LevelGenerator},
+    level_generator::{LevelGenerator, geometric::Geometric},
     skipnode::SkipNode,
 };
 

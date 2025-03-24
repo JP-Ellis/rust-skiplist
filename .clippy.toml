@@ -1,4 +1,4 @@
-#:schema https://www.schemastore.org/any.json
+#:schema https://json.schemastore.org/any.json
 
 # Clippy's default only allows 2 segments, but I find 3 to be allowable before
 # requiring a 'use' statement.
@@ -10,11 +10,10 @@ allow-panic-in-tests  = true
 allow-print-in-tests  = true
 allow-unwrap-in-tests = false
 
-disallowed-macros = [
-  # Prefer the macros from the `pretty_assertions` crate
+disallowed-methods = [
+  # Prefer the pretty_assertions crate
   "std::assert_eq",
   "std::assert_matches::assert_matches",
-  "std::assert_matches::debug_assert_matches",
   "std::assert_ne",
 ]
 

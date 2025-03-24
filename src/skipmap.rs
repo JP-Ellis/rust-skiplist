@@ -7,7 +7,7 @@ use std::{
 
 pub use crate::skipnode::IntoIter;
 use crate::{
-    level_generator::{geometric::Geometric, LevelGenerator},
+    level_generator::{LevelGenerator, geometric::Geometric},
     skipnode::{self, SkipListAction, insertion_fixup},
 };
 
