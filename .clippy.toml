@@ -16,3 +16,7 @@ disallowed-methods = [
     "std::assert_matches::assert_matches",
     "std::assert_ne",
 ]
+
+# Prefer semi-colons inside blocks _except_ for single-line blocks
+semicolon-inside-block-ignore-singleline = true
+semicolon-outside-block-ignore-multiline = true
