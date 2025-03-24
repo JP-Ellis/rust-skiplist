@@ -1,0 +1,23 @@
+<script>
+  "use strict";
+  // Transform the input of the form
+  //
+  // ```html
+  // <pre><code class="language-math">...</code></pre>
+  // ```
+  //
+  // into the form mermaid expects:
+  //
+  // ```html
+  // <pre class="mermaid">...</pre>
+  // ```
+  const mermaids = document.getElementsByClassName("language-mermaid");
+  for (let i = 0; i < mermaids.length; i++) {
+    const mermaid = mermaids[i];
+    mermaid.classList.add("mermaid");
+    mermaid.innerHTML = mermaid.firstChild.innerText;
+    // mermaid.parentNode.replaceWith(mermaid);
+  }
+
+  mermaid.initialize({ startOnLoad: true });
+</script>

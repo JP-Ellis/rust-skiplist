@@ -1,0 +1,62 @@
+<script>
+  "use strict";
+  const macros = {
+    "\\vt": "\\boldsymbol{#1}",
+    "\\pfrac": "\\frac{\\partial{#1}}{\\partial{#2}}",
+    "\\dd": "\\mathop{}\\!\\mathrm{d}",
+    "\\ddfrac": "\\frac{\\dd #1}{\\dd #2}",
+    "\\defeq": "\\vcentcolon=",
+    "\\abs": "\\left\\lvert{#1}\\right\\rvert",
+    "\\norm": "\\left\\lVert{#1}\\right\\rVert",
+    "\\transpose": "\\intercal",
+  };
+
+  // Display math is inputted in the documentation as:
+  //
+  // ```math
+  //   \int_0^1 x
+  // ```
+  //
+  // and in the HTML appears as
+  //
+  // ```html
+  // <pre><code class="language-math">...</code></pre>
+  // ```
+  const displayMaths = document.getElementsByClassName("language-math");
+  for (let i = 0; i < displayMaths.length; i++) {
+    const displayMath = displayMaths[i];
+    displayMath.parentNode.replaceWith(displayMath);
+    katex.render(displayMath.innerText, displayMath, {
+      displayMode: true,
+      macros: macros,
+    });
+  }
+
+  // Inline math is inputted in the documentation as `$...$` (with the
+  // backticks) and in the HTML appears as
+  //
+  // ```html
+  // <code>$...$</code>
+  // ```
+  const inlineMaths = document.getElementsByTagName("code");
+  for (let i = 0; i < inlineMaths.length; i++) {
+    const inlineMath = inlineMaths[i];
+    if (
+      inlineMath.innerText.startsWith("$") &&
+      inlineMath.innerText.endsWith("$")
+    ) {
+      katex.render(
+        inlineMath.innerText.substring(1, inlineMath.innerText.length - 1),
+        inlineMath,
+        {
+          macros: macros,
+        }
+      );
+      inlineMath.parentNode.insertBefore(inlineMath.firstChild, inlineMath);
+      inlineMath.remove();
+
+      // After being removed, the current index points to the next element.
+      i--;
+    }
+  }
+</script>
