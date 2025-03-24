@@ -7,7 +7,7 @@ use std::{
 
 pub use crate::skipnode::IntoIter;
 use crate::{
-    level_generator::{Geometric, LevelGenerator},
+    level_generator::{geometric::Geometric, LevelGenerator},
     skipnode::{self, SkipListAction, insertion_fixup},
 };
 
@@ -126,7 +126,7 @@ where
     pub fn insert(&mut self, key: K, value: V) -> Option<V> {
         let level_gen = &mut self.level_generator;
         let inserter = InsertOrReplace::new(key, value, |k, v| {
-            Box::new(SkipNode::new((k, v), level_gen.random()))
+            Box::new(SkipNode::new((k, v), level_gen.level()))
         });
         let insert_res = inserter.act(self.head.as_mut());
         match insert_res {
