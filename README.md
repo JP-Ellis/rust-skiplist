@@ -11,10 +11,10 @@ position.
 
 There are three kinds of collections defined here:
 
-- **SkipList** This behaves like nearly any other double-ended list.
-- **OrderedSkipList** Ensures that the elements are always sorted. Still allows
+-   **SkipList** This behaves like nearly any other double-ended list.
+-   **OrderedSkipList** Ensures that the elements are always sorted. Still allows
   for access nodes at a given index.
-- **SkipMap** A map in which the keys are ordered.
+-   **SkipMap** A map in which the keys are ordered.
 
 Documentation can be found on [docs.rs](https://docs.rs/skiplist) and the cargo
 crate can be found on [crates.io](https://crates.io/crates/skiplist).

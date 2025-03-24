@@ -12,8 +12,8 @@ use std::{
 
 pub use crate::skipnode::{IntoIter, Iter, IterMut};
 use crate::{
-    level_generator::{geometric::Geometric, LevelGenerator},
-    skipnode::{insertion_fixup, removal_fixup, SkipListAction, SkipNode},
+    level_generator::{LevelGenerator, geometric::Geometric},
+    skipnode::{SkipListAction, SkipNode, insertion_fixup, removal_fixup},
 };
 
 // ////////////////////////////////////////////////////////////////////////////

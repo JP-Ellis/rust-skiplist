@@ -11,10 +11,10 @@ allow-print-in-tests  = true
 allow-unwrap-in-tests = false
 
 disallowed-methods = [
-    # Prefer the pretty_assertions crate
-    "std::assert_eq",
-    "std::assert_matches::assert_matches",
-    "std::assert_ne",
+  # Prefer the pretty_assertions crate
+  "std::assert_eq",
+  "std::assert_matches::assert_matches",
+  "std::assert_ne",
 ]
 
 # Prefer semi-colons inside blocks _except_ for single-line blocks
