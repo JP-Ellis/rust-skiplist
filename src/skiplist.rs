@@ -6,7 +6,7 @@ use std::{
 
 pub use crate::skipnode::{IntoIter, Iter, IterMut};
 use crate::{
-    level_generator::{Geometric, LevelGenerator},
+    level_generator::{geometric::Geometric, LevelGenerator},
     skipnode::SkipNode,
 };
 
@@ -168,7 +168,7 @@ where
             panic!("Index out of bounds.");
         }
         self.len += 1;
-        let new_node = Box::new(SkipNode::new(value, self.level_generator.random()));
+        let new_node = Box::new(SkipNode::new(value, self.level_generator.level()));
         self.head
             .insert_at(new_node, index)
             .unwrap_or_else(|_| panic!("No insertion position is found!"));

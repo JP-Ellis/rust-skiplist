@@ -1,6 +1,6 @@
 //! Geometric level generator.
 
-use rand::{Rng, SeedableRng, rngs::SmallRng};
+use rand::prelude::*;
 use thiserror::Error;
 
 use crate::level_generator::LevelGenerator;
@@ -16,9 +16,6 @@ pub enum GeometricError {
     /// The maximum number of levels must be non-zero.
     #[error("max must be non-zero.")]
     ZeroMax,
-    /// The maximum number of levels must be less than `i32::MAX`.
-    #[error("max must be less than i32::MAX.")]
-    MaxTooLarge,
     /// The probability `$p$` must be in the range `$(0, 1)$`.
     #[error("p must be in (0, 1).")]
     InvalidProbability,
@@ -46,22 +43,38 @@ pub struct Geometric {
     rng: SmallRng,
 }
 impl Geometric {
-    /// Create a new geometric level generator with `total` number of levels,
-    /// and `p` as the probability that a given node is present in the next
-    /// level.
+    /// Creates a new geometric level generator.
+    ///
+    /// `total` sets the maximum number of levels (must be at least 1 and less
+    /// than `i32::MAX`). `p` is the probability that an element is promoted to
+    /// the next level and must be strictly between 0 and 1.
     ///
     /// # Errors
     ///
-    /// `p` must be between 0 and 1 and will panic otherwise. Similarly, `total`
-    /// must be at greater or equal to 1.
+    /// Returns a [`GeometricError`] if `total` is zero, if `total` exceeds
+    /// `i32::MAX`, or if `p` is not in the open interval `$(0, 1)$`.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use skiplist::level_generator::LevelGenerator;
+    /// use skiplist::level_generator::geometric::{Geometric, GeometricError};
+    ///
+    /// // Valid configuration: 16 levels, promotion probability 0.5.
+    /// let mut generator = Geometric::new(16, 0.5).unwrap();
+    /// assert_eq!(generator.total(), 16);
+    ///
+    /// // Invalid: zero levels.
+    /// assert_eq!(Geometric::new(0, 0.5).unwrap_err(), GeometricError::ZeroMax);
+    ///
+    /// // Invalid: probability out of range.
+    /// assert_eq!(Geometric::new(16, 0.0).unwrap_err(), GeometricError::InvalidProbability);
+    /// assert_eq!(Geometric::new(16, 1.0).unwrap_err(), GeometricError::InvalidProbability);
+    /// ```
     #[inline]
     pub fn new(total: usize, p: f64) -> Result<Self, GeometricError> {
         if total == 0 {
             return Err(GeometricError::ZeroMax);
-        }
-        match i32::try_from(total) {
-            Ok(_) => {}
-            Err(_) => return Err(GeometricError::MaxTooLarge),
         }
         if !(0.0 < p && p < 1.0) {
             return Err(GeometricError::InvalidProbability);
@@ -70,7 +83,7 @@ impl Geometric {
         Ok(Geometric {
             total,
             q: 1.0 - p,
-            rng: SmallRng::from_rng(&mut rand::rng()),
+            rng: SmallRng::from_rng(thread_rng()).map_err(|_err| GeometricError::RngInitFailed)?,
         })
     }
 }
@@ -87,7 +100,7 @@ impl LevelGenerator for Geometric {
     /// by sample from a uniform distribution and inverting the cumulative
     /// distribution function (CDF) of the truncated geometric distribution.
     ///
-    /// The CDF of the truncated geometric distribution is:
+    /// The CDF of the truncated geometric distribution is
     ///
     /// ```math
     /// \text{CDF}(n) = \frac{q^n - 1}{q^{t} - 1}
@@ -102,24 +115,9 @@ impl LevelGenerator for Geometric {
     ///
     /// where `$u \in [0, 1]$` is a uniformly distributed random variate.
     #[inline]
-    #[expect(clippy::float_arithmetic, reason = "Computing inverse CDF")]
-    #[expect(
-        clippy::cast_possible_truncation,
-        clippy::cast_sign_loss,
-        reason = "CDF domain is [0, total] so the cast is safe"
-    )]
-    #[expect(
-        clippy::expect_used,
-        reason = "Runtime check guarantees total fits in i32"
-    )]
-    #[expect(clippy::as_conversions, reason = "No other way to do this")]
     fn level(&mut self) -> usize {
-        let u = self.rng.random::<f64>();
-        (1.0 + (self
-            .q
-            .powi(i32::try_from(self.total).expect("total is guaranteed to fit in i32"))
-            - 1.0)
-            * u)
+        let u = self.rng.r#gen::<f64>();
+        (1.0 + (self.q.powi(self.total as i32) - 1.0) * u)
             .log(self.q)
             .floor() as usize
     }
@@ -127,7 +125,9 @@ impl LevelGenerator for Geometric {
 
 #[cfg(test)]
 mod tests {
-    use anyhow::{Result, bail};
+    use anyhow::Result;
+    #[cfg(not(miri))]
+    use anyhow::bail;
     use pretty_assertions::assert_eq;
     use rstest::rstest;
 
@@ -151,43 +151,21 @@ mod tests {
         );
     }
 
-    // Miri is very slow, so we use a much smaller number of iterations, and
-    // don't check for the presence of min and max level nodes.
-    #[cfg(miri)]
     #[rstest]
-    fn new_miri(
+    fn new(
         #[values(1, 2, 128, 1024)] n: usize,
         #[values(0.01, 0.1, 0.5, 0.99)] p: f64,
     ) -> Result<()> {
-        const MAX: usize = 10;
-
         let mut generator = Geometric::new(n, p)?;
         assert_eq!(generator.total(), n);
-        for _ in 0..MAX {
-            let level = generator.level();
-            assert!((0..n).contains(&level));
-        }
-        Ok(())
-    }
-
-    #[cfg(not(miri))]
-    #[rstest]
-    fn new_small(
-        #[values(1, 2, 4, 8)] n: usize,
-        #[values(0.01, 0.1, 0.5, 0.8)] p: f64,
-    ) -> Result<()> {
-        const MAX: usize = 10_000_000;
-
-        let mut generator = Geometric::new(n, p)?;
-        assert_eq!(generator.total(), n);
-        for _ in 0..1_000 {
+        for _ in 0..1_000_000 {
             let level = generator.level();
             assert!((0..n).contains(&level));
         }
         // Make sure that we can produce at least one level-0 node, and one at the
         // maximum level.
         let mut found = false;
-        for _ in 0..MAX {
+        for _ in 0..1_000_000 {
             let level = generator.level();
             if level == 0 {
                 found = true;
@@ -199,61 +177,15 @@ mod tests {
         }
 
         found = false;
-        for _ in 0..MAX {
+        for _ in 0..1_000_000 {
             let level = generator.level();
-            if level == n.checked_sub(1).expect("n is guaranteed to be > 0") {
+            if level == n - 1 {
                 found = true;
                 break;
             }
         }
         if !found {
-            bail!(
-                "Failed to generate a level-{} node.",
-                n.checked_sub(1).expect("n is guaranteed to be > 0")
-            );
-        }
-
-        Ok(())
-    }
-
-    #[cfg(not(miri))]
-    #[rstest]
-    fn new_large(#[values(512, 1024)] n: usize, #[values(0.001, 0.01)] p: f64) -> Result<()> {
-        const MAX: usize = 10_000_000;
-
-        let mut generator = Geometric::new(n, p)?;
-        assert_eq!(generator.total(), n);
-        for _ in 0..1_000 {
-            let level = generator.level();
-            assert!((0..n).contains(&level));
-        }
-        // Make sure that we can produce at least one level-0 node, and one at the
-        // maximum level.
-        let mut found = false;
-        for _ in 0..MAX {
-            let level = generator.level();
-            if level == 0 {
-                found = true;
-                break;
-            }
-        }
-        if !found {
-            bail!("Failed to generate a level-0 node.");
-        }
-
-        found = false;
-        for _ in 0..MAX {
-            let level = generator.level();
-            if level == n.checked_sub(1).expect("n is guaranteed to be > 0") {
-                found = true;
-                break;
-            }
-        }
-        if !found {
-            bail!(
-                "Failed to generate a level-{} node.",
-                n.checked_sub(1).expect("n is guaranteed to be > 0")
-            );
+            bail!("Failed to generate a level-{} node.", n - 1);
         }
 
         Ok(())

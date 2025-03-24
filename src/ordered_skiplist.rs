@@ -12,8 +12,8 @@ use std::{
 
 pub use crate::skipnode::{IntoIter, Iter, IterMut};
 use crate::{
-    level_generator::{Geometric, LevelGenerator},
-    skipnode::{SkipListAction, SkipNode, insertion_fixup, removal_fixup},
+    level_generator::{geometric::Geometric, LevelGenerator},
+    skipnode::{insertion_fixup, removal_fixup, SkipListAction, SkipNode},
 };
 
 // ////////////////////////////////////////////////////////////////////////////
@@ -331,7 +331,7 @@ impl<T> OrderedSkipList<T> {
     /// assert!(!skiplist.is_empty());
     /// ```
     pub fn insert(&mut self, value: T) {
-        let new_node = Box::new(SkipNode::new(value, self.level_generator.random()));
+        let new_node = Box::new(SkipNode::new(value, self.level_generator.level()));
         let inserter = OrdInserter::new(self.compare.as_ref(), new_node);
         let _ = inserter.act(self.head.as_mut());
         self.len += 1;
