@@ -113,11 +113,28 @@ impl LevelGenerator for Geometric {
     /// n = \left\lfloor \log_q\left(1 + (q^{\text{total}} - 1) \cdot u\right) \right\rfloor
     /// ```
     ///
-    /// where `$u \in [0, 1]$` is a uniformly distributed random variate.
+    /// The level is sampled from the truncated geometric distribution configured
+    /// at construction time. Lower levels are more probable; level 0 is the most
+    /// common.
     #[inline]
+    #[expect(clippy::float_arithmetic, reason = "Computing inverse CDF")]
+    #[expect(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        reason = "CDF domain is [0, total] so the cast is safe"
+    )]
+    #[expect(
+        clippy::expect_used,
+        reason = "Runtime check guarantees total fits in i32"
+    )]
+    #[expect(clippy::as_conversions, reason = "No other way to do this")]
     fn level(&mut self) -> usize {
         let u = self.rng.r#gen::<f64>();
-        (1.0 + (self.q.powi(self.total as i32) - 1.0) * u)
+        (1.0 + (self
+            .q
+            .powi(i32::try_from(self.total).expect("total is guaranteed to fit in i32"))
+            - 1.0)
+            * u)
             .log(self.q)
             .floor() as usize
     }
