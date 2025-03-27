@@ -151,21 +151,43 @@ mod tests {
         );
     }
 
+    // Miri is very slow, so we use a much smaller number of iterations, and
+    // don't check for the presence of min and max level nodes.
+    #[cfg(miri)]
     #[rstest]
-    fn new(
+    fn new_miri(
         #[values(1, 2, 128, 1024)] n: usize,
         #[values(0.01, 0.1, 0.5, 0.99)] p: f64,
     ) -> Result<()> {
+        const MAX: usize = 10;
+
         let mut generator = Geometric::new(n, p)?;
         assert_eq!(generator.total(), n);
-        for _ in 0..1_000_000 {
+        for _ in 0..MAX {
+            let level = generator.level();
+            assert!((0..n).contains(&level));
+        }
+        Ok(())
+    }
+
+    #[cfg(not(miri))]
+    #[rstest]
+    fn new_small(
+        #[values(1, 2, 4, 8)] n: usize,
+        #[values(0.01, 0.1, 0.5, 0.8)] p: f64,
+    ) -> Result<()> {
+        const MAX: usize = 10_000_000;
+
+        let mut generator = Geometric::new(n, p)?;
+        assert_eq!(generator.total(), n);
+        for _ in 0..1_000 {
             let level = generator.level();
             assert!((0..n).contains(&level));
         }
         // Make sure that we can produce at least one level-0 node, and one at the
         // maximum level.
         let mut found = false;
-        for _ in 0..1_000_000 {
+        for _ in 0..MAX {
             let level = generator.level();
             if level == 0 {
                 found = true;
@@ -177,15 +199,61 @@ mod tests {
         }
 
         found = false;
-        for _ in 0..1_000_000 {
+        for _ in 0..MAX {
             let level = generator.level();
-            if level == n - 1 {
+            if level == n.checked_sub(1).expect("n is guaranteed to be > 0") {
                 found = true;
                 break;
             }
         }
         if !found {
-            bail!("Failed to generate a level-{} node.", n - 1);
+            bail!(
+                "Failed to generate a level-{} node.",
+                n.checked_sub(1).expect("n is guaranteed to be > 0")
+            );
+        }
+
+        Ok(())
+    }
+
+    #[cfg(not(miri))]
+    #[rstest]
+    fn new_large(#[values(512, 1024)] n: usize, #[values(0.001, 0.01)] p: f64) -> Result<()> {
+        const MAX: usize = 10_000_000;
+
+        let mut generator = Geometric::new(n, p)?;
+        assert_eq!(generator.total(), n);
+        for _ in 0..1_000 {
+            let level = generator.level();
+            assert!((0..n).contains(&level));
+        }
+        // Make sure that we can produce at least one level-0 node, and one at the
+        // maximum level.
+        let mut found = false;
+        for _ in 0..MAX {
+            let level = generator.level();
+            if level == 0 {
+                found = true;
+                break;
+            }
+        }
+        if !found {
+            bail!("Failed to generate a level-0 node.");
+        }
+
+        found = false;
+        for _ in 0..MAX {
+            let level = generator.level();
+            if level == n.checked_sub(1).expect("n is guaranteed to be > 0") {
+                found = true;
+                break;
+            }
+        }
+        if !found {
+            bail!(
+                "Failed to generate a level-{} node.",
+                n.checked_sub(1).expect("n is guaranteed to be > 0")
+            );
         }
 
         Ok(())
