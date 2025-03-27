@@ -44,6 +44,10 @@
 // layers in the above diagram, with level 0 being the bottom-most layer, level
 // 1 being the one above level 0, etc.
 
+// New modules
+mod node;
+
+// Old modules
 extern crate rand;
 pub mod level_generator;
 pub mod ordered_skiplist;
