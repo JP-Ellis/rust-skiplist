@@ -16,6 +16,9 @@ pub enum GeometricError {
     /// The maximum number of levels must be non-zero.
     #[error("max must be non-zero.")]
     ZeroMax,
+    /// The maximum number of levels must be less than `i32::MAX`.
+    #[error("max must be less than i32::MAX.")]
+    MaxTooLarge,
     /// The probability `$p$` must be in the range `$(0, 1)$`.
     #[error("p must be in (0, 1).")]
     InvalidProbability,
@@ -55,6 +58,10 @@ impl Geometric {
     pub fn new(total: usize, p: f64) -> Result<Self, GeometricError> {
         if total == 0 {
             return Err(GeometricError::ZeroMax);
+        }
+        match i32::try_from(total) {
+            Ok(_) => {}
+            Err(_) => return Err(GeometricError::MaxTooLarge),
         }
         if !(0.0 < p && p < 1.0) {
             return Err(GeometricError::InvalidProbability);
