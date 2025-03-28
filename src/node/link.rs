@@ -49,7 +49,7 @@ impl<V> Link<V> {
     }
 
     /// Get a reference to the next node.
-    pub(crate) fn next(&self) -> &Node<V> {
+    pub(crate) fn node(&self) -> &Node<V> {
         // SAFETY: The pointer can never be null, and the value is
         // [convertible](https://doc.rust-lang.org/stable/std/ptr/index.html#pointer-to-reference-conversion).
         unsafe { self.node.as_ref() }
@@ -62,7 +62,7 @@ impl<V> Link<V> {
     /// The caller must ensure that the reference is not used elsewhere while
     /// this mutable reference is held. In most cases, this is not a problem as
     /// the caller will have a mutable reference to the source node.
-    pub(crate) unsafe fn next_mut(&mut self) -> &mut Node<V> {
+    pub(crate) unsafe fn node_mut(&mut self) -> &mut Node<V> {
         // SAFETY: The pointer can never be null, and the value is
         // [convertible](https://doc.rust-lang.org/stable/std/ptr/index.html#pointer-to-reference-conversion).
         unsafe { self.node.as_mut() }
@@ -138,7 +138,7 @@ mod tests {
     fn link_new() -> Result<()> {
         let node: Node<i32> = Node::new(3);
         let link = Link::new(&node, 1)?;
-        assert_eq!(ptr::from_ref(link.next()), ptr::from_ref(&node));
+        assert_eq!(ptr::from_ref(link.node()), ptr::from_ref(&node));
         assert_eq!(
             link.distance(),
             NonZeroUsize::new(1).ok_or(anyhow!("Invalid distance"))?

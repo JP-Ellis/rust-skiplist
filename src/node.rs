@@ -518,7 +518,7 @@ impl<V: Debug> Node<V> {
                         " {}-> ",
                         "------".repeat(link.distance().get().saturating_sub(1))
                     )?;
-                    current = link.next();
+                    current = link.node();
                 } else {
                     writeln!(output)?;
                     break;
