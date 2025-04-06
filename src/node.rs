@@ -850,7 +850,9 @@ mod tests {
         assert!(matches!(detached_node.node_type(), NodeType::Detached));
 
         // Insta is incompatible with Miri
-        if !cfg!(miri) {
+        if cfg!(miri) {
+            head.display()?;
+        } else {
             // Note: The sequence of values should be valid. It is fine for the
             // links to be invalid as the node has been popped without updating the
             // links.
@@ -868,8 +870,6 @@ mod tests {
                 [03|00] Some(4)
                 "
             );
-        } else {
-            head.display()?;
         }
 
         Ok(())
