@@ -94,12 +94,13 @@
 
 #![expect(dead_code, reason = "Temporary until put to use")]
 
-use std::{
-    collections::HashMap,
+use core::{
     fmt::{self, Debug, Write},
     iter,
     ptr::NonNull,
 };
+#[cfg(debug_assertions)]
+use std::collections::HashMap;
 
 use crate::node::link::Link;
 

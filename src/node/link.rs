@@ -4,7 +4,7 @@
 //! skip links to nodes further ahead. These links allow traversal to jump
 //! over runs of nodes, giving the skip list its `$O(\log n)$` characteristics.
 
-use std::{num::NonZeroUsize, ptr::NonNull};
+use core::{num::NonZeroUsize, ptr::NonNull};
 
 use thiserror::Error;
 
