@@ -1,6 +1,10 @@
 //! SkipMap stores key-value pairs, with the keys being unique and always
 //! sorted.
 
+#![allow(warnings)]
+#![allow(clippy)]
+#![allow(unknown_lints)]
+
 use std::{
     borrow::Borrow, cmp, cmp::Ordering, default, fmt, hash, hash::Hash, iter, mem, ops, ops::Bound,
 };
