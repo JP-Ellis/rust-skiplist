@@ -1,0 +1,308 @@
+---
+name: test
+
+permissions:
+  contents: read
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Generic
+  FORCE_COLOR: '1'
+  CLICOLOR: '1'
+  # Rust
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: '1'
+  NEXTEST_PROFILE: ci
+
+jobs:
+  complete:
+    name: Test completion check
+    if: always()
+
+    permissions:
+      contents: none
+
+    runs-on: ubuntu-latest
+    needs:
+      - clippy
+      - coverage
+      - format
+      - pre-commit
+      - spelling
+      - test
+
+    steps:
+      - name: Failed
+        run: exit 1
+        if: >
+          contains(needs.*.result, 'failure')
+          || contains(needs.*.result, 'cancelled')
+          || contains(needs.*.result, 'skipped')
+
+  clippy:
+    name: >-
+      Clippy Rust ${{ matrix.rust }}
+      on ${{ startsWith(matrix.os, 'macos-') && 'macOS' || startsWith(matrix.os, 'windows-') && 'Windows' || 'Linux' }}
+
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      matrix:
+        os:
+          - ubuntu-latest
+        rust:
+          - stable
+    continue-on-error: ${{ matrix.rust != 'stable' }}
+
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ matrix.rust }}
+          components: clippy
+
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6  # v2.7.8
+
+      - name: Install cargo-hack and cargo-action-fmt
+        uses: taiki-e/install-action@09dc018eee06ae1c9e0409786563f534210ceb83  # v2.49.50
+        with:
+          tool: cargo-hack,cargo-action-fmt
+
+      - name: Clippy
+        run: |
+          cargo hack \
+            --feature-powerset \
+            clippy \
+            --workspace \
+            --all-targets \
+            --message-format json \
+            -- \
+            -D warnings |
+           cargo-action-fmt
+
+  format:
+    name: >-
+      Format Rust ${{ matrix.rust }}
+      on ${{ startsWith(matrix.os, 'macos-') && 'macOS' || startsWith(matrix.os, 'windows-') && 'Windows' || 'Linux' }}
+
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      matrix:
+        os:
+          - ubuntu-latest
+        rust:
+          - stable
+    continue-on-error: ${{ matrix.rust != 'stable' }}
+
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ matrix.rust }}
+          components: rustfmt
+
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6  # v2.7.8
+
+      - name: Format
+        run: cargo fmt --check
+
+  test:
+    name: >-
+      Test Rust ${{ matrix.rust }}
+      on ${{ startsWith(matrix.os, 'macos-') && 'macOS' || startsWith(matrix.os, 'windows-') && 'Windows' || 'Linux' }}
+
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      matrix:
+        os:
+          - ubuntu-latest
+          - windows-latest
+          - macos-latest
+        rust:
+          - stable
+          - beta
+    continue-on-error: ${{ matrix.rust != 'stable' }}
+
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ matrix.rust }}
+
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6  # v2.7.8
+
+      - name: Install cargo-hack and nextest
+        uses: taiki-e/install-action@09dc018eee06ae1c9e0409786563f534210ceb83  # v2.49.50
+        with:
+          tool: cargo-hack,nextest
+
+      - name: Run tests
+        shell: bash
+        env:
+          NEXTEST_EXPERIMENTAL_LIBTEST_JSON: '1'
+        run: |
+          while IFS=$'\n' read -r line || ! retval=$line; do
+            if ! echo "$line" | jq -e . 2>/dev/null 1>&2; then
+              continue
+            fi
+
+            type=$(echo "$line" | jq -r '.type')
+            event=$(echo "$line" | jq -r '.event')
+            if [ "$type" != "test" ] || [ "$event" != "failed" ]; then
+              continue
+            fi
+
+            echo "Found failed test: $line"
+
+            failed=true
+            name=$(echo "$line" | jq -r '.name')
+            stdout=$(echo "$line" | jq -r '.stdout')
+
+            {
+              echo "## Failed test $name"
+              echo '```'
+              echo "$stdout"
+              echo '```'
+            } >>"$GITHUB_STEP_SUMMARY"
+          done < <(
+            cargo hack nextest run \
+              --feature-powerset \
+              --workspace \
+              --message-format libtest-json
+            printf '%s' "$?"
+          )
+
+          exit "$retval"
+
+  coverage:
+    name: >-
+      Coverage ${{ matrix.rust }}
+      on ${{ startsWith(matrix.os, 'macos-') && 'macOS' || startsWith(matrix.os, 'windows-') && 'Windows' || 'Linux' }}
+
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      matrix:
+        os:
+          - ubuntu-latest
+        rust:
+          - nightly
+    continue-on-error: ${{ matrix.rust != 'stable' }}
+
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ matrix.rust }}
+
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6  # v2.7.8
+
+      - name: Install cargo-hack, tarpaulin
+        uses: taiki-e/install-action@09dc018eee06ae1c9e0409786563f534210ceb83  # v2.49.50
+        with:
+          tool: cargo-hack,cargo-tarpaulin
+
+      - name: Run tests
+        shell: bash
+        env:
+          NEXTEST_EXPERIMENTAL_LIBTEST_JSON: '1'
+        run: |
+          cargo hack \
+            --feature-powerset \
+            --workspace \
+            tarpaulin \
+            --out Xml
+
+  spelling:
+    name: Spell check
+
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+
+      - name: Spell Check Repo
+        uses: crate-ci/typos@3be83342e28b9421997e9f781f713f8dde8453d2  # v1.31.2
+
+  pre-commit:
+    name: Pre-commit
+
+    runs-on: ubuntu-latest
+
+    env:
+      PRE_COMMIT_HOME: ${{ github.workspace }}/.pre-commit
+
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+
+      - name: Cache pre-commit
+        uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684  # v4.2.3
+        with:
+          path: |
+            ${{ env.PRE_COMMIT_HOME }}
+          key: ${{ runner.os }}-pre-commit-${{ hashFiles('.pre-commit-config.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pre-commit-
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86  # v5.4.2
+        with:
+          enable-cache: true
+          cache-suffix: pre-commit
+          cache-dependency-glob: ''
+
+      - name: Install pre-commit
+        run: uv tool install pre-commit
+      - name: Install hatch
+        run: uv tool install hatch
+
+      - name: Run pre-commit
+        run: pre-commit run --show-diff-on-failure --color=always --all-files
+        env:
+          OPENAI_API_KEY: sk-000000000000000000000000000000000000000000000000
+
+  committed:
+    name: Committed
+
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+        with:
+          fetch-depth: 0
+
+      - name: committed-action
+        uses: crate-ci/committed@15229711f8f597474c0b636f327cde5969f9a529  # v1.1.7
+        with:
+          args: -vv --no-merge-commit --no-wip --no-fixup
