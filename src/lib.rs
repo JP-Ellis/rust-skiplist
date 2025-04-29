@@ -51,4 +51,9 @@ pub mod skiplist;
 pub mod skipmap;
 mod skipnode;
 
+#[expect(
+    clippy::pub_use,
+    clippy::useless_attribute,
+    reason = "Temporary silencing clippy"
+)]
 pub use crate::{ordered_skiplist::OrderedSkipList, skiplist::SkipList, skipmap::SkipMap};

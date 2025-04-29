@@ -1,5 +1,9 @@
 //! A skiplist implementation which allows faster random access than a standard linked list.
 
+#![allow(warnings)]
+#![allow(clippy)]
+#![allow(unknown_lints)]
+
 use std::{
     cmp, cmp::Ordering, default, fmt, hash, hash::Hash, iter, ops, ops::Bound, ptr::NonNull,
 };

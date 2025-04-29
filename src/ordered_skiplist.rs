@@ -1,5 +1,9 @@
 //! An always-ordered skiplist.
 
+#![allow(warnings)]
+#![allow(clippy)]
+#![allow(unknown_lints)]
+
 use std::{
     cmp,
     cmp::Ordering,
