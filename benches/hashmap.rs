@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 
 use criterion::{AxisScale, BenchmarkId, Criterion, PlotConfiguration, black_box};
-use rand::prelude::*;
+use rand::{Rng, SeedableRng, rngs::StdRng};
 
 /// Benchmarking sizes
 const SIZES: [usize; 6] = [1, 10, 100, 1000, 10_000, 100_000];
@@ -16,11 +16,11 @@ pub fn insert(c: &mut Criterion) {
     for size in SIZES {
         group.bench_function(BenchmarkId::from_parameter(size), |b| {
             let mut rng = StdRng::seed_from_u64(0x1234_abcd);
-            let mut sl: HashMap<usize, usize> =
-                std::iter::repeat_with(|| rng.r#gen()).take(size).collect();
+            let mut sl: HashMap<u64, u64> =
+                std::iter::repeat_with(|| rng.random()).take(size).collect();
 
             b.iter(|| {
-                sl.insert(rng.r#gen(), rng.r#gen());
+                sl.insert(rng.random(), rng.random());
             });
         });
     }
@@ -34,11 +34,11 @@ pub fn rand_access(c: &mut Criterion) {
     for size in SIZES {
         group.bench_function(BenchmarkId::from_parameter(size), |b| {
             let mut rng = StdRng::seed_from_u64(0x1234_abcd);
-            let sl: HashMap<usize, usize> = std::iter::repeat_with(|| rng.r#gen())
+            let sl: HashMap<usize, u64> = std::iter::repeat_with(|| rng.random())
                 .enumerate()
                 .take(size)
                 .collect();
-            let indices: Vec<_> = std::iter::repeat_with(|| rng.gen_range(0..sl.len()))
+            let indices: Vec<usize> = std::iter::repeat_with(|| rng.random_range(0..sl.len()))
                 .take(10)
                 .collect();
 
@@ -55,7 +55,7 @@ pub fn rand_access(c: &mut Criterion) {
 pub fn iter(c: &mut Criterion) {
     c.bench_function("HashMap Iter", |b| {
         let mut rng = StdRng::seed_from_u64(0x1234_abcd);
-        let sl: HashMap<usize, usize> = std::iter::repeat_with(|| rng.r#gen())
+        let sl: HashMap<u64, u64> = std::iter::repeat_with(|| rng.random())
             .take(100_000)
             .collect();
 

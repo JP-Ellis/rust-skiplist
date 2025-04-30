@@ -1,7 +1,7 @@
 //! Benchmarks for this crate's [`SkipMap`].
 
 use criterion::{AxisScale, BenchmarkId, Criterion, PlotConfiguration, black_box};
-use rand::prelude::*;
+use rand::{Rng, SeedableRng, rngs::StdRng};
 use skiplist::SkipMap;
 
 /// Benchmarking sizes
@@ -15,11 +15,11 @@ pub fn insert(c: &mut Criterion) {
     for size in SIZES {
         group.bench_function(BenchmarkId::from_parameter(size), |b| {
             let mut rng = StdRng::seed_from_u64(0x1234_abcd);
-            let mut sl: SkipMap<usize, usize> =
-                std::iter::repeat_with(|| rng.r#gen()).take(size).collect();
+            let mut sl: SkipMap<u64, u64> =
+                std::iter::repeat_with(|| rng.random()).take(size).collect();
 
             b.iter(|| {
-                sl.insert(rng.r#gen(), rng.r#gen());
+                sl.insert(rng.random(), rng.random());
             });
         });
     }
@@ -33,11 +33,11 @@ pub fn rand_access(c: &mut Criterion) {
     for size in SIZES {
         group.bench_function(BenchmarkId::from_parameter(size), |b| {
             let mut rng = StdRng::seed_from_u64(0x123_4abcd);
-            let sl: SkipMap<usize, usize> = std::iter::repeat_with(|| rng.r#gen())
+            let sl: SkipMap<usize, u64> = std::iter::repeat_with(|| rng.random())
                 .enumerate()
                 .take(size)
                 .collect();
-            let indices: Vec<_> = std::iter::repeat_with(|| rng.gen_range(0..sl.len()))
+            let indices: Vec<usize> = std::iter::repeat_with(|| rng.random_range(0..sl.len()))
                 .take(10)
                 .collect();
 
@@ -54,7 +54,7 @@ pub fn rand_access(c: &mut Criterion) {
 pub fn iter(c: &mut Criterion) {
     c.bench_function("SkipMap Iter", |b| {
         let mut rng = StdRng::seed_from_u64(0x1234_abcd);
-        let sl: SkipMap<usize, usize> = std::iter::repeat_with(|| rng.r#gen())
+        let sl: SkipMap<u64, u64> = std::iter::repeat_with(|| rng.random())
             .take(100_000)
             .collect();
 
