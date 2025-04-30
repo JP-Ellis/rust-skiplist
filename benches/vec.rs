@@ -1,7 +1,7 @@
 //! Benchmarks for the Standard Library's [`Vec`].
 
 use criterion::{AxisScale, BenchmarkId, Criterion, PlotConfiguration, black_box};
-use rand::prelude::*;
+use rand::{Rng, SeedableRng, rngs::StdRng};
 
 /// Benchmarking sizes
 const SIZES: [usize; 6] = [1, 10, 100, 1000, 10_000, 100_000];
@@ -14,10 +14,10 @@ pub fn push_front(c: &mut Criterion) {
     for size in SIZES {
         group.bench_function(BenchmarkId::from_parameter(size), |b| {
             let mut rng = StdRng::seed_from_u64(0x1234_abcd);
-            let mut sl: Vec<usize> = std::iter::repeat_with(|| rng.r#gen()).take(size).collect();
+            let mut sl: Vec<u64> = std::iter::repeat_with(|| rng.random()).take(size).collect();
 
             b.iter(|| {
-                sl.insert(0, rng.r#gen());
+                sl.insert(0, rng.random());
             });
         });
     }
@@ -31,10 +31,10 @@ pub fn push_back(c: &mut Criterion) {
     for size in SIZES {
         group.bench_function(BenchmarkId::from_parameter(size), |b| {
             let mut rng = StdRng::seed_from_u64(0x1234_abcd);
-            let mut sl: Vec<usize> = std::iter::repeat_with(|| rng.r#gen()).take(size).collect();
+            let mut sl: Vec<u64> = std::iter::repeat_with(|| rng.random()).take(size).collect();
 
             b.iter(|| {
-                sl.push(rng.r#gen());
+                sl.push(rng.random());
             });
         });
     }
@@ -48,10 +48,10 @@ pub fn insert(c: &mut Criterion) {
     for size in SIZES {
         group.bench_function(BenchmarkId::from_parameter(size), |b| {
             let mut rng = StdRng::seed_from_u64(0x1234_abcd);
-            let mut sl: Vec<usize> = std::iter::repeat_with(|| rng.r#gen()).take(size).collect();
+            let mut sl: Vec<u64> = std::iter::repeat_with(|| rng.random()).take(size).collect();
 
             b.iter(|| {
-                let v = rng.r#gen();
+                let v = rng.random();
                 match sl.binary_search(&v) {
                     Ok(i) | Err(i) => sl.insert(i, v),
                 }
@@ -68,8 +68,8 @@ pub fn rand_access(c: &mut Criterion) {
     for size in SIZES {
         group.bench_function(BenchmarkId::from_parameter(size), |b| {
             let mut rng = StdRng::seed_from_u64(0x1234_abcd);
-            let sl: Vec<usize> = std::iter::repeat_with(|| rng.r#gen()).take(size).collect();
-            let indices: Vec<_> = std::iter::repeat_with(|| rng.gen_range(0..sl.len()))
+            let sl: Vec<u64> = std::iter::repeat_with(|| rng.random()).take(size).collect();
+            let indices: Vec<_> = std::iter::repeat_with(|| rng.random_range(0..sl.len()))
                 .take(10)
                 .collect();
 
@@ -86,7 +86,7 @@ pub fn rand_access(c: &mut Criterion) {
 pub fn iter(c: &mut Criterion) {
     c.bench_function("Vec Iter", |b| {
         let mut rng = StdRng::seed_from_u64(0x1234_abcd);
-        let sl: Vec<usize> = std::iter::repeat_with(|| rng.r#gen())
+        let sl: Vec<u64> = std::iter::repeat_with(|| rng.random())
             .take(100_000)
             .collect();
 

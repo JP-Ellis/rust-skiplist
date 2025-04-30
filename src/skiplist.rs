@@ -982,6 +982,12 @@ impl<T: Hash> Hash for SkipList<T> {
 mod tests {
     use std::ops::Bound::{self, Excluded, Included, Unbounded};
 
+    use anyhow::Result;
+    use rand::{
+        Rng,
+        distr::{Uniform, uniform::UniformUsize},
+    };
+
     use super::SkipList;
 
     #[test]
@@ -1004,17 +1010,17 @@ mod tests {
     }
 
     #[test]
-    fn insert_rand() {
-        use rand::{Rng, distributions::Uniform};
+    fn insert_rand() -> Result<()> {
         let mut rng = rand::thread_rng();
         let mut sl: SkipList<usize> = SkipList::new();
         let mut vec: Vec<usize> = Vec::new();
         for i in 0..100 {
-            let idx = rng.sample(Uniform::new_inclusive(0, i));
+            let idx = rng.sample(Uniform::new_inclusive(0, i)?);
             sl.insert(i, idx);
             vec.insert(idx, i);
         }
         assert_eq!(sl.into_iter().collect::<Vec<_>>(), vec);
+        Ok(())
     }
 
     #[test]
@@ -1030,15 +1036,15 @@ mod tests {
     }
 
     #[test]
-    fn remove_rand() {
-        use rand::{Rng, distributions::Uniform};
+    fn remove_rand() -> Result<()> {
         let mut rng = rand::thread_rng();
         let mut v: Vec<i32> = (0..1000).collect();
         let mut sl: SkipList<i32> = (0..1000).collect();
         for i in (0..1000).rev() {
-            let idx = rng.sample(Uniform::new_inclusive(0, i));
+            let idx = rng.sample(Uniform::new_inclusive(0, i)?);
             assert_eq!(sl.remove(idx), v.remove(idx));
         }
+        Ok(())
     }
 
     #[test]

@@ -1,6 +1,6 @@
 //! Geometric level generator.
 
-use rand::prelude::*;
+use rand::{Rng, SeedableRng, rngs::SmallRng};
 use thiserror::Error;
 
 use crate::level_generator::LevelGenerator;
@@ -70,7 +70,7 @@ impl Geometric {
         Ok(Geometric {
             total,
             q: 1.0 - p,
-            rng: SmallRng::from_rng(thread_rng()).map_err(|_err| GeometricError::RngInitFailed)?,
+            rng: SmallRng::from_rng(&mut rand::rng()),
         })
     }
 }
@@ -114,7 +114,7 @@ impl LevelGenerator for Geometric {
     )]
     #[expect(clippy::as_conversions, reason = "No other way to do this")]
     fn level(&mut self) -> usize {
-        let u = self.rng.r#gen::<f64>();
+        let u = self.rng.random::<f64>();
         (1.0 + (self
             .q
             .powi(i32::try_from(self.total).expect("total is guaranteed to fit in i32"))
