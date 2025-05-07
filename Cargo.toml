@@ -1,7 +1,7 @@
 #:schema https://json.schemastore.org/cargo.json
 [package]
 name    = "skiplist"
-version = "0.5.0"
+version = "0.6.0"
 
 authors     = ["JP-Ellis <josh@jpellis.me>"]
 description = "Skiplist implementation in Rust for fast insertion and removal, including a normal skiplist, ordered skiplist, and skipmap."
