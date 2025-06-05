@@ -266,8 +266,6 @@ jobs:
           path: |
             ${{ env.PRE_COMMIT_HOME }}
           key: ${{ runner.os }}-pre-commit-${{ hashFiles('.pre-commit-config.yaml') }}
-          restore-keys: |
-            ${{ runner.os }}-pre-commit-
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
