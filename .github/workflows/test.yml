@@ -78,7 +78,7 @@ jobs:
         uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6  # v2.7.8
 
       - name: Install cargo-hack and cargo-action-fmt
-        uses: taiki-e/install-action@7b20dfd705618832f20d29066e34aa2f2f6194c2  # v2.52.8
+        uses: taiki-e/install-action@9ba3ac3fd006a70c6e186a683577abc1ccf0ff3a  # v2.54.0
         with:
           tool: cargo-hack,cargo-action-fmt
 
@@ -154,7 +154,7 @@ jobs:
         uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6  # v2.7.8
 
       - name: Install cargo-hack and nextest
-        uses: taiki-e/install-action@7b20dfd705618832f20d29066e34aa2f2f6194c2  # v2.52.8
+        uses: taiki-e/install-action@9ba3ac3fd006a70c6e186a683577abc1ccf0ff3a  # v2.54.0
         with:
           tool: cargo-hack,nextest
 
@@ -223,7 +223,7 @@ jobs:
         uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6  # v2.7.8
 
       - name: Install cargo-hack, tarpaulin
-        uses: taiki-e/install-action@7b20dfd705618832f20d29066e34aa2f2f6194c2  # v2.52.8
+        uses: taiki-e/install-action@9ba3ac3fd006a70c6e186a683577abc1ccf0ff3a  # v2.54.0
         with:
           tool: cargo-hack,cargo-tarpaulin
 
