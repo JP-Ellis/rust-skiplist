@@ -10,10 +10,11 @@ allow-panic-in-tests  = true
 allow-print-in-tests  = true
 allow-unwrap-in-tests = false
 
-disallowed-methods = [
-  # Prefer the pretty_assertions crate
+disallowed-macros = [
+  # Prefer the macros from the `pretty_assertions` crate
   "std::assert_eq",
   "std::assert_matches::assert_matches",
+  "std::assert_matches::debug_assert_matches",
   "std::assert_ne",
 ]
 
