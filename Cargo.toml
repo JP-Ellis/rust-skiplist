@@ -27,7 +27,7 @@ rand      = { version = "0.9", features = ["small_rng"] }
 thiserror = "2.0"
 
 [dev-dependencies]
-anyhow            = "=1.0.98"
+anyhow            = "=1.0.99"
 criterion         = "=0.3.6"
 insta             = "=1.43.1"
 pretty_assertions = "=1.4.1"
