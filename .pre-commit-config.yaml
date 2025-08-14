@@ -13,7 +13,7 @@ default_stages:
 repos:
   # Generic hooks that apply to a lot of files
   - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v5.0.0
+    rev: v6.0.0
     hooks:
       - id: check-added-large-files
       - id: check-case-conflict
