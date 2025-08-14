@@ -79,7 +79,7 @@ repos:
           - --fix
 
   - repo: https://github.com/crate-ci/typos
-    rev: v1.35.1
+    rev: v1.35.4
     hooks:
       - id: typos
 
