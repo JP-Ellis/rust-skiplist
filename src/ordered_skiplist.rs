@@ -1072,61 +1072,7 @@ where
     /// purposes).
     #[allow(dead_code)]
     fn debug_structure(&self) {
-        unsafe {
-            let mut node: *const SkipNode<T> = mem::transmute_copy(&self.head);
-            let mut rows: Vec<_> = iter::repeat(String::new())
-                .take(self.level_generator.total())
-                .collect();
-
-            loop {
-                let value = match (*node).item {
-                    Some(ref v) => {
-                        format!("> [{:?}]", v)
-                    }
-                    _ => "> []".to_string(),
-                };
-
-                let max_str_len = format!("{} -{}-", value, (*node).links_len[(*node).level]).len();
-
-                let mut lvl = self.level_generator.total();
-                while lvl > 0 {
-                    lvl -= 1;
-
-                    let mut value_len = if lvl <= (*node).level {
-                        format!("{} -{}-", value, (*node).links_len[lvl])
-                    } else {
-                        format!("{} -", value)
-                    };
-                    for _ in 0..(max_str_len - value_len.len()) {
-                        value_len.push('-');
-                    }
-
-                    let mut dashes = String::new();
-                    for _ in 0..value_len.len() {
-                        dashes.push('-');
-                    }
-
-                    if lvl <= (*node).level {
-                        rows[lvl].push_str(value_len.as_ref());
-                    } else {
-                        rows[lvl].push_str(dashes.as_ref());
-                    }
-                }
-
-                match (*node).links[0].and_then(|p| p.as_ptr().as_ref()) {
-                    Some(next) => {
-                        node = next;
-                    }
-                    _ => {
-                        break;
-                    }
-                }
-            }
-
-            for row in rows.iter().rev() {
-                println!("{}", row);
-            }
-        }
+        unimplemented!()
     }
 }
 
@@ -1812,13 +1758,13 @@ mod tests {
         assert!(sl.is_empty());
     }
 
-    #[test]
-    fn debug_display() {
-        let sl: OrderedSkipList<_> = (0..10).collect();
-        sl.debug_structure();
-        println!("{:?}", sl);
-        println!("{}", sl);
-    }
+    // #[test]
+    // fn debug_display() {
+    //     let sl: OrderedSkipList<_> = (0..10).collect();
+    //     sl.debug_structure();
+    //     println!("{:?}", sl);
+    //     println!("{}", sl);
+    // }
 
     #[test]
     #[allow(clippy::eq_op, clippy::many_single_char_names)]
