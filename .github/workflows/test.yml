@@ -75,7 +75,7 @@ jobs:
           components: clippy
 
       - name: Cache Rust
-        uses: Swatinem/rust-cache@98c8021b550208e191a6a3145459bfc9fb29c4c0  # v2.8.0
+        uses: Swatinem/rust-cache@f13886b937689c021905a6b90929199931d60db1  # v2.8.1
 
       - name: Install cargo-hack and cargo-action-fmt
         uses: taiki-e/install-action@57511bcdf8cdb0eab6448cb7fa632952d9f25742  # v2.59.1
@@ -119,7 +119,7 @@ jobs:
           components: rustfmt
 
       - name: Cache Rust
-        uses: Swatinem/rust-cache@98c8021b550208e191a6a3145459bfc9fb29c4c0  # v2.8.0
+        uses: Swatinem/rust-cache@f13886b937689c021905a6b90929199931d60db1  # v2.8.1
 
       - name: Format
         run: cargo fmt --check
@@ -151,7 +151,7 @@ jobs:
           toolchain: ${{ matrix.rust }}
 
       - name: Cache Rust
-        uses: Swatinem/rust-cache@98c8021b550208e191a6a3145459bfc9fb29c4c0  # v2.8.0
+        uses: Swatinem/rust-cache@f13886b937689c021905a6b90929199931d60db1  # v2.8.1
 
       - name: Install cargo-hack and nextest
         uses: taiki-e/install-action@57511bcdf8cdb0eab6448cb7fa632952d9f25742  # v2.59.1
@@ -220,7 +220,7 @@ jobs:
           toolchain: ${{ matrix.rust }}
 
       - name: Cache Rust
-        uses: Swatinem/rust-cache@98c8021b550208e191a6a3145459bfc9fb29c4c0  # v2.8.0
+        uses: Swatinem/rust-cache@f13886b937689c021905a6b90929199931d60db1  # v2.8.1
 
       - name: Install cargo-hack, tarpaulin
         uses: taiki-e/install-action@57511bcdf8cdb0eab6448cb7fa632952d9f25742  # v2.59.1
