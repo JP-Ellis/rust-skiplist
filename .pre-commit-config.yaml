@@ -41,7 +41,7 @@ repos:
       - id: check-xml
 
   - repo: https://github.com/lyz-code/yamlfix/
-    rev: 1.18.0
+    rev: 1.19.0
     hooks:
       - id: yamlfix
         args:
