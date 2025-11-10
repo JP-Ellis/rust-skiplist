@@ -1,4 +1,4 @@
-#:schema https://json.schemastore.org/rustfmt.json
+#:schema https://www.schemastore.org/rustfmt.json
 # Used by `cargo +nightly fmt`, otherwise emits a warning
 unstable_features = true
 
