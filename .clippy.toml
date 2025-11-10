@@ -1,4 +1,4 @@
-#:schema https://json.schemastore.org/any.json
+#:schema https://www.schemastore.org/any.json
 
 # Clippy's default only allows 2 segments, but I find 3 to be allowable before
 # requiring a 'use' statement.

@@ -1,4 +1,4 @@
-#:schema https://json.schemastore.org/any.json
+#:schema https://www.schemastore.org/any.json
 [profile.ci]
 # In CI, we want to run all tests instead of failing fast
 fail-fast = false
