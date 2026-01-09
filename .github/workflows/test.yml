@@ -301,6 +301,6 @@ jobs:
           fetch-depth: 0
 
       - name: committed-action
-        uses: crate-ci/committed@9865da4f86a4523e4a80597d7760763d86adafd8  # v1.1.9
+        uses: crate-ci/committed@dc6f20ddd899fe6d6f0402807884c0a4b3176b53  # v1.1.10
         with:
           args: -vv --no-merge-commit --no-wip --no-fixup
