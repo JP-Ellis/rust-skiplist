@@ -87,7 +87,7 @@ impl LevelGenerator for Geometric {
     /// by sample from a uniform distribution and inverting the cumulative
     /// distribution function (CDF) of the truncated geometric distribution.
     ///
-    /// The CDF of the truncated geometric distribution is
+    /// The CDF of the truncated geometric distribution is:
     ///
     /// ```math
     /// \text{CDF}(n) = \frac{q^n - 1}{q^{t} - 1}

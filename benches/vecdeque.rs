@@ -5,10 +5,11 @@ use std::collections::VecDeque;
 use criterion::{AxisScale, BenchmarkId, Criterion, PlotConfiguration, black_box};
 use rand::{Rng, SeedableRng, rngs::StdRng};
 
-/// Benchmarking sizes
+/// Benchmarking sizes.
 const SIZES: [usize; 6] = [1, 10, 100, 1000, 10_000, 100_000];
 
-/// Benchmarking push front
+/// Benchmarking push front.
+#[inline]
 pub fn push_front(c: &mut Criterion) {
     let mut group = c.benchmark_group("VecDeque Push Front");
     group.plot_config(PlotConfiguration::default().summary_scale(AxisScale::Logarithmic));
@@ -26,7 +27,8 @@ pub fn push_front(c: &mut Criterion) {
     }
 }
 
-/// Benchmarking push back
+/// Benchmarking push back.
+#[inline]
 pub fn push_back(c: &mut Criterion) {
     let mut group = c.benchmark_group("VecDeque Push Back");
     group.plot_config(PlotConfiguration::default().summary_scale(AxisScale::Logarithmic));
@@ -44,7 +46,8 @@ pub fn push_back(c: &mut Criterion) {
     }
 }
 
-/// Benchmarking random access
+/// Benchmarking random access.
+#[inline]
 pub fn rand_access(c: &mut Criterion) {
     let mut group = c.benchmark_group("VecDeque Random Access");
     group.plot_config(PlotConfiguration::default().summary_scale(AxisScale::Logarithmic));
@@ -66,7 +69,8 @@ pub fn rand_access(c: &mut Criterion) {
     }
 }
 
-/// Benchmarking iteration
+/// Benchmarking iteration.
+#[inline]
 pub fn iter(c: &mut Criterion) {
     c.bench_function("VecDeque Iter", |b| {
         let mut rng = StdRng::seed_from_u64(0x1234_abcd);

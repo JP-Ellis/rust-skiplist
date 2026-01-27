@@ -4,10 +4,11 @@ use criterion::{AxisScale, BenchmarkId, Criterion, PlotConfiguration, black_box}
 use rand::{Rng, SeedableRng, rngs::StdRng};
 use skiplist::OrderedSkipList;
 
-/// Benchmarking sizes
+/// Benchmarking sizes.
 const SIZES: [usize; 6] = [1, 10, 100, 1000, 10_000, 100_000];
 
-/// Benchmarking insertion
+/// Benchmarking insertion.
+#[inline]
 pub fn insert(c: &mut Criterion) {
     let mut group = c.benchmark_group("OrderedSkiplist Insert");
     group.plot_config(PlotConfiguration::default().summary_scale(AxisScale::Logarithmic));
@@ -25,7 +26,8 @@ pub fn insert(c: &mut Criterion) {
     }
 }
 
-/// Benchmarking random access
+/// Benchmarking random access.
+#[inline]
 pub fn rand_access(c: &mut Criterion) {
     let mut group = c.benchmark_group("OrderedSkiplist Random Access");
     group.plot_config(PlotConfiguration::default().summary_scale(AxisScale::Logarithmic));
@@ -48,7 +50,8 @@ pub fn rand_access(c: &mut Criterion) {
     }
 }
 
-/// Benchmarking iteration
+/// Benchmarking iteration.
+#[inline]
 pub fn iter(c: &mut Criterion) {
     c.bench_function("OrderedSkipList Iter", |b| {
         let mut rng = StdRng::seed_from_u64(0x123_4abcd);
