@@ -1,6 +1,6 @@
 //! Geometric level generator.
 
-use rand::{Rng, SeedableRng, rngs::SmallRng};
+use rand::{RngExt, SeedableRng, rngs::SmallRng};
 use thiserror::Error;
 
 use crate::level_generator::LevelGenerator;

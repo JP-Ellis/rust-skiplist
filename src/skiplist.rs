@@ -984,7 +984,7 @@ mod tests {
 
     use anyhow::Result;
     use rand::{
-        Rng,
+        RngExt,
         distr::{Uniform, uniform::UniformUsize},
     };
 
@@ -1011,7 +1011,7 @@ mod tests {
 
     #[test]
     fn insert_rand() -> Result<()> {
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
         let mut sl: SkipList<usize> = SkipList::new();
         let mut vec: Vec<usize> = Vec::new();
         for i in 0..100 {
@@ -1037,7 +1037,7 @@ mod tests {
 
     #[test]
     fn remove_rand() -> Result<()> {
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
         let mut v: Vec<i32> = (0..1000).collect();
         let mut sl: SkipList<i32> = (0..1000).collect();
         for i in (0..1000).rev() {
