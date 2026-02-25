@@ -43,9 +43,9 @@
 //! 1. A skip list or skip map owns the head node.
 //! 2. Each node owns the immediately following node through the `next` pointer.
 //!
-//! As a result of (2), it is generally safer to get a mutable reference to the
-//! next node through [`next_mut`][NodeTrait::next_mut], as that requires a
-//! mutable reference to the current node.
+//! As a result of (2), getting a mutable reference to the next node through
+//! [`next_mut`][NodeTrait::next_mut] requires that no other mutable reference
+//! to that node exists, which is why the method is marked `unsafe`.
 //!
 //! ## Pointers
 //!
@@ -167,12 +167,12 @@ pub(crate) trait NodeTrait {
     ///
     /// # Safety
     ///
-    /// As `self`, which is borrowed mutably, is the owner of the next node, it
-    /// should generally be safe to get a mutable reference to the next node
-    /// provided that no other references are using the next node. This
-    /// requirement _should_ be enforced by the fact that `self` is borrowed
-    /// mutably.
-    fn next_mut(&mut self) -> Option<&mut Self>;
+    /// The caller must ensure that no other mutable references to the next
+    /// node exist while this reference is held. Borrowing `self` mutably is
+    /// necessary but not sufficient: the same next node can be reached through
+    /// a different parent's `next` pointer, creating aliasing `&mut`
+    /// references.
+    unsafe fn next_mut(&mut self) -> Option<&mut Self>;
 
     /// Get a reference to the previous node.
     fn prev(&self) -> Option<&Self>;
@@ -404,7 +404,7 @@ impl<V> NodeTrait for Node<V> {
     }
 
     #[inline]
-    fn next_mut(&mut self) -> Option<&mut Self> {
+    unsafe fn next_mut(&mut self) -> Option<&mut Self> {
         // SAFETY: The pointer can never be null, and the value is
         // [convertible](https://doc.rust-lang.org/stable/std/ptr/index.html#pointer-to-reference-conversion).
         self.next.map(|mut ptr| unsafe { ptr.as_mut() })
@@ -758,7 +758,7 @@ mod tests {
         let mut node = Node::<()>::new(MAX_LEVELS);
 
         assert!(node.next().is_none());
-        assert!(node.next_mut().is_none());
+        assert!(unsafe { node.next_mut() }.is_none());
 
         assert!(node.prev().is_none());
         assert!(unsafe { node.prev_mut() }.is_none());
@@ -826,8 +826,7 @@ mod tests {
             v3_v4 = Link::new(v4_ref, 1)?;
         }
 
-        #[expect(clippy::indexing_slicing, reason = "Serves as an additional assertion")]
-        {
+        unsafe {
             head.links[1] = Some(head_v3);
             head.links[0] = Some(head_v2);
 
@@ -907,8 +906,10 @@ mod tests {
     fn pop_node(minimal_skiplist: Result<Box<Node<u8>>>) -> Result<()> {
         let mut head = minimal_skiplist?;
 
-        let v1 = head.next_mut().expect("v1 not found");
-        let v2 = v1.next_mut().expect("v2 not found");
+        // SAFETY: `head` is a valid node with `v1` as its next.
+        let v1 = unsafe { head.next_mut() }.expect("v1 not found");
+        // SAFETY: `v1` is a valid node with `v2` as its next.
+        let v2 = unsafe { v1.next_mut() }.expect("v2 not found");
         let detached_node = unsafe { v2.pop() };
 
         assert_eq!(detached_node.value, Some(2));
