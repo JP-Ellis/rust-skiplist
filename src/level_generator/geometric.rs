@@ -111,7 +111,7 @@ impl LevelGenerator for Geometric {
     #[expect(
         clippy::cast_possible_truncation,
         clippy::cast_sign_loss,
-        reason = "CDF domain is [0, total] so the cast is safe"
+        reason = "CDF domain is [0, total] so the cast is safe after clamping"
     )]
     #[expect(clippy::as_conversions, reason = "No other way to do this")]
     fn level(&mut self) -> usize {
@@ -125,9 +125,13 @@ impl LevelGenerator for Geometric {
         //
         // where q = 1 - p and t is the total number of levels.
         let u = self.rng.random::<f64>();
-        (1.0 + (self.q.powi(self.total_i32) - 1.0) * u)
+        ((1.0 + (self.q.powi(self.total_i32) - 1.0) * u)
             .log(self.q)
-            .floor() as usize
+            .floor() as usize)
+            // When q^total underflows to 0.0 due to floating-point precision,
+            // the formula can produce values >= total.  This ensures that we
+            // never return a level greater than total - 1.
+            .min(self.total.saturating_sub(1))
     }
 }
 
