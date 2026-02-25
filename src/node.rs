@@ -699,7 +699,7 @@ impl<V: Debug> NodeDebug for Node<V> {
 }
 
 impl<V: Debug> Debug for Node<V> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Node")
             .field("next", &self.next)
             .field("prev", &self.prev)
