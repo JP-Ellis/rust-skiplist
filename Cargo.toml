@@ -114,7 +114,3 @@ rstest            = "0.25.0"
 
 [badges]
 codecov = { repository = "JP-Ellis/rust-skiplist", branch = "master", service = "github" }
-
-[[bench]]
-harness = false
-name    = "main"
