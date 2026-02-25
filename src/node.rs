@@ -284,7 +284,7 @@ pub(crate) trait NodeTrait {
 /// internal state of the node and its links. It is not intended for use in
 /// production code, nor externally.
 #[cfg(debug_assertions)]
-pub(crate) trait NodeDebug {
+pub(crate) trait NodeDebug: NodeTrait {
     /// Generate a map of pointers to node indices.
     fn ptr_index_map(&self) -> HashMap<NonNull<Self>, usize>;
 
