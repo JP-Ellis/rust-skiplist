@@ -717,23 +717,41 @@ impl<V: Debug> Debug for Node<V> {
     }
 }
 
-// impl<V> Drop for Node<V> {
-//     /// Drop a node
-//     ///
-//     /// We cannot simply drop the node, as that would result in the next node
-//     /// leaking. We need to drop the next node (if it exists) before dropping
-//     /// the current node.
-//     fn drop(&mut self) {
-//         while self
-//             .next_mut()
-//             .map(|node|
-//                 // SAFE_TY: Some links will be left dangling during the
-//                 // drop, but once finished, all links are also dropped.
-//                 unsafe { node.pop() })
-//             .is_some()
-//         {}
-//     }
-// }
+impl<V> Drop for Node<V> {
+    /// Drop a node and all subsequent nodes in the chain.
+    ///
+    /// `NonNull<T>` does not own its pointee, so without this implementation
+    /// every node after the head would be leaked when the head is dropped.
+    ///
+    /// # Implementation note
+    ///
+    /// We iterate using raw pointers (`NonNull::as_ptr`) rather than the safe
+    /// `next_as_mut()` method.  Using `next_as_mut()` inside `drop` would
+    /// create a `&mut Node<V>` that aliases the `Box<Node<V>>` we are about to
+    /// construct, which is undefined behaviour.  Working at the raw-pointer
+    /// level avoids that aliasing entirely.
+    fn drop(&mut self) {
+        // Walk the chain, reconstructing each heap-allocated node as a `Box`
+        // and immediately dropping it.  Each `Box::from_raw` is safe because:
+        //   1. Every node reachable via `next` was allocated with `Box::new`
+        //      and leaked (see `insert_after`).
+        //   2. We take `next` out of the node before reconstructing it as a
+        //      `Box`, so this path is only visited once per node.
+        // Skip links become dangling as nodes are freed, but they are owned by
+        // the nodes themselves and are freed together with each node.
+        while let Some(next_ptr) = self.next.take() {
+            // SAFETY: `next_ptr` points to a heap-allocated `Node<V>` that
+            // was created via `Box::new` + `Box::leak` in `insert_after`.
+            // We have taken ownership by removing it from `self.next`, so no
+            // other `Box` wraps this pointer.
+            let mut next_box: Box<Node<V>> = unsafe { Box::from_raw(next_ptr.as_ptr()) };
+            // Take `next_box.next` so that *its* drop does not recurse further
+            // (the loop will handle it in the next iteration instead).
+            self.next = next_box.next.take();
+            drop(next_box);
+        }
+    }
+}
 
 #[expect(
     clippy::undocumented_unsafe_blocks,
