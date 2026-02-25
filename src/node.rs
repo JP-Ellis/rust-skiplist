@@ -254,22 +254,18 @@ pub(crate) trait NodeTrait {
 
     /// Join two sequences of nodes.
     ///
-    /// Joins a head node to a tail node, creating a single sequence of nodes,
-    /// returning the head node.
+    /// Joins a head node to a tail node, creating a single sequence of nodes.
     ///
-    /// This method takes ownership of the new sequence of nodes, and joins it
-    /// to the tail node.
+    /// This method takes ownership of `head` (consuming it) and splices the
+    /// nodes that follow it onto `self` (the tail).  After the call, `self` is
+    /// no longer a tail node — it now points to what was the first real node
+    /// after `head`.
     ///
     /// # Safety
     ///
-    /// This method re-allocates the node on the heap. As a result, any links
-    /// pointing to the node being joined will be invalidated.
-    ///
-    /// This method does not alter the links of the node being joined, or
-    /// surrounding nodes. As a result, while traversing the list to find a
-    /// specific node, it is important to keep track of the links to the node
-    /// and links over the node.
-    unsafe fn join(&mut self, head: Self) -> Self;
+    /// This method does not alter the skip links of the nodes. The caller must
+    /// update those links afterwards so that no dangling link pointers remain.
+    unsafe fn join(&mut self, head: Self);
 
     /// Insert a new node after the current node.
     ///
@@ -501,7 +497,7 @@ impl<V> NodeTrait for Node<V> {
     }
 
     #[inline]
-    unsafe fn join(&mut self, mut head: Self) -> Self {
+    unsafe fn join(&mut self, mut head: Self) {
         debug_assert!(
             matches!(self.node_type(), NodeType::Tail),
             "Can only join to tail node"
@@ -522,8 +518,8 @@ impl<V> NodeTrait for Node<V> {
             // [convertible](https://doc.rust-lang.org/stable/std/ptr/index.html#pointer-to-reference-conversion).
             unsafe { head_next.as_mut() }.prev = Some(NonNull::from(&mut *self));
         }
-
-        head
+        // `head` is dropped here; it has already had its `next` taken so only
+        // the now-empty sentinel is freed — no nodes are lost.
     }
 
     #[inline]
