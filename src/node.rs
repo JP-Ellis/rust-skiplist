@@ -3,7 +3,8 @@
 //! Underlying all the operations of the skip list, skip map and ordered skip
 //! list is the node. Each node owns the next node, and has a link to the
 //! previous node. The node also has a level, which corresponds to how 'high'
-//! the node reaches.
+//! the node reaches (or equivalently, how many links it has above the immediate
+//! neighbour links).
 //!
 //! As a concrete example, consider the following list:
 //!
@@ -19,11 +20,11 @@
 //! previous and next pointers (the latter being the one that owns the next
 //! node).
 //!
-//! The skip-list's benefit comes from the ability to skip over nodes at higher
+//! The skip list's benefit comes from the ability to skip over nodes at higher
 //! levels. For example, to move from node 1 to node 10, the above list would be
 //! traversed in the order head -> 6 -> 8 -> 9 -> 10.
 //!
-//! # Consideration
+//! # Considerations
 //!
 //! There are a number of considerations to take into account when working with
 //! the [`Node`] directly. These concerns are managed by the higher-level skip
@@ -43,8 +44,8 @@
 //! 2. Each node owns the immediately following node through the `next` pointer.
 //!
 //! As a result of (2), it is generally safer to get a mutable reference to the
-//! next node through [`next_mut`][Node::next_mut], as that requires a mutable
-//! reference to the current node.
+//! next node through [`next_mut`][NodeTrait::next_mut], as that requires a
+//! mutable reference to the current node.
 //!
 //! ## Pointers
 //!
@@ -148,7 +149,7 @@ pub(crate) struct Node<V> {
     value: Option<V>,
 }
 
-/// Node interface
+/// Node interface.
 pub(crate) trait NodeTrait {
     /// Inner type of the node.
     type Value;
@@ -198,7 +199,146 @@ pub(crate) trait NodeTrait {
         }
     }
 
-    /// Create a new node that already holds a value.
+    /// Get a reference to the value.
+    fn value(&self) -> Option<&Self::Value>;
+
+    /// Get a mutable reference to the value.
+    fn value_mut(&mut self) -> Option<&mut Self::Value>;
+
+    /// Get a reference to the list of links.
+    ///
+    /// This is used to get a list of links to the next nodes at each level.
+    fn links(&self) -> &Vec<Option<Link<Self::Value>>>;
+
+    /// Get a mutable reference to the list of links.
+    fn links_mut(&mut self) -> &mut Vec<Option<Link<Self::Value>>>;
+
+    /// Identify the type of node.
+    ///
+    /// This is used to determine the type of node in the skip list. The head
+    /// and tail nodes must not have a value, while regular nodes must have a
+    /// value. Additionally, the head node must have a `next` pointer and no
+    /// `prev` pointer, and the tail node must have a `prev` pointer and no
+    /// `next` pointer.
+    fn node_type(&self) -> NodeType;
+
+    /// Remove the node from the list.
+    ///
+    /// This method removes the node from the list, returning the node on its
+    /// own. It modifies the immediately preceding and following nodes so that
+    /// their `next` and `prev` pointers are updated to point to each other. It
+    /// also transfers the ownership of the node to the caller, and ensures that
+    /// the ownership of the following node is transferred to the preceding
+    /// node.
+    ///
+    /// This method must not be called on the head node, as it will result in
+    /// the rest of the list becoming unreachable.
+    ///
+    /// # Safety
+    ///
+    /// This method does not alter the links of the node, or surrounding nodes.
+    /// As a result, the caller must ensure that these are updated accordingly.
+    unsafe fn pop(&mut self) -> Box<Self>;
+
+    /// Join two sequences of nodes.
+    ///
+    /// Joins a head node to a tail node, creating a single sequence of nodes,
+    /// returning the head node.
+    ///
+    /// This method takes ownership of the new sequence of nodes, and joins it
+    /// to the tail node.
+    ///
+    /// # Safety
+    ///
+    /// This method re-allocates the node on the heap. As a result, any links
+    /// pointing to the node being joined will be invalidated.
+    ///
+    /// This method does not alter the links of the node being joined, or
+    /// surrounding nodes. As a result, while traversing the list to find a
+    /// specific node, it is important to keep track of the links to the node
+    /// and links over the node.
+    unsafe fn join(&mut self, head: Self) -> Self;
+
+    /// Insert a new node after the current node.
+    ///
+    /// The new node to be inserted must be a standalone node and not part of a
+    /// list (i.e., it must not have a `prev` or `next` pointer).
+    ///
+    /// This method takes ownership of the node to insert, and inserts it after
+    /// the current node. It modifies the current node, the new node, and the
+    /// node following the current node so that their `next` and `prev` pointers
+    /// are updated to point to each other.
+    ///
+    /// # Safety
+    ///
+    /// This method does not alter the links of the node being inserted, or
+    /// surrounding nodes. As a result, while traversing the list to find a
+    /// specific node, it is important to keep track of the links to the node and
+    /// links over the node.
+    unsafe fn insert_after(&mut self, node: Self);
+}
+
+/// Node trait for debugging purposes.
+///
+/// This trait is only available in debug mode, and is used to display the
+/// internal state of the node and its links. It is not intended for use in
+/// production code, nor externally.
+#[cfg(debug_assertions)]
+pub(crate) trait NodeDebug {
+    /// Generate a map of pointers to node indices.
+    fn ptr_index_map(&self) -> HashMap<NonNull<Self>, usize>;
+
+    /// Display the node and all subsequent nodes.
+    ///
+    /// This is only used for debugging purposes. If the node or its links are
+    /// not properly initialized or contain invalid links, this method may
+    /// result in undefined behavior.
+    ///
+    /// The output will be of the form:
+    ///
+    /// ```text
+    /// [03] head -------------------------------------------> 08
+    /// [02] head -------------------------> 05 -------------> 08
+    /// [01] head -------> 02 -------------> 05 -------> 07 -> 08
+    /// [->] head -> 01 -> 02 -> 03 -> 04 -> 05 -> 06 -> 07 -> 08
+    /// [<-] head <- 01 <- 02 <- 03 <- 04 <- 05 <- 06 <- 07 <- 08
+    ///
+    /// values:
+    /// head: None
+    /// 1: Some(...)
+    /// ...
+    /// tail: None
+    /// ```
+    fn display(&self) -> Result<String, fmt::Error>;
+
+    /// Display the links of the node.
+    ///
+    /// This is only used for debugging purposes. If the node or its links are
+    /// not properly initialized or contain invalid links, this method may
+    /// result in undefined behavior.
+    ///
+    /// The output will be of the form:
+    ///
+    /// ```text
+    /// [03] 00
+    /// [02] 00 -------------------------> 05
+    /// [01] 00 -------> 02 -------------> 05
+    /// [->] 00 -> 01 -> 02 -> 03 -> 04 -> 05 -> 06
+    /// [<-] 00 <- 01 <- 02 <- 03 <- 04 <- 05 <- 06
+    ///
+    /// [00|02] None
+    /// [01|00] Some(..)
+    /// [02|01] Some(..)
+    /// [03|00] Some(..)
+    /// [04|00] Some(..)
+    /// [05|02] Some(..)
+    /// [06|00] Some(..)
+    /// ```
+    ///
+    /// The first section displays the links between nodes at each level. The
+    /// `[->]` level displays the sequence of `next` pointers, while the `[<-]`
+    /// level displays the sequence of `prev` pointers. The numbers indicate the
+    /// positions of the index within the list (with `00` being the head).
     ///
     /// The second section displays the value of each node, in the form
     /// `[index|level] value`.
