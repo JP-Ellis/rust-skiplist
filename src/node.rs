@@ -208,10 +208,10 @@ pub(crate) trait NodeTrait {
     /// Get a reference to the list of links.
     ///
     /// This is used to get a list of links to the next nodes at each level.
-    fn links(&self) -> &Vec<Option<Link<Self::Value>>>;
+    fn links(&self) -> &[Option<Link<Self::Value>>];
 
     /// Get a mutable reference to the list of links.
-    fn links_mut(&mut self) -> &mut Vec<Option<Link<Self::Value>>>;
+    fn links_mut(&mut self) -> &mut [Option<Link<Self::Value>>];
 
     /// Identify the type of node.
     ///
@@ -435,12 +435,12 @@ impl<V> NodeTrait for Node<V> {
     }
 
     #[inline]
-    fn links(&self) -> &Vec<Option<Link<V>>> {
+    fn links(&self) -> &[Option<Link<V>>] {
         &self.links
     }
 
     #[inline]
-    fn links_mut(&mut self) -> &mut Vec<Option<Link<V>>> {
+    fn links_mut(&mut self) -> &mut [Option<Link<V>>] {
         &mut self.links
     }
 
