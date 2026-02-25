@@ -1,0 +1,105 @@
+#:schema https://raw.githubusercontent.com/j178/prek/refs/heads/master/prek.schema.json
+#:tombi toml-version = "v1.1.0"
+
+default_install_hook_types = ["commit-msg", "pre-commit", "pre-push"]
+# Unless otherwise specified, all hooks below are run during pre-commit.
+default_stages = ["pre-commit"]
+exclude = {
+  glob = [
+    "**/snapshots/**/*.snap",
+  ]
+}
+
+# Generic hooks that apply to a lot of files
+[[repos]]
+repo = "https://github.com/pre-commit/pre-commit-hooks"
+rev = "v6.0.0"
+hooks = [
+  { id = "check-added-large-files" },
+  { id = "check-case-conflict" },
+  { id = "check-executables-have-shebangs" },
+  { id = "check-merge-conflict" },
+  { id = "check-shebang-scripts-are-executable", exclude = "\\.rs$" },
+  { id = "check-symlinks" },
+  { id = "destroyed-symlinks" },
+  { id = "detect-private-key" },
+  { id = "end-of-file-fixer" },
+  { id = "fix-byte-order-marker" },
+  { id = "mixed-line-ending" },
+  { id = "trailing-whitespace" },
+  # The following only check that the files are parseable and does _not_
+  # modify the formatting.
+  { id = "check-json" },
+  { id = "check-toml" },
+  { id = "check-xml" },
+  { id = "check-yaml" },
+]
+
+[[repos]]
+repo = "https://github.com/lyz-code/yamlfix/"
+rev = "1.19.1"
+hooks = [{ id = "yamlfix", args = ["--config-file", ".yamlfix.toml"] }]
+
+[[repos]]
+repo = "https://github.com/biomejs/pre-commit"
+rev = "v2.4.4"
+hooks = [{ id = "biome-check" }]
+
+[[repos]]
+repo = "https://github.com/tombi-toml/tombi-pre-commit"
+rev = "v0.7.32"
+hooks = [{ id = "tombi-format" }, { id = "tombi-lint" }]
+
+[[repos]]
+repo = "https://github.com/crate-ci/committed"
+rev = "v1.1.10"
+hooks = [{ id = "committed" }]
+
+[[repos]]
+repo = "https://github.com/DavidAnson/markdownlint-cli2"
+rev = "v0.21.0"
+hooks = [{ id = "markdownlint-cli2", args = ["--fix"] }]
+
+[[repos]]
+repo = "https://github.com/crate-ci/typos"
+rev = "v1.43.5"
+hooks = [{ id = "typos" }]
+
+[[repos]]
+repo = "https://github.com/shellcheck-py/shellcheck-py"
+rev = "v0.11.0.1"
+hooks = [{ id = "shellcheck", args = ["--external-sources"] }]
+
+[[repos]]
+repo = "https://github.com/scop/pre-commit-shfmt"
+rev = "v3.12.0-2"
+hooks = [{ id = "shfmt" }]
+
+[[repos]]
+repo = "local"
+hooks = [
+  {
+    id = "cargo-check",
+    name = "cargo check",
+    entry = "cargo check --",
+    language = "system",
+    types = ["rust"],
+    pass_filenames = false
+  },
+  {
+    id = "cargo-clippy",
+    name = "cargo clippy",
+    entry = "cargo clippy --",
+    language = "system",
+    types = ["rust"],
+    pass_filenames = false
+  },
+  {
+    id = "cargo-fmt",
+    name = "cargo fmt",
+    entry = "cargo fmt --",
+    language = "system",
+    types = ["rust"],
+    pass_filenames = false
+  },
+]

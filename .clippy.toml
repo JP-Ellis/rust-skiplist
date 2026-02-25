@@ -1,23 +1,18 @@
 #:schema https://json.schemastore.org/any.json
-allowed-duplicate-crates = []
+#:tombi schema.strict = false
 
+allowed-duplicate-crates = []
 # Clippy's default only allows 2 segments, but I find 3 to be fine before
 # requiring a `use` statement.
 absolute-paths-max-segments = 3
-
 # Tweaks specific targeting tests
 allow-expect-in-tests = true
-allow-panic-in-tests  = true
-allow-print-in-tests  = true
+allow-panic-in-tests = true
+allow-print-in-tests = true
 allow-unwrap-in-tests = false
 
-# List of words which Clippy thinks are code, but are not.
-doc-valid-idents = [
-  "..", # Defaults
-]
-
+# Methods to avoid
 disallowed-methods = []
-
 disallowed-macros = [
   # Prefer the macros from the `pretty_assertions` crate
   "std::assert_eq",
@@ -25,7 +20,10 @@ disallowed-macros = [
   "std::assert_matches::debug_assert_matches",
   "std::assert_ne",
 ]
-
 # Prefer semi-colons inside blocks _except_ for single-line blocks
 semicolon-inside-block-ignore-singleline = true
 semicolon-outside-block-ignore-multiline = true
+
+# We have split the `impl` across modules, but it is still a warning to have
+# multiple impl blocks within one file.
+inherent-impl-lint-scope = "module"

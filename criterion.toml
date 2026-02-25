@@ -1,3 +1,4 @@
 #:schema https://json.schemastore.org/any.json
-criterion_home   = "./criterion"
+
+criterion_home = "./criterion"
 plotting_backend = "plotters"
