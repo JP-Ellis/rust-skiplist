@@ -24,9 +24,6 @@ pub enum GeometricError {
     /// The probability `$p$` must be in the range `$(0, 1)$`.
     #[error("p must be in (0, 1).")]
     InvalidProbability,
-    /// Failed to initialize the random number generator.
-    #[error("Failed to initialize the random number generator.")]
-    RngInitFailed,
 }
 
 /// A level generator using a geometric distribution.
@@ -94,7 +91,7 @@ impl Geometric {
             total,
             total_i32,
             q: 1.0 - p,
-            rng: SmallRng::from_rng(thread_rng()).map_err(|_err| GeometricError::RngInitFailed)?,
+            rng: SmallRng::from_rng(&mut rand::rng()),
         })
     }
 }
@@ -118,7 +115,16 @@ impl LevelGenerator for Geometric {
     )]
     #[expect(clippy::as_conversions, reason = "No other way to do this")]
     fn level(&mut self) -> usize {
-        let u = self.rng.r#gen::<f64>();
+        // Invert the CDF of the truncated geometric distribution:
+        //
+        //   CDF(n) = (q^n - 1) / (q^t - 1)
+        //
+        // Solving for n given a uniform variate u in [0, 1]:
+        //
+        //   n = floor( log_q( 1 + (q^total - 1) * u ) )
+        //
+        // where q = 1 - p and t is the total number of levels.
+        let u = self.rng.random::<f64>();
         (1.0 + (self.q.powi(self.total_i32) - 1.0) * u)
             .log(self.q)
             .floor() as usize
