@@ -1,4 +1,0 @@
-- We use `cargo nextest run` to run tests.
-- When referencing modules within the same crate, prefer `crate::module::function` over of `super::module::function`.
-- Use `cargo +nightly fmt` to format your code.
-- We avoid introducing panis where possible. If you must introduce a panic, prefer `expect` over `unwrap`.
