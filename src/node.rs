@@ -543,6 +543,12 @@ impl<V> NodeTrait for Node<V> {
 }
 
 #[cfg(debug_assertions)]
+#[allow(
+    clippy::allow_attributes,
+    clippy::use_debug,
+    dead_code,
+    reason = "Used for debugging"
+)]
 impl<V: Debug> NodeDebug for Node<V> {
     #[inline]
     fn ptr_index_map(&self) -> HashMap<NonNull<Self>, usize> {
@@ -562,8 +568,6 @@ impl<V: Debug> NodeDebug for Node<V> {
     }
 
     #[inline]
-    #[allow(clippy::allow_attributes, dead_code, reason = "Used for debugging")]
-    #[cfg(debug_assertions)]
     fn display(&self) -> Result<String, fmt::Error> {
         let mut output = String::new();
         write!(
@@ -576,8 +580,6 @@ impl<V: Debug> NodeDebug for Node<V> {
     }
 
     #[inline]
-    #[allow(clippy::allow_attributes, dead_code, reason = "Used for debugging")]
-    #[cfg(debug_assertions)]
     fn display_links(&self) -> Result<String, fmt::Error> {
         let hm = self.ptr_index_map();
         let mut output = String::new();
@@ -648,8 +650,6 @@ impl<V: Debug> NodeDebug for Node<V> {
     }
 
     #[inline]
-    #[allow(clippy::allow_attributes, dead_code, reason = "Used for debugging")]
-    #[expect(clippy::use_debug, reason = "This is an internal method for debugging")]
     #[cfg(debug_assertions)]
     fn display_values(&self) -> Result<String, fmt::Error> {
         let mut output = String::new();
@@ -674,8 +674,6 @@ impl<V: Debug> NodeDebug for Node<V> {
     }
 
     #[inline]
-    #[expect(clippy::use_debug, reason = "This is an internal method for debugging")]
-    #[cfg(debug_assertions)]
     fn display_ptrs(&self) -> Result<String, fmt::Error> {
         let mut output = String::new();
         let mut current = self;
@@ -721,7 +719,7 @@ impl<V: Debug> Debug for Node<V> {
 //         while self
 //             .next_mut()
 //             .map(|node|
-//                 // SAFETY: Some links will be left dangling during the
+//                 // SAFE_TY: Some links will be left dangling during the
 //                 // drop, but once finished, all links are also dropped.
 //                 unsafe { node.pop() })
 //             .is_some()
@@ -729,7 +727,12 @@ impl<V: Debug> Debug for Node<V> {
 //     }
 // }
 
-#[expect(clippy::undocumented_unsafe_blocks, reason = "Test code")]
+#[expect(
+    clippy::undocumented_unsafe_blocks,
+    clippy::multiple_unsafe_ops_per_block,
+    clippy::indexing_slicing,
+    reason = "test code, covered by miri, so safety guarantees can be relaxed"
+)]
 #[cfg(test)]
 mod tests {
     use anyhow::Result;

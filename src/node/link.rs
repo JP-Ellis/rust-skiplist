@@ -119,7 +119,7 @@ pub(crate) enum LinkError {
     /// The distance between two nodes has underflowed, becoming zero.
     #[error("distance underflow")]
     DistanceUnderflow,
-    /// The distance between is invalid
+    /// The supplied distance is invalid (zero is not permitted).
     #[error("invalid distance")]
     InvalidDistance,
 }
@@ -151,8 +151,7 @@ mod tests {
         let node: Node<i32> = Node::new(3);
         let mut link = Link::new(&node, 1)?;
         assert_eq!(
-            link.increment_distance()
-                .expect("Distance increment failed"),
+            link.increment_distance()?,
             NonZeroUsize::new(2).expect("NonZeroUsize::new failed")
         );
         Ok(())
@@ -163,8 +162,7 @@ mod tests {
         let node: Node<i32> = Node::new(3);
         let mut link = Link::new(&node, 2)?;
         assert_eq!(
-            link.decrement_distance()
-                .expect("Distance decrement failed"),
+            link.decrement_distance()?,
             NonZeroUsize::new(1).expect("NonZeroUsize::new failed")
         );
         Ok(())
