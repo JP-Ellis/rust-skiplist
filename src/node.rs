@@ -236,8 +236,20 @@ pub(crate) trait NodeTrait {
     ///
     /// # Safety
     ///
-    /// This method does not alter the links of the node, or surrounding nodes.
-    /// As a result, the caller must ensure that these are updated accordingly.
+    /// The caller must uphold **all** of the following:
+    ///
+    /// 1. **Heap allocation**: `self` must have been originally allocated via
+    ///    [`Box::new`] and then leaked (e.g. via [`Box::leak`] into a
+    ///    [`NonNull`] pointer). Calling this method on a stack-allocated node
+    ///    is instant undefined behaviour because it calls
+    ///    [`Box::from_raw(self)`][Box::from_raw] internally.
+    /// 2. **Node type**: `self` must not be a [`NodeType::Head`] or
+    ///    [`NodeType::Detached`] node.  Popping the head would make the rest
+    ///    of the list unreachable; popping a detached node has no well-defined
+    ///    meaning.
+    /// 3. **Links**: This method does not update the skip links of the node or
+    ///    the surrounding nodes. The caller must update those links afterwards
+    ///    so that no dangling link pointers remain.
     unsafe fn pop(&mut self) -> Box<Self>;
 
     /// Join two sequences of nodes.
