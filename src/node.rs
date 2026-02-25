@@ -44,7 +44,7 @@
 //! 2. Each node owns the immediately following node through the `next` pointer.
 //!
 //! As a result of (2), getting a mutable reference to the next node through
-//! [`next_mut`][NodeTrait::next_mut] requires that no other mutable reference
+//! [`next_mut`][Node::next_mut] requires that no other mutable reference
 //! to that node exists, which is why the method is marked `unsafe`.
 //!
 //! ## Pointers
@@ -150,18 +150,39 @@ pub(crate) struct Node<V> {
 }
 
 /// Node interface.
-pub(crate) trait NodeTrait {
-    /// Inner type of the node.
-    type Value;
+impl<V> Node<V> {
+    /// Create a new node.
+    ///
+    /// # Parameters
+    ///
+    /// - `max_levels`: The maximum number of levels in the skip list.
+    #[inline]
+    #[must_use]
+    pub(crate) fn new(max_levels: usize) -> Self {
+        Self {
+            next: None,
+            prev: None,
+            links: iter::repeat_with(|| None).take(max_levels).collect(),
+            value: None,
+        }
+    }
 
     /// Get the node's level.
     ///
     /// The level of a node corresponds to how many links it has (excluding the
     /// `prev`/`next` links).
-    fn level(&self) -> usize;
+    #[inline]
+    pub(crate) fn level(&self) -> usize {
+        self.links.len()
+    }
 
     /// Get a reference to the next node.
-    fn next(&self) -> Option<&Self>;
+    #[inline]
+    fn next(&self) -> Option<&Self> {
+        // SAFETY: The pointer can never be null, and the value is
+        // [convertible](https://doc.rust-lang.org/stable/std/ptr/index.html#pointer-to-reference-conversion).
+        self.next.map(|ptr| unsafe { ptr.as_ref() })
+    }
 
     /// Get a mutable reference to the next node.
     ///
@@ -172,55 +193,88 @@ pub(crate) trait NodeTrait {
     /// necessary but not sufficient: the same next node can be reached through
     /// a different parent's `next` pointer, creating aliasing `&mut`
     /// references.
-    unsafe fn next_mut(&mut self) -> Option<&mut Self>;
+    #[inline]
+    unsafe fn next_mut(&mut self) -> Option<&mut Self> {
+        // SAFETY: The pointer can never be null, and the value is
+        // [convertible](https://doc.rust-lang.org/stable/std/ptr/index.html#pointer-to-reference-conversion).
+        self.next.map(|mut ptr| unsafe { ptr.as_mut() })
+    }
 
     /// Get a reference to the previous node.
-    fn prev(&self) -> Option<&Self>;
+    #[inline]
+    fn prev(&self) -> Option<&Self> {
+        // SAFETY: The pointer can never be null, and the value is
+        // [convertible](https://doc.rust-lang.org/stable/std/ptr/index.html#pointer-to-reference-conversion).
+        self.prev.map(|ptr| unsafe { ptr.as_ref() })
+    }
 
     /// Get a mutable reference to the previous node.
     ///
     /// # Arguments
     ///
-    /// - `max_levels`: The number of skip-link slots to initialise (must be
-    ///   `<= N`).  Passing a value greater than `N` panics in debug builds
-    ///   and truncates silently in release builds.
+    /// Unlike [`next_mut`][Node::next_mut], the current node does _not_ own the
+    /// previous node. The fact that `self` is borrowed mutably does not imply
+    /// that the previous node is not being used elsewhere. As a result, the
+    /// caller must ensure that the previous node is not being used elsewhere.
     #[inline]
-    #[must_use]
-    pub(crate) fn new(max_levels: usize) -> Self {
-        debug_assert!(
-            max_levels <= N,
-            "max_levels ({max_levels}) exceeds node capacity ({N})"
-        );
-        Self {
-            next: None,
-            prev: None,
-            links: iter::repeat_with(|| None).take(max_levels).collect(),
-            value: None,
-        }
+    unsafe fn prev_mut(&mut self) -> Option<&mut Self> {
+        // SAFETY: The pointer can never be null, and the value is
+        // [convertible](https://doc.rust-lang.org/stable/std/ptr/index.html#pointer-to-reference-conversion).
+        self.prev.map(|mut ptr| unsafe { ptr.as_mut() })
     }
 
     /// Get a reference to the value.
-    fn value(&self) -> Option<&Self::Value>;
+    #[inline]
+    fn value(&self) -> Option<&V> {
+        self.value.as_ref()
+    }
 
     /// Get a mutable reference to the value.
-    fn value_mut(&mut self) -> Option<&mut Self::Value>;
+    #[inline]
+    fn value_mut(&mut self) -> Option<&mut V> {
+        self.value.as_mut()
+    }
 
     /// Get a reference to the list of links.
     ///
-    /// This is used to get a list of links to the next nodes at each level.
-    fn links(&self) -> &[Option<Link<Self::Value>>];
+    /// Each slot at index `l` holds the link to the next node reachable at
+    /// skip level `l`, or `None` if no such forward node exists at that level.
+    #[inline]
+    fn links(&self) -> &[Option<Link<V>>] {
+        &self.links
+    }
 
-    /// Get a mutable reference to the list of links.
-    fn links_mut(&mut self) -> &mut [Option<Link<Self::Value>>];
-
-    /// Identify the type of node.
+    /// Returns a mutable view of the skip-link slots for this node.
     ///
-    /// This is used to determine the type of node in the skip list. The head
-    /// and tail nodes must not have a value, while regular nodes must have a
-    /// value. Additionally, the head node must have a `next` pointer and no
-    /// `prev` pointer, and the tail node must have a `prev` pointer and no
-    /// `next` pointer.
-    fn node_type(&self) -> NodeType;
+    /// Used when wiring or clearing skip links during insertion, removal,
+    /// or a full link rebuild.
+    #[inline]
+    fn links_mut(&mut self) -> &mut [Option<Link<V>>] {
+        &mut self.links
+    }
+
+    /// Classifies this node based on its `prev`, `next`, and `value` fields.
+    ///
+    /// Classification rules:
+    /// - No `prev`, no value: [`NodeType::Head`] (sentinel; may or may not have `next`).
+    /// - No `prev`, no `next`, has value: [`NodeType::Detached`] (unlinked data node).
+    /// - Has `prev` and `next`, has value: [`NodeType::Body`].
+    /// - Has `prev`, no `next`, has value: [`NodeType::Tail`].
+    /// - Any other combination is unreachable given correct node construction.
+    #[inline]
+    fn node_type(&self) -> NodeType {
+        match (
+            self.prev.is_some(),
+            self.next.is_some(),
+            self.value.is_some(),
+        ) {
+            (false, _, false) => NodeType::Head,
+            (false, false, true) => NodeType::Detached,
+            (true, true, true) => NodeType::Body,
+            (true, false, true) => NodeType::Tail,
+            _ => unreachable!("Invalid node state"),
+        }
+    }
 
     /// Remove the node from the list.
     ///
@@ -250,223 +304,6 @@ pub(crate) trait NodeTrait {
     /// 3. **Links**: This method does not update the skip links of the node or
     ///    the surrounding nodes. The caller must update those links afterwards
     ///    so that no dangling link pointers remain.
-    unsafe fn pop(&mut self) -> Box<Self>;
-
-    /// Join two sequences of nodes.
-    ///
-    /// Joins a head node to a tail node, creating a single sequence of nodes.
-    ///
-    /// This method takes ownership of `head` (consuming it) and splices the
-    /// nodes that follow it onto `self` (the tail).  After the call, `self` is
-    /// no longer a tail node — it now points to what was the first real node
-    /// after `head`.
-    ///
-    /// # Safety
-    ///
-    /// This method does not alter the skip links of the nodes. The caller must
-    /// update those links afterwards so that no dangling link pointers remain.
-    unsafe fn join(&mut self, head: Self);
-
-    /// Insert a new node after the current node.
-    ///
-    /// The new node to be inserted must be a standalone node and not part of a
-    /// list (i.e., it must not have a `prev` or `next` pointer).
-    ///
-    /// This method takes ownership of the node to insert, and inserts it after
-    /// the current node. It modifies the current node, the new node, and the
-    /// node following the current node so that their `next` and `prev` pointers
-    /// are updated to point to each other.
-    ///
-    /// # Safety
-    ///
-    /// This method does not alter the links of the node being inserted, or
-    /// surrounding nodes. As a result, while traversing the list to find a
-    /// specific node, it is important to keep track of the links to the node and
-    /// links over the node.
-    unsafe fn insert_after(&mut self, node: Self);
-}
-
-/// Node trait for debugging purposes.
-///
-/// This trait is only available in debug mode, and is used to display the
-/// internal state of the node and its links. It is not intended for use in
-/// production code, nor externally.
-#[cfg(debug_assertions)]
-pub(crate) trait NodeDebug: NodeTrait {
-    /// Generate a map of pointers to node indices.
-    fn ptr_index_map(&self) -> HashMap<NonNull<Self>, usize>;
-
-    /// Display the node and all subsequent nodes.
-    ///
-    /// This is only used for debugging purposes. If the node or its links are
-    /// not properly initialized or contain invalid links, this method may
-    /// result in undefined behavior.
-    ///
-    /// The output will be of the form:
-    ///
-    /// ```text
-    /// [03] head -------------------------------------------> 08
-    /// [02] head -------------------------> 05 -------------> 08
-    /// [01] head -------> 02 -------------> 05 -------> 07 -> 08
-    /// [->] head -> 01 -> 02 -> 03 -> 04 -> 05 -> 06 -> 07 -> 08
-    /// [<-] head <- 01 <- 02 <- 03 <- 04 <- 05 <- 06 <- 07 <- 08
-    ///
-    /// values:
-    /// head: None
-    /// 1: Some(...)
-    /// ...
-    /// tail: None
-    /// ```
-    fn display(&self) -> Result<String, fmt::Error>;
-
-    /// Display the links of the node.
-    ///
-    /// This is only used for debugging purposes. If the node or its links are
-    /// not properly initialized or contain invalid links, this method may
-    /// result in undefined behavior.
-    ///
-    /// The output will be of the form:
-    ///
-    /// ```text
-    /// [03] 00
-    /// [02] 00 -------------------------> 05
-    /// [01] 00 -------> 02 -------------> 05
-    /// [->] 00 -> 01 -> 02 -> 03 -> 04 -> 05 -> 06
-    /// [<-] 00 <- 01 <- 02 <- 03 <- 04 <- 05 <- 06
-    ///
-    /// [00|02] None
-    /// [01|00] Some(..)
-    /// [02|01] Some(..)
-    /// [03|00] Some(..)
-    /// [04|00] Some(..)
-    /// [05|02] Some(..)
-    /// [06|00] Some(..)
-    /// ```
-    ///
-    /// The first section displays the links between nodes at each level. The
-    /// `[->]` level displays the sequence of `next` pointers, while the `[<-]`
-    /// level displays the sequence of `prev` pointers. The numbers indicate the
-    /// positions of the index within the list (with `00` being the head).
-    ///
-    /// The second section displays the value of each node, in the form
-    /// `[index|level] value`.
-    fn display_links(&self) -> Result<String, fmt::Error>;
-
-    /// Display the value of each node.
-    ///
-    /// This is only used for debugging purposes. If the node or its links are
-    /// not properly initialized or contain invalid links, this method may
-    /// result in undefined behavior.
-    ///
-    /// The output will be of the form:
-    ///
-    /// ```text
-    /// [00|04] None
-    /// [01|02] Some(1)
-    /// [02|00] Some(2)
-    /// [03|03] Some(3)
-    /// ```
-    ///
-    /// which is of the form `[index|level] value`.
-    fn display_values(&self) -> Result<String, fmt::Error>;
-
-    /// Display the pointer addresses of the nodes.
-    ///
-    /// This is only used for debugging purposes. If the node or its links are
-    /// not properly initialized or contain invalid links, this method may
-    /// result in undefined behavior.
-    fn display_ptrs(&self) -> Result<String, fmt::Error>;
-}
-
-impl<V> Node<V> {
-    /// Create a new node.
-    ///
-    /// # Parameters
-    ///
-    /// - `max_levels`: The maximum number of levels in the skip list.
-    #[inline]
-    #[must_use]
-    pub(crate) fn new(max_levels: usize) -> Self {
-        Self {
-            next: None,
-            prev: None,
-            links: iter::repeat_with(|| None).take(max_levels).collect(),
-            value: None,
-        }
-    }
-}
-
-impl<V> NodeTrait for Node<V> {
-    type Value = V;
-
-    #[inline]
-    fn level(&self) -> usize {
-        self.links.len()
-    }
-
-    #[inline]
-    fn next(&self) -> Option<&Self> {
-        // SAFETY: The pointer can never be null, and the value is
-        // [convertible](https://doc.rust-lang.org/stable/std/ptr/index.html#pointer-to-reference-conversion).
-        self.next.map(|ptr| unsafe { ptr.as_ref() })
-    }
-
-    #[inline]
-    unsafe fn next_mut(&mut self) -> Option<&mut Self> {
-        // SAFETY: The pointer can never be null, and the value is
-        // [convertible](https://doc.rust-lang.org/stable/std/ptr/index.html#pointer-to-reference-conversion).
-        self.next.map(|mut ptr| unsafe { ptr.as_mut() })
-    }
-
-    #[inline]
-    fn prev(&self) -> Option<&Self> {
-        // SAFETY: The pointer can never be null, and the value is
-        // [convertible](https://doc.rust-lang.org/stable/std/ptr/index.html#pointer-to-reference-conversion).
-        self.prev.map(|ptr| unsafe { ptr.as_ref() })
-    }
-
-    #[inline]
-    unsafe fn prev_mut(&mut self) -> Option<&mut Self> {
-        // SAFETY: The pointer can never be null, and the value is
-        // [convertible](https://doc.rust-lang.org/stable/std/ptr/index.html#pointer-to-reference-conversion).
-        self.prev.map(|mut ptr| unsafe { ptr.as_mut() })
-    }
-
-    #[inline]
-    fn value(&self) -> Option<&V> {
-        self.value.as_ref()
-    }
-
-    #[inline]
-    fn value_mut(&mut self) -> Option<&mut V> {
-        self.value.as_mut()
-    }
-
-    #[inline]
-    fn links(&self) -> &[Option<Link<V>>] {
-        &self.links
-    }
-
-    #[inline]
-    fn links_mut(&mut self) -> &mut [Option<Link<V>>] {
-        &mut self.links
-    }
-
-    #[inline]
-    fn node_type(&self) -> NodeType {
-        match (
-            self.prev.is_some(),
-            self.next.is_some(),
-            self.value.is_some(),
-        ) {
-            (false, _, false) => NodeType::Head,
-            (false, false, true) => NodeType::Detached,
-            (true, true, true) => NodeType::Body,
-            (true, false, true) => NodeType::Tail,
-            _ => unreachable!("Invalid node state"),
-        }
-    }
-
     #[inline]
     unsafe fn pop(&mut self) -> Box<Self> {
         let _node_type = self.node_type();
@@ -496,6 +333,19 @@ impl<V> NodeTrait for Node<V> {
         unsafe { Box::from_raw(self) }
     }
 
+    /// Join two sequences of nodes.
+    ///
+    /// Joins a head node to a tail node, creating a single sequence of nodes.
+    ///
+    /// This method takes ownership of `head` (consuming it) and splices the
+    /// nodes that follow it onto `self` (the tail).  After the call, `self` is
+    /// no longer a tail node, it now points to what was the first real node
+    /// after `head`.
+    ///
+    /// # Safety
+    ///
+    /// This method does not alter the skip links of the nodes. The caller must
+    /// update those links afterwards so that no dangling link pointers remain.
     #[inline]
     unsafe fn join(&mut self, mut head: Self) {
         debug_assert!(
@@ -519,9 +369,25 @@ impl<V> NodeTrait for Node<V> {
             unsafe { head_next.as_mut() }.prev = Some(NonNull::from(&mut *self));
         }
         // `head` is dropped here; it has already had its `next` taken so only
-        // the now-empty sentinel is freed — no nodes are lost.
+        // the now-empty sentinel is freed and no nodes are lost.
     }
 
+    /// Insert a new node after the current node.
+    ///
+    /// The new node to be inserted must be a standalone node and not part of a
+    /// list (i.e., it must not have a `prev` or `next` pointer).
+    ///
+    /// This method takes ownership of the node to insert, and inserts it after
+    /// the current node. It modifies the current node, the new node, and the
+    /// node following the current node so that their `next` and `prev` pointers
+    /// are updated to point to each other.
+    ///
+    /// # Safety
+    ///
+    /// This method does not alter the links of the node being inserted, or
+    /// surrounding nodes. As a result, while traversing the list to find a
+    /// specific node, it is important to keep track of the links to the node and
+    /// links over the node.
     #[inline]
     unsafe fn insert_after(&mut self, mut node: Self) {
         debug_assert!(
@@ -557,7 +423,8 @@ impl<V> NodeTrait for Node<V> {
     dead_code,
     reason = "Used for debugging"
 )]
-impl<V: Debug> NodeDebug for Node<V> {
+impl<V: Debug> Node<V> {
+    /// Generate a map of pointers to node indices.
     #[inline]
     fn ptr_index_map(&self) -> HashMap<NonNull<Self>, usize> {
         let mut hm = HashMap::new();
@@ -575,6 +442,27 @@ impl<V: Debug> NodeDebug for Node<V> {
         hm
     }
 
+    /// Display the node and all subsequent nodes.
+    ///
+    /// This is only used for debugging purposes. If the node or its links are
+    /// not properly initialized or contain invalid links, this method may
+    /// result in undefined behavior.
+    ///
+    /// The output will be of the form:
+    ///
+    /// ```text
+    /// [03] head -------------------------------------------> 08
+    /// [02] head -------------------------> 05 -------------> 08
+    /// [01] head -------> 02 -------------> 05 -------> 07 -> 08
+    /// [->] head -> 01 -> 02 -> 03 -> 04 -> 05 -> 06 -> 07 -> 08
+    /// [<-] head <- 01 <- 02 <- 03 <- 04 <- 05 <- 06 <- 07 <- 08
+    ///
+    /// values:
+    /// head: None
+    /// 1: Some(...)
+    /// ...
+    /// tail: None
+    /// ```
     #[inline]
     fn display(&self) -> Result<String, fmt::Error> {
         let mut output = String::new();
@@ -587,6 +475,37 @@ impl<V: Debug> NodeDebug for Node<V> {
         Ok(output)
     }
 
+    /// Display the links of the node.
+    ///
+    /// This is only used for debugging purposes. If the node or its links are
+    /// not properly initialized or contain invalid links, this method may
+    /// result in undefined behavior.
+    ///
+    /// The output will be of the form:
+    ///
+    /// ```text
+    /// [03] 00
+    /// [02] 00 -------------------------> 05
+    /// [01] 00 -------> 02 -------------> 05
+    /// [->] 00 -> 01 -> 02 -> 03 -> 04 -> 05 -> 06
+    /// [<-] 00 <- 01 <- 02 <- 03 <- 04 <- 05 <- 06
+    ///
+    /// [00|02] None
+    /// [01|00] Some(..)
+    /// [02|01] Some(..)
+    /// [03|00] Some(..)
+    /// [04|00] Some(..)
+    /// [05|02] Some(..)
+    /// [06|00] Some(..)
+    /// ```
+    ///
+    /// The first section displays the links between nodes at each level. The
+    /// `[->]` level displays the sequence of `next` pointers, while the `[<-]`
+    /// level displays the sequence of `prev` pointers. The numbers indicate the
+    /// positions of the index within the list (with `00` being the head).
+    ///
+    /// The second section displays the value of each node, in the form
+    /// `[index|level] value`.
     #[inline]
     fn display_links(&self) -> Result<String, fmt::Error> {
         let hm = self.ptr_index_map();
@@ -657,8 +576,23 @@ impl<V: Debug> NodeDebug for Node<V> {
         Ok(output)
     }
 
+    /// Display the value of each node.
+    ///
+    /// This is only used for debugging purposes. If the node or its links are
+    /// not properly initialized or contain invalid links, this method may
+    /// result in undefined behavior.
+    ///
+    /// The output will be of the form:
+    ///
+    /// ```text
+    /// [00|04] None
+    /// [01|02] Some(1)
+    /// [02|00] Some(2)
+    /// [03|03] Some(3)
+    /// ```
+    ///
+    /// which is of the form `[index|level] value`.
     #[inline]
-    #[cfg(debug_assertions)]
     fn display_values(&self) -> Result<String, fmt::Error> {
         let mut output = String::new();
         let mut current = self;
@@ -681,6 +615,11 @@ impl<V: Debug> NodeDebug for Node<V> {
         Ok(output)
     }
 
+    /// Display the pointer addresses of the nodes.
+    ///
+    /// This is only used for debugging purposes. If the node or its links are
+    /// not properly initialized or contain invalid links, this method may
+    /// result in undefined behavior.
     #[inline]
     fn display_ptrs(&self) -> Result<String, fmt::Error> {
         let mut output = String::new();
@@ -766,7 +705,7 @@ mod tests {
     use pretty_assertions::{assert_eq, assert_matches};
     use rstest::{fixture, rstest};
 
-    use crate::node::{Node, NodeDebug, NodeTrait, NodeType, link::Link};
+    use crate::node::{Node, NodeType, link::Link};
 
     const MAX_LEVELS: usize = 2;
 
