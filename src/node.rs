@@ -737,7 +737,7 @@ impl<V: Debug> Debug for Node<V> {
 mod tests {
     use anyhow::Result;
     use insta::assert_snapshot;
-    use pretty_assertions::assert_eq;
+    use pretty_assertions::{assert_eq, assert_matches};
     use rstest::{fixture, rstest};
 
     use crate::node::{Node, NodeDebug, NodeTrait, NodeType, link::Link};
@@ -880,23 +880,23 @@ mod tests {
     fn node_properties(minimal_skiplist: Result<Box<Node<u8>>>) -> Result<()> {
         let head = minimal_skiplist?;
 
-        matches!(head.node_type(), NodeType::Head);
+        assert_matches!(head.node_type(), NodeType::Head);
         assert_eq!(head.level(), 2);
 
         let mut node = head.next().expect("v1 not found");
-        matches!(node.node_type(), NodeType::Body);
+        assert_matches!(node.node_type(), NodeType::Body);
         assert_eq!(node.level(), 0);
 
         node = node.next().expect("v2 not found");
-        matches!(node.node_type(), NodeType::Body);
+        assert_matches!(node.node_type(), NodeType::Body);
         assert_eq!(node.level(), 1);
 
         node = node.next().expect("v3 not found");
-        matches!(node.node_type(), NodeType::Body);
+        assert_matches!(node.node_type(), NodeType::Body);
         assert_eq!(node.level(), 1);
 
         node = node.next().expect("v4 not found");
-        matches!(node.node_type(), NodeType::Tail);
+        assert_matches!(node.node_type(), NodeType::Tail);
         assert_eq!(node.level(), 0);
 
         Ok(())
