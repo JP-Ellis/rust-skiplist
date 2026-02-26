@@ -101,6 +101,12 @@ impl<T, Q: ?Sized, F: Fn(&T, &Q) -> Ordering> Visitor for OrdMutVisitor<'_, T, Q
         self.found
     }
 
+    #[expect(
+        clippy::indexing_slicing,
+        reason = "`level` comes from `(0..self.level).rev()` where `self.level` is \
+                  initialised to `max_levels = precursors.len()` and only decreases, \
+                  so `level < max_levels == precursors.len()` is always true"
+    )]
     fn step(&mut self) -> Step<Self::NodeRef> {
         if self.found {
             return Step::FoundTarget;
