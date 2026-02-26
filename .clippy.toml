@@ -1,7 +1,8 @@
 #:schema https://json.schemastore.org/any.json
 #:tombi schema.strict = false
 
-allowed-duplicate-crates = []
+allowed-duplicate-crates = ["wit-bindgen", "hashbrown"]
+
 # Clippy's default only allows 2 segments, but I find 3 to be fine before
 # requiring a `use` statement.
 absolute-paths-max-segments = 3
