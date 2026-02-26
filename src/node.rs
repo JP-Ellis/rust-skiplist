@@ -179,7 +179,7 @@ impl<V> Node<V> {
 
     /// Get a reference to the next node.
     #[inline]
-    fn next(&self) -> Option<&Self> {
+    pub(crate) fn next(&self) -> Option<&Self> {
         // SAFETY: The pointer can never be null, and the value is
         // [convertible](https://doc.rust-lang.org/stable/std/ptr/index.html#pointer-to-reference-conversion).
         self.next.map(|ptr| unsafe { ptr.as_ref() })
@@ -195,7 +195,7 @@ impl<V> Node<V> {
     /// a different parent's `next` pointer, creating aliasing `&mut`
     /// references.
     #[inline]
-    unsafe fn next_mut(&mut self) -> Option<&mut Self> {
+    pub(crate) unsafe fn next_mut(&mut self) -> Option<&mut Self> {
         // SAFETY: The pointer can never be null, and the value is
         // [convertible](https://doc.rust-lang.org/stable/std/ptr/index.html#pointer-to-reference-conversion).
         self.next.map(|mut ptr| unsafe { ptr.as_mut() })
@@ -203,7 +203,7 @@ impl<V> Node<V> {
 
     /// Get a reference to the previous node.
     #[inline]
-    fn prev(&self) -> Option<&Self> {
+    pub(crate) fn prev(&self) -> Option<&Self> {
         // SAFETY: The pointer can never be null, and the value is
         // [convertible](https://doc.rust-lang.org/stable/std/ptr/index.html#pointer-to-reference-conversion).
         self.prev.map(|ptr| unsafe { ptr.as_ref() })
@@ -218,7 +218,7 @@ impl<V> Node<V> {
     /// that the previous node is not being used elsewhere. As a result, the
     /// caller must ensure that the previous node is not being used elsewhere.
     #[inline]
-    unsafe fn prev_mut(&mut self) -> Option<&mut Self> {
+    pub(crate) unsafe fn prev_mut(&mut self) -> Option<&mut Self> {
         // SAFETY: The pointer can never be null, and the value is
         // [convertible](https://doc.rust-lang.org/stable/std/ptr/index.html#pointer-to-reference-conversion).
         self.prev.map(|mut ptr| unsafe { ptr.as_mut() })
@@ -226,7 +226,7 @@ impl<V> Node<V> {
 
     /// Get a reference to the value.
     #[inline]
-    fn value(&self) -> Option<&V> {
+    pub(crate) fn value(&self) -> Option<&V> {
         self.value.as_ref()
     }
 
@@ -241,7 +241,7 @@ impl<V> Node<V> {
     /// Each slot at index `l` holds the link to the next node reachable at
     /// skip level `l`, or `None` if no such forward node exists at that level.
     #[inline]
-    fn links(&self) -> &[Option<Link<V>>] {
+    pub(crate) fn links(&self) -> &[Option<Link<V>>] {
         &self.links
     }
 
@@ -250,7 +250,7 @@ impl<V> Node<V> {
     /// Used when wiring or clearing skip links during insertion, removal,
     /// or a full link rebuild.
     #[inline]
-    fn links_mut(&mut self) -> &mut [Option<Link<V>>] {
+    pub(crate) fn links_mut(&mut self) -> &mut [Option<Link<V>>] {
         &mut self.links
     }
 
@@ -305,8 +305,13 @@ impl<V> Node<V> {
     /// 3. **Links**: This method does not update the skip links of the node or
     ///    the surrounding nodes. The caller must update those links afterwards
     ///    so that no dangling link pointers remain.
+    #[expect(
+        clippy::unnecessary_box_returns,
+        reason = "pop() recovers the existing Box allocation created by insert_after(); \
+                  returning Box<Self> signals heap ownership to callers"
+    )]
     #[inline]
-    unsafe fn pop(&mut self) -> Box<Self> {
+    pub(crate) unsafe fn pop(&mut self) -> Box<Self> {
         let _node_type = self.node_type();
         debug_assert!(
             !matches!(self.node_type(), NodeType::Head | NodeType::Detached),
@@ -348,7 +353,7 @@ impl<V> Node<V> {
     /// This method does not alter the skip links of the nodes. The caller must
     /// update those links afterwards so that no dangling link pointers remain.
     #[inline]
-    unsafe fn join(&mut self, mut head: Self) {
+    pub(crate) unsafe fn join(&mut self, mut head: Self) {
         debug_assert!(
             matches!(self.node_type(), NodeType::Tail),
             "Can only join to tail node"
@@ -390,7 +395,7 @@ impl<V> Node<V> {
     /// specific node, it is important to keep track of the links to the node and
     /// links over the node.
     #[inline]
-    unsafe fn insert_after(&mut self, mut node: Self) {
+    pub(crate) unsafe fn insert_after(&mut self, mut node: Self) {
         debug_assert!(
             matches!(node.node_type(), NodeType::Detached),
             "Can only insert detached nodes."
