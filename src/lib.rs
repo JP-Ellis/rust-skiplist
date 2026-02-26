@@ -47,3 +47,4 @@
 // New modules
 pub mod level_generator;
 mod node;
+pub mod skip_list;

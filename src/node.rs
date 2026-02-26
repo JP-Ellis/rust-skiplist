@@ -93,7 +93,7 @@
 //! the node being similar to
 //! [`linked_list::Node`](https://doc.rust-lang.org/stable/src/alloc/collections/linked_list.rs.html).
 
-#![expect(dead_code, reason = "Temporary until put to use")]
+#![expect(dead_code, reason = "library is still being implemented")]
 
 use core::{
     fmt::{self, Debug, Write},
