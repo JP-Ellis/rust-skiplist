@@ -105,7 +105,7 @@ use std::collections::HashMap;
 
 use crate::node::link::Link;
 
-mod link;
+pub(crate) mod link;
 mod visitor;
 
 /// The type of node in the skip list.
@@ -165,6 +165,26 @@ impl<V> Node<V> {
             prev: None,
             links: iter::repeat_with(|| None).take(max_levels).collect(),
             value: None,
+        }
+    }
+
+    /// Create a new data node that already holds a value.
+    ///
+    /// # Arguments
+    ///
+    /// # Parameters
+    ///
+    /// - `max_levels`: The number of skip-link levels (same meaning as in
+    ///   [`Node::new`]).
+    /// - `value`: The value the node will hold.
+    #[inline]
+    #[must_use]
+    pub(crate) fn with_value(max_levels: usize, value: V) -> Self {
+        Self {
+            next: None,
+            prev: None,
+            links: iter::repeat_with(|| None).take(max_levels).collect(),
+            value: Some(value),
         }
     }
 

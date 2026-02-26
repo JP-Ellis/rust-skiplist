@@ -15,8 +15,12 @@
 //! assert_eq!(list.len(), 0);
 //! ```
 
-use crate::level_generator::{LevelGenerator, geometric::Geometric};
-use crate::node::Node;
+use core::ptr::NonNull;
+
+use crate::{
+    level_generator::{LevelGenerator, geometric::Geometric},
+    node::{Node, link::Link},
+};
 
 /// Default number of levels used by [`SkipList::new`] and
 /// [`SkipList::with_capacity`].
@@ -56,7 +60,7 @@ pub struct SkipList<T, G: LevelGenerator = Geometric> {
     generator: G,
 }
 
-// ── Constructors that require the default Geometric generator ────────────────
+// MARK: Constructors (default level generator)
 
 impl<T> SkipList<T> {
     /// Creates an empty skip list with the default level generator
@@ -115,7 +119,7 @@ impl<T> SkipList<T> {
     }
 }
 
-// ── Generic methods available for any LevelGenerator ────────────────────────
+// MARK: Generic methods available for any LevelGenerator
 
 impl<T, G: LevelGenerator> SkipList<T, G> {
     /// Creates an empty skip list driven by the supplied level generator.
@@ -181,9 +185,102 @@ impl<T, G: LevelGenerator> SkipList<T, G> {
     pub fn is_empty(&self) -> bool {
         self.len == 0
     }
+
+    /// Inserts `value` at the front of the list.
+    ///
+    /// The new element becomes the element at index 0, shifting all existing
+    /// elements one position to the right.  This operation is O(log n).
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use skiplist::skip_list::SkipList;
+    ///
+    /// let mut list = SkipList::<i32>::new();
+    /// list.push_front(1);
+    /// list.push_front(2);
+    /// assert_eq!(list.len(), 2);
+    /// ```
+    #[expect(
+        clippy::expect_used,
+        clippy::missing_panics_doc,
+        reason = "insert_after guarantees head.next is Some; Link::new(_, 1) and \
+                  increment_distance cannot fail under any reachable condition"
+    )]
+    #[expect(
+        clippy::indexing_slicing,
+        reason = "l is bounded by height <= max_levels, which equals the length \
+                  of the links slice on every node, so all accesses are in bounds"
+    )]
+    #[expect(
+        clippy::multiple_unsafe_ops_per_block,
+        reason = "head_ptr and new_raw are provably distinct heap allocations; \
+                  batching the operations avoids repeating the same SAFETY preamble"
+    )]
+    #[inline]
+    pub fn push_front(&mut self, value: T) {
+        // height ∈ [1, max_levels]: generator.level() ∈ [0, total).
+        let height = self.generator.level().saturating_add(1);
+        let max_levels = self.head.level();
+
+        // SAFETY: Node::with_value produces a detached node (prev = next = None),
+        // which is the only kind insert_after accepts.
+        unsafe { self.head.insert_after(Node::with_value(height, value)) };
+
+        // SAFETY: insert_after placed new_node immediately after head on the heap.
+        // Converting the &mut to NonNull releases the borrow on this line, so
+        // no live &mut exists when we later obtain raw pointers to both nodes.
+        let new_node_ptr: NonNull<Node<T>> = unsafe {
+            NonNull::from(
+                self.head
+                    .next_mut()
+                    .expect("node was just inserted after head"),
+            )
+        };
+
+        // Update skip links so the structure remains consistent.
+        //
+        // Before insertion (new_node not yet wired):
+        //   head.links[l] → X at distance d   (X is at rank d)
+        //
+        // After inserting new_node at rank 1:
+        //   head is rank 0, new_node is rank 1, X is now at rank d+1.
+        //   distance head → new_node = 1
+        //   distance new_node → X   = (d+1) - 1 = d  (unchanged)
+        //
+        // For levels 0..height:
+        //   head.links[l]     ← Link { new_node, 1 }
+        //   new_node.links[l] ← old head link (distance unchanged)
+        //
+        // For levels height..max_levels:
+        //   head.links[l].distance += 1  (target node shifted one rank right)
+        //
+        // SAFETY: head_ptr and new_raw point to distinct, heap-allocated Node<T>
+        // values.  No safe references to either node exist during this block.
+        unsafe {
+            let head_ptr: *mut Node<T> = &raw mut *self.head;
+            let new_raw: *mut Node<T> = new_node_ptr.as_ptr();
+
+            for l in 0..height {
+                let old = (*head_ptr).links_mut()[l].take();
+                (*new_raw).links_mut()[l] = old;
+                (*head_ptr).links_mut()[l] =
+                    Some(Link::new(&*new_raw, 1).expect("distance 1 is always valid"));
+            }
+
+            for l in height..max_levels {
+                if let Some(link) = (*head_ptr).links_mut()[l].as_mut() {
+                    link.increment_distance()
+                        .expect("distance overflow requires > usize::MAX nodes");
+                }
+            }
+        }
+
+        self.len = self.len.saturating_add(1);
+    }
 }
 
-// ── Default ──────────────────────────────────────────────────────────────────
+// MARK: Default
 
 impl<T> Default for SkipList<T> {
     #[inline]
@@ -192,14 +289,14 @@ impl<T> Default for SkipList<T> {
     }
 }
 
-// ── Tests ────────────────────────────────────────────────────────────────────
+// MARK: Tests
 
 #[cfg(test)]
 mod tests {
     use pretty_assertions::{assert_eq, assert_ne};
 
     use super::SkipList;
-    use crate::level_generator::geometric::Geometric;
+    use crate::{level_generator::geometric::Geometric, node::link::Link};
 
     #[test]
     fn new_is_empty() {
@@ -240,5 +337,85 @@ mod tests {
         let list = SkipList::<i32>::default();
         assert_eq!(list.len(), 0);
         assert!(list.is_empty());
+    }
+
+    // MARK: push_front
+
+    #[test]
+    fn push_front_into_empty() {
+        let mut list = SkipList::<i32>::with_capacity(1);
+        list.push_front(42);
+        assert_eq!(list.len(), 1);
+        assert!(!list.is_empty());
+        assert_eq!(list.head.next().and_then(|n| n.value()), Some(&42));
+        assert!(list.head.next().and_then(|n| n.next()).is_none());
+    }
+
+    #[test]
+    fn push_front_order() {
+        let mut list = SkipList::<i32>::with_capacity(1);
+        list.push_front(1);
+        list.push_front(2);
+        list.push_front(3);
+        assert_eq!(list.len(), 3);
+
+        // Last pushed element is at the front: 3 → 2 → 1
+        let n1 = list.head.next().expect("n1");
+        assert_eq!(n1.value(), Some(&3));
+        let n2 = n1.next().expect("n2");
+        assert_eq!(n2.value(), Some(&2));
+        let n3 = n2.next().expect("n3");
+        assert_eq!(n3.value(), Some(&1));
+        assert!(n3.next().is_none());
+    }
+
+    #[test]
+    fn push_front_len_increments() {
+        let mut list = SkipList::<usize>::new();
+        for i in 0..50_usize {
+            list.push_front(i);
+            assert_eq!(list.len(), i + 1);
+        }
+    }
+
+    /// With `with_capacity(1)` the generator always assigns height = 1.
+    /// After two `push_front` calls the skip-link structure must be:
+    ///
+    /// ```text
+    /// head.links[0] → second_node (value 20) at distance 1
+    /// second_node.links[0] → first_node (value 10) at distance 1
+    /// first_node.links is empty (height 1 = index-0 only)
+    /// ```
+    #[expect(
+        clippy::indexing_slicing,
+        reason = "links slice length is known to be 1 for with_capacity(1)"
+    )]
+    #[test]
+    fn push_front_links_with_single_level() {
+        let mut list = SkipList::<i32>::with_capacity(1);
+
+        list.push_front(10);
+        // After first push: head.links[0] → node(10) at distance 1
+        {
+            let link: &Link<_> = list.head.links()[0].as_ref().expect("head link");
+            assert_eq!(link.distance().get(), 1);
+            assert_eq!(link.node().value(), Some(&10));
+        }
+
+        list.push_front(20);
+        // After second push: head.links[0] → node(20) at distance 1
+        {
+            let link: &Link<_> = list.head.links()[0].as_ref().expect("head link");
+            assert_eq!(link.distance().get(), 1);
+            assert_eq!(link.node().value(), Some(&20));
+        }
+        // node(20).links[0] → node(10) at distance 1
+        {
+            let front = list.head.next().expect("front node");
+            assert_eq!(front.value(), Some(&20));
+            let link: &Link<_> = front.links()[0].as_ref().expect("front link");
+            assert_eq!(link.distance().get(), 1);
+            assert_eq!(link.node().value(), Some(&10));
+        }
     }
 }
