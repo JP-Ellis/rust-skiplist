@@ -29,7 +29,7 @@
 //! `head[3]`, `head[2]`, and `2[1]`.
 
 mod index;
-// mod index_mut;
+mod index_mut;
 
 /// Outcome of a single [`Visitor::step`] call.
 #[derive(Debug, PartialEq, Eq)]
@@ -101,37 +101,33 @@ trait Visitor {
 /// Extension to the [`Visitor`] trait for mutation.
 ///
 /// This trait extends the [`Visitor`] trait to allow for mutation of the
-/// current node and the links around it.
+/// current node and the links around it during insert and remove operations.
+///
+/// During traversal the visitor records, for each level `l`, the last node
+/// whose skip-link at level `l` points to the target position or beyond.
+/// These precursor nodes are the ones whose links must be rewritten when
+/// a node is inserted or removed.
 trait VisitorMut: Visitor {
-    /// Mutable node reference associated type.
+    /// Mutable node reference returned by [`current_mut`][VisitorMut::current_mut].
     type NodeMut;
-    /// Link reference associated type.
-    type LinkRef;
-    /// Mutable link reference associated type.
-    type LinkMut;
 
-    /// Get a mutable reference to the current node.
+    /// Opaque pointer to a precursor node (typically `NonNull<Node<V>>`).
+    ///
+    /// This is `Copy` so that precursor slices can be indexed cheaply and
+    /// individual entries can be read without consuming the array.
+    type Precursor: Copy;
+
+    /// Get a mutable reference to the current (target) node.
     fn current_mut(&mut self) -> Self::NodeMut;
 
-    /// Get the links that may need to be modified.
+    /// Precursor nodes, one per level.
     ///
-    /// As the visitor finds the target node, it will need to keep track of
-    /// links which may need to be modified. Specifically, these fall into three
-    /// categories:
+    /// After traversal, `precursors()[l]` is the last node at level `l` whose
+    /// skip-link at level `l` points to the target position or beyond. These
+    /// are the nodes whose links must be updated when inserting or removing a
+    /// node at the visited position.
     ///
-    /// 1.  Missing links. If a new node is being inserted, new links may need
-    ///     to be created.
-    /// 2.  Links that reach the target.
-    ///
-    ///     For example, if the target node is removed, these links need to be
-    ///     updated, either by removing them or merging them with links from the
-    ///     node being removed.
-    /// 3.  Links that overshoot the target.
-    ///
-    ///     For example, if the target node is removed, these links need to be
-    ///     updated to be shorter.
-    fn links(&self) -> &[Option<Self::LinkRef>];
-
-    /// Get a mutable reference to the links.
-    fn links_mut(&mut self) -> &mut [Option<Self::LinkMut>];
+    /// The slice has one entry per level (length equals the maximum number of
+    /// levels for this skip list).
+    fn precursors(&self) -> &[Self::Precursor];
 }
