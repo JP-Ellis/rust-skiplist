@@ -30,6 +30,8 @@
 
 mod index;
 mod index_mut;
+mod ord;
+mod ord_mut;
 
 /// Outcome of a single [`Visitor::step`] call.
 #[derive(Debug, PartialEq, Eq)]
