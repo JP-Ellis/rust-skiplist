@@ -1,0 +1,19 @@
+#:schema https://json.schemastore.org/any.json
+#:tombi schema.strict = false
+
+# Run Miri under Tree Borrows rather than the default Stacked Borrows.
+#
+# Skip lists are inherently multi-path aliased data structures: a single node is
+# reachable both through the sequential `next` ownership chain *and* through
+# skip links stored in `Link<V>`.  Stacked Borrows' invalidation rule (a `&mut`
+# retag pops all SharedReadOnly tags for the same allocation) is too
+# conservative for this pattern.  Concretely, `Link::new(&node)` stores a
+# `NonNull` with SharedReadOnly provenance; when `next_mut()` later reborrows
+# the same node as `&mut` (to install skip links during list construction) that
+# tag is popped. Subsequent read-only access via `link.node()` triggers a
+# false-positive UB report under Stacked Borrows.
+#
+# Tree Borrows (the planned long-term replacement for Stacked Borrows) handles
+# this class of aliasing correctly.  All tests pass under Tree Borrows.
+[env]
+MIRIFLAGS = "-Zmiri-tree-borrows"
