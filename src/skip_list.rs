@@ -374,6 +374,99 @@ impl<T, G: LevelGenerator> SkipList<T, G> {
 
         self.len = self.len.saturating_add(1);
     }
+
+    /// Removes and returns the first element, or `None` if the list is empty.
+    ///
+    /// This operation is O(log n) expected.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use skiplist::skip_list::SkipList;
+    ///
+    /// let mut list = SkipList::<i32>::new();
+    /// list.push_back(1);
+    /// list.push_back(2);
+    /// assert_eq!(list.pop_front(), Some(1));
+    /// assert_eq!(list.pop_front(), Some(2));
+    /// assert_eq!(list.pop_front(), None);
+    /// ```
+    #[expect(
+        clippy::expect_used,
+        clippy::missing_panics_doc,
+        clippy::unwrap_in_result,
+        reason = "head.next is Some because is_empty() was checked first; \
+                  decrement_distance cannot underflow because head.links[l] for \
+                  l ≥ front_height cannot point to front_node (front_node.level() ≤ l), \
+                  so its distance is ≥ 2 before the decrement; \
+                  all expects fire only on internal invariant violations, not user input"
+    )]
+    #[expect(
+        clippy::indexing_slicing,
+        reason = "l is bounded by front_height ≤ max_levels, which equals the length \
+                  of the links slice on every node, so all accesses are in bounds"
+    )]
+    #[expect(
+        clippy::multiple_unsafe_ops_per_block,
+        reason = "link unwiring, pointer extraction, and node pop all touch provably \
+                  disjoint heap nodes; splitting across blocks would require \
+                  unsafe-crossing raw-pointer variables"
+    )]
+    #[inline]
+    pub fn pop_front(&mut self) -> Option<T> {
+        if self.is_empty() {
+            return None;
+        }
+
+        let max_levels = self.head.level();
+
+        // SAFETY: All raw pointers originate from heap allocations owned by this
+        // SkipList.  No safe &mut references to any node exist while this block
+        // runs.  head_ptr and front_ptr are distinct heap allocations; all slice
+        // accesses are bounded by front_height ≤ max_levels = links.len().
+        let value = unsafe {
+            let head_ptr: *mut Node<T> = &raw mut *self.head;
+
+            // front_ptr is the node at rank 1.  The list is non-empty, so
+            // head.next is Some.  Converting the &mut to NonNull releases the
+            // borrow immediately, leaving no live &mut when we later use head_ptr.
+            let front_ptr: *mut Node<T> =
+                NonNull::from((*head_ptr).next_mut().expect("list is non-empty")).as_ptr();
+
+            let front_height = (*front_ptr).level();
+
+            // Restore skip links as if front_node never existed.
+            //
+            // Invariant (maintained by push_front / push_back):
+            //   For l < front_height, head.links[l] = Link(front_node, 1).
+            //   front_node.links[l] points to the next node at level l.
+            // Moving that link back to head is the exact inverse of push_front's wiring.
+            for l in 0..front_height {
+                (*head_ptr).links_mut()[l] = (*front_ptr).links_mut()[l].take();
+            }
+
+            // For l ≥ front_height, head.links[l] cannot point to front_node
+            // (front_node has no link tower at those levels), so the target node
+            // is at rank ≥ 2.  Removing front_node shifts every node left by 1,
+            // so each such distance decrements from d ≥ 2 to d−1 ≥ 1.
+            for l in front_height..max_levels {
+                if let Some(link) = (*head_ptr).links_mut()[l].as_mut() {
+                    link.decrement_distance().expect(
+                        "skip list invariant: target at rank ≥ 2 so distance ≥ 2 before decrement",
+                    );
+                }
+            }
+
+            // Detach front_node from the prev/next chain.
+            // pop() sets: head.next = front_node.next
+            //             front_node.next.prev = &head  (if next exists)
+            let mut popped = (*front_ptr).pop();
+            popped.take_value()
+        };
+
+        self.len = self.len.saturating_sub(1);
+        value
+    }
 }
 
 // MARK: Default
@@ -621,5 +714,115 @@ mod tests {
         let n3 = n2.next().expect("n3");
         assert_eq!(n3.value(), Some(&3));
         assert!(n3.next().is_none());
+    }
+
+    // MARK: pop_front
+
+    #[test]
+    fn pop_front_from_empty() {
+        let mut list = SkipList::<i32>::new();
+        assert_eq!(list.pop_front(), None);
+    }
+
+    #[test]
+    fn pop_front_single_element() {
+        let mut list = SkipList::<i32>::with_capacity(1);
+        list.push_back(42);
+        assert_eq!(list.pop_front(), Some(42));
+        assert!(list.is_empty());
+        assert_eq!(list.len(), 0);
+        assert!(list.head.next().is_none());
+        // Second pop on now-empty list
+        assert_eq!(list.pop_front(), None);
+    }
+
+    #[test]
+    fn pop_front_returns_in_order() {
+        let mut list = SkipList::<i32>::with_capacity(1);
+        list.push_back(1);
+        list.push_back(2);
+        list.push_back(3);
+        assert_eq!(list.pop_front(), Some(1));
+        assert_eq!(list.pop_front(), Some(2));
+        assert_eq!(list.pop_front(), Some(3));
+        assert_eq!(list.pop_front(), None);
+    }
+
+    #[test]
+    fn pop_front_len_decrements() {
+        let mut list = SkipList::<usize>::new();
+        for i in 0..50_usize {
+            list.push_back(i);
+        }
+        for remaining in (0..50_usize).rev() {
+            list.pop_front();
+            assert_eq!(list.len(), remaining);
+        }
+        assert_eq!(list.pop_front(), None);
+    }
+
+    /// With `with_capacity(1)` the generator always assigns height = 1.
+    /// After three `push_back` calls followed by two `pop_front` calls
+    /// the skip-link structure must be kept consistent.
+    ///
+    /// ```text
+    /// Initial:  head → n1(10,d=1) → n2(20,d=1) → n3(30,None)
+    /// After 1st pop_front (removes 10):
+    ///   head → n2(20,d=1) → n3(30,None)
+    /// After 2nd pop_front (removes 20):
+    ///   head → n3(30,None)
+    /// ```
+    #[expect(
+        clippy::indexing_slicing,
+        reason = "links slice length is known to be 1 for with_capacity(1)"
+    )]
+    #[test]
+    fn pop_front_links_with_single_level() {
+        let mut list = SkipList::<i32>::with_capacity(1);
+        list.push_back(10);
+        list.push_back(20);
+        list.push_back(30);
+
+        // First pop_front: removes 10
+        assert_eq!(list.pop_front(), Some(10));
+        assert_eq!(list.len(), 2);
+        {
+            let link: &Link<_> = list.head.links()[0]
+                .as_ref()
+                .expect("head link after 1st pop");
+            assert_eq!(link.distance().get(), 1);
+            assert_eq!(link.node().value(), Some(&20));
+        }
+
+        // Second pop_front: removes 20
+        assert_eq!(list.pop_front(), Some(20));
+        assert_eq!(list.len(), 1);
+        {
+            let link: &Link<_> = list.head.links()[0]
+                .as_ref()
+                .expect("head link after 2nd pop");
+            assert_eq!(link.distance().get(), 1);
+            assert_eq!(link.node().value(), Some(&30));
+        }
+
+        // Third pop_front: removes 30, head link becomes None
+        assert_eq!(list.pop_front(), Some(30));
+        assert_eq!(list.len(), 0);
+        assert!(list.head.links()[0].is_none());
+    }
+
+    #[test]
+    fn pop_front_interleaved_with_push() {
+        let mut list = SkipList::<i32>::with_capacity(1);
+        list.push_back(1); // [1]
+        list.push_back(2); // [1, 2]
+        assert_eq!(list.pop_front(), Some(1)); // [2]
+        list.push_front(0); // [0, 2]
+        list.push_back(3); // [0, 2, 3]
+        assert_eq!(list.pop_front(), Some(0)); // [2, 3]
+        assert_eq!(list.pop_front(), Some(2)); // [3]
+        assert_eq!(list.pop_front(), Some(3)); // []
+        assert_eq!(list.pop_front(), None);
+        assert_eq!(list.len(), 0);
     }
 }

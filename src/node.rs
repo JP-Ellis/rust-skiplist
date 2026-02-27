@@ -256,7 +256,16 @@ impl<V> Node<V> {
         self.value.as_mut()
     }
 
-    /// Get a reference to the list of links.
+    /// Take the value out of the node, leaving `None` in its place.
+    ///
+    /// Used by removal operations (e.g. [`SkipList::pop_front`]) to transfer
+    /// ownership of the stored value after the node has been unlinked.
+    #[inline]
+    pub(crate) fn take_value(&mut self) -> Option<V> {
+        self.value.take()
+    }
+
+    /// Returns the skip-link slots for this node.
     ///
     /// Each slot at index `l` holds the link to the next node reachable at
     /// skip level `l`, or `None` if no such forward node exists at that level.
