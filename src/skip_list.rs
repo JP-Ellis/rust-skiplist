@@ -57,6 +57,10 @@ pub struct SkipList<T, G: LevelGenerator = Geometric> {
     /// Sentinel head node. Never holds a value; its `links` array has length
     /// equal to the maximum number of levels.
     head: Box<Node<T>>,
+    /// Non-owning pointer to the last data node, or `None` when the list is
+    /// empty.  Maintained by every insert and remove operation to provide O(1)
+    /// [`back`](SkipList::back) / [`back_mut`](SkipList::back_mut) access.
+    tail: Option<NonNull<Node<T>>>,
     /// Cached element count. Updated by every insert / remove operation.
     len: usize,
     /// Level generator used to determine the tower height of each new node.
@@ -148,6 +152,7 @@ impl<T, G: LevelGenerator> SkipList<T, G> {
         let max_levels = generator.total();
         Self {
             head: Box::new(Node::new(max_levels)),
+            tail: None,
             len: 0,
             generator,
         }
@@ -299,6 +304,114 @@ impl<T, G: LevelGenerator> SkipList<T, G> {
         }
     }
 
+    /// Returns a reference to the first element, or `None` if the list is
+    /// empty.
+    ///
+    /// This operation is O(1).
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use skiplist::skip_list::SkipList;
+    ///
+    /// let mut list = SkipList::<i32>::new();
+    /// assert_eq!(list.front(), None);
+    /// list.push_back(1);
+    /// list.push_back(2);
+    /// assert_eq!(list.front(), Some(&1));
+    /// ```
+    #[inline]
+    #[must_use]
+    pub fn front(&self) -> Option<&T> {
+        self.head.next()?.value()
+    }
+
+    /// Returns a mutable reference to the first element, or `None` if the
+    /// list is empty.
+    ///
+    /// This operation is O(1).
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use skiplist::skip_list::SkipList;
+    ///
+    /// let mut list = SkipList::<i32>::new();
+    /// list.push_back(10);
+    /// list.push_back(20);
+    /// if let Some(v) = list.front_mut() {
+    ///     *v = 99;
+    /// }
+    /// assert_eq!(list.front(), Some(&99));
+    /// assert_eq!(list.get(1), Some(&20));
+    /// ```
+    #[inline]
+    #[must_use]
+    pub fn front_mut(&mut self) -> Option<&mut T> {
+        // SAFETY: &mut self guarantees exclusive access to all nodes.  We
+        // convert the shared reference from next() to a raw pointer and
+        // re-borrow it as &mut T, which is sound because no other reference to
+        // the front node can exist concurrently.  The `?` propagates None when
+        // the list is empty.  The returned &mut T is bounded by &mut self.
+        unsafe {
+            let front_ptr: *mut Node<T> = NonNull::from(self.head.next()?).as_ptr();
+            (*front_ptr).value_mut()
+        }
+    }
+
+    /// Returns a reference to the last element, or `None` if the list is
+    /// empty.
+    ///
+    /// This operation is O(1).
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use skiplist::skip_list::SkipList;
+    ///
+    /// let mut list = SkipList::<i32>::new();
+    /// assert_eq!(list.back(), None);
+    /// list.push_back(1);
+    /// list.push_back(2);
+    /// assert_eq!(list.back(), Some(&2));
+    /// ```
+    #[inline]
+    #[must_use]
+    pub fn back(&self) -> Option<&T> {
+        // SAFETY: self.tail is Some iff len > 0, an invariant maintained by all
+        // mutating operations.  The pointer remains valid for the lifetime of &self.
+        unsafe { self.tail?.as_ref().value() }
+    }
+
+    /// Returns a mutable reference to the last element, or `None` if the list
+    /// is empty.
+    ///
+    /// This operation is O(1).
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use skiplist::skip_list::SkipList;
+    ///
+    /// let mut list = SkipList::<i32>::new();
+    /// list.push_back(10);
+    /// list.push_back(20);
+    /// if let Some(v) = list.back_mut() {
+    ///     *v = 99;
+    /// }
+    /// assert_eq!(list.back(), Some(&99));
+    /// assert_eq!(list.get(0), Some(&10));
+    /// ```
+    #[inline]
+    #[must_use]
+    pub fn back_mut(&mut self) -> Option<&mut T> {
+        // SAFETY: self.tail is Some iff len > 0, an invariant maintained by all
+        // mutating operations.  &mut self guarantees exclusive access, so no
+        // other reference to the tail node exists.  The returned &mut T is
+        // bounded by &mut self's lifetime.
+        unsafe { self.tail?.as_mut().value_mut() }
+    }
+
     /// Inserts `value` at the front of the list.
     ///
     /// The new element becomes the element at index 0, shifting all existing
@@ -389,6 +502,10 @@ impl<T, G: LevelGenerator> SkipList<T, G> {
             }
         }
 
+        // If the list was empty the new node is also the tail.
+        if self.len == 0 {
+            self.tail = Some(new_node_ptr);
+        }
         self.len = self.len.saturating_add(1);
     }
 
@@ -434,7 +551,7 @@ impl<T, G: LevelGenerator> SkipList<T, G> {
         // SkipList.  No safe &mut references to any node exist while this block
         // runs.  Each node's fields are accessed at most once per iteration, so
         // there is no simultaneous aliasing.
-        unsafe {
+        let new_node_nonnull: NonNull<Node<T>> = unsafe {
             let head_ptr: *mut Node<T> = &raw mut *self.head;
 
             // update[l] = (last node at level l, its 0-based rank from head).
@@ -483,8 +600,13 @@ impl<T, G: LevelGenerator> SkipList<T, G> {
             }
             // Levels height..max_levels need no update: new_node is at the end
             // and no existing skip link spans past the old tail.
-        }
 
+            // SAFETY: new_raw was derived from NonNull::from(next_mut()), so it
+            // is non-null.  Return it so self.tail can be updated outside.
+            NonNull::new_unchecked(new_raw)
+        };
+
+        self.tail = Some(new_node_nonnull);
         self.len = self.len.saturating_add(1);
     }
 
@@ -578,6 +700,10 @@ impl<T, G: LevelGenerator> SkipList<T, G> {
         };
 
         self.len = self.len.saturating_sub(1);
+        // If that was the only element the list is now empty.
+        if self.len == 0 {
+            self.tail = None;
+        }
         value
     }
 
@@ -627,7 +753,7 @@ impl<T, G: LevelGenerator> SkipList<T, G> {
         // SkipList.  No safe &mut references to any node exist while this block
         // runs.  update[] entries and back_ptr are distinct heap allocations; all
         // slice accesses are bounded by max_levels = head.links.len().
-        let value = unsafe {
+        let (value, pred0) = unsafe {
             let head_ptr: *mut Node<T> = &raw mut *self.head;
 
             // Build the update array: for each level l, update[l] is the
@@ -676,13 +802,25 @@ impl<T, G: LevelGenerator> SkipList<T, G> {
                 (*pred_ptr).links_mut()[l] = None;
             }
 
+            // Capture the level-0 predecessor before the node is popped.  When
+            // len == 1, this equals head_ptr; the tail update below handles that.
+            let pred0: *mut Node<T> = update[0];
+
             // Detach the tail from the prev/next chain.
             // pop() sets: tail.prev.next = None
             //             (tail.next is already None for the tail node)
             let mut popped = (*back_ptr).pop();
-            popped.take_value()
+            (popped.take_value(), pred0)
         };
 
+        // Update the cached tail pointer.  When the list becomes empty pred0
+        // equals head_ptr; we set tail to None rather than pointing at head.
+        self.tail = if self.len == 1 {
+            None
+        } else {
+            // SAFETY: pred0 is a live data node pointer owned by this SkipList.
+            Some(unsafe { NonNull::new_unchecked(pred0) })
+        };
         self.len = self.len.saturating_sub(1);
         value
     }
@@ -744,7 +882,7 @@ impl<T, G: LevelGenerator> SkipList<T, G> {
         // runs.  Different update[] entries may alias (same predecessor node,
         // different levels) but each iteration accesses a distinct links[l]
         // index, so no simultaneous aliasing occurs.
-        unsafe {
+        let new_node_nonnull: NonNull<Node<T>> = unsafe {
             let head_ptr: *mut Node<T> = &raw mut *self.head;
 
             // update[l] = (predecessor at level l, its rank from head).
@@ -808,8 +946,16 @@ impl<T, G: LevelGenerator> SkipList<T, G> {
                         .expect("distance overflow requires > usize::MAX nodes");
                 }
             }
-        }
 
+            // SAFETY: new_raw was derived from NonNull::from(next_mut()), so it
+            // is non-null.  Return it so self.tail can be updated outside.
+            NonNull::new_unchecked(new_raw)
+        };
+
+        // When inserting at the end the new node becomes the tail.
+        if index == self.len {
+            self.tail = Some(new_node_nonnull);
+        }
         self.len = self.len.saturating_add(1);
     }
 
@@ -871,7 +1017,7 @@ impl<T, G: LevelGenerator> SkipList<T, G> {
         // runs.  Different update[] entries may alias (same predecessor node,
         // different levels) but each iteration accesses a distinct links[l]
         // index, so no simultaneous aliasing occurs.
-        let value = unsafe {
+        let (value, pred0) = unsafe {
             let head_ptr: *mut Node<T> = &raw mut *self.head;
 
             // update[l] = (predecessor at level l, its rank from head).
@@ -936,10 +1082,24 @@ impl<T, G: LevelGenerator> SkipList<T, G> {
             }
 
             // Detach the target node from the prev/next chain and take its value.
+            // Also capture the level-0 predecessor for the tail update below.
+            let pred0 = update[0].0;
             let mut popped = (*target_ptr).pop();
-            popped.take_value().expect("target node always has a value")
+            (
+                popped.take_value().expect("target node always has a value"),
+                pred0,
+            )
         };
 
+        // When the last element is removed, update the cached tail pointer.
+        if index.saturating_add(1) == self.len {
+            self.tail = if self.len == 1 {
+                None
+            } else {
+                // SAFETY: pred0 is a live data node pointer owned by this SkipList.
+                Some(unsafe { NonNull::new_unchecked(pred0) })
+            };
+        }
         self.len = self.len.saturating_sub(1);
         value
     }
@@ -2061,5 +2221,211 @@ mod tests {
         list.insert(3, 42); // [0,1,2,42,4,5,6,7,8,9]
         assert_eq!(list[3], 42);
         assert_eq!(list[4], 4);
+    }
+
+    // MARK: front / back
+
+    #[test]
+    fn front_empty() {
+        let list = SkipList::<i32>::new();
+        assert_eq!(list.front(), None);
+    }
+
+    #[test]
+    fn back_empty() {
+        let list = SkipList::<i32>::new();
+        assert_eq!(list.back(), None);
+    }
+
+    #[test]
+    fn front_single() {
+        let mut list = SkipList::<i32>::new();
+        list.push_back(42);
+        assert_eq!(list.front(), Some(&42));
+    }
+
+    #[test]
+    fn back_single() {
+        let mut list = SkipList::<i32>::new();
+        list.push_back(42);
+        assert_eq!(list.back(), Some(&42));
+    }
+
+    #[test]
+    fn front_and_back_are_same_for_single_element() {
+        let mut list = SkipList::<i32>::new();
+        list.push_back(7);
+        assert_eq!(list.front(), list.back());
+    }
+
+    #[test]
+    fn front_returns_first_after_push_back() {
+        let mut list = SkipList::<i32>::new();
+        list.push_back(10);
+        list.push_back(20);
+        list.push_back(30);
+        assert_eq!(list.front(), Some(&10));
+    }
+
+    #[test]
+    fn back_returns_last_after_push_back() {
+        let mut list = SkipList::<i32>::new();
+        list.push_back(10);
+        list.push_back(20);
+        list.push_back(30);
+        assert_eq!(list.back(), Some(&30));
+    }
+
+    #[test]
+    fn front_returns_first_after_push_front() {
+        let mut list = SkipList::<i32>::new();
+        list.push_back(10);
+        list.push_front(99);
+        assert_eq!(list.front(), Some(&99));
+        assert_eq!(list.back(), Some(&10));
+    }
+
+    #[test]
+    fn back_unchanged_after_push_front() {
+        let mut list = SkipList::<i32>::new();
+        list.push_back(1);
+        list.push_back(2);
+        list.push_front(0);
+        // front is new element, back is still 2
+        assert_eq!(list.front(), Some(&0));
+        assert_eq!(list.back(), Some(&2));
+    }
+
+    #[test]
+    fn front_unchanged_after_push_back() {
+        let mut list = SkipList::<i32>::new();
+        list.push_back(1);
+        list.push_back(2);
+        list.push_back(3);
+        // front stays 1 no matter how many push_backs
+        assert_eq!(list.front(), Some(&1));
+        assert_eq!(list.back(), Some(&3));
+    }
+
+    #[test]
+    fn front_mut_modifies_first_element() {
+        let mut list = SkipList::<i32>::new();
+        list.push_back(10);
+        list.push_back(20);
+        *list.front_mut().expect("non-empty") = 99;
+        assert_eq!(list.front(), Some(&99));
+        assert_eq!(list.back(), Some(&20));
+    }
+
+    #[test]
+    fn back_mut_modifies_last_element() {
+        let mut list = SkipList::<i32>::new();
+        list.push_back(10);
+        list.push_back(20);
+        *list.back_mut().expect("non-empty") = 99;
+        assert_eq!(list.front(), Some(&10));
+        assert_eq!(list.back(), Some(&99));
+    }
+
+    #[test]
+    fn front_mut_empty_returns_none() {
+        let mut list = SkipList::<i32>::new();
+        assert_eq!(list.front_mut(), None);
+    }
+
+    #[test]
+    fn back_mut_empty_returns_none() {
+        let mut list = SkipList::<i32>::new();
+        assert_eq!(list.back_mut(), None);
+    }
+
+    #[test]
+    fn front_none_after_pop_front_empties_list() {
+        let mut list = SkipList::<i32>::new();
+        list.push_back(1);
+        list.pop_front();
+        assert_eq!(list.front(), None);
+        assert_eq!(list.back(), None);
+    }
+
+    #[test]
+    fn back_none_after_pop_back_empties_list() {
+        let mut list = SkipList::<i32>::new();
+        list.push_back(1);
+        list.pop_back();
+        assert_eq!(list.front(), None);
+        assert_eq!(list.back(), None);
+    }
+
+    #[test]
+    fn back_updates_after_pop_back() {
+        let mut list = SkipList::<i32>::new();
+        list.push_back(1);
+        list.push_back(2);
+        list.push_back(3);
+        list.pop_back();
+        assert_eq!(list.back(), Some(&2));
+        list.pop_back();
+        assert_eq!(list.back(), Some(&1));
+    }
+
+    #[test]
+    fn front_updates_after_pop_front() {
+        let mut list = SkipList::<i32>::new();
+        list.push_back(1);
+        list.push_back(2);
+        list.push_back(3);
+        list.pop_front();
+        assert_eq!(list.front(), Some(&2));
+        list.pop_front();
+        assert_eq!(list.front(), Some(&3));
+    }
+
+    #[test]
+    fn back_updates_after_insert_at_end() {
+        let mut list = SkipList::<i32>::new();
+        list.push_back(1);
+        list.push_back(2);
+        list.insert(2, 99); // append
+        assert_eq!(list.back(), Some(&99));
+    }
+
+    #[test]
+    fn back_unchanged_after_insert_in_middle() {
+        let mut list = SkipList::<i32>::new();
+        list.push_back(1);
+        list.push_back(2);
+        list.push_back(3);
+        list.insert(1, 99); // middle
+        assert_eq!(list.back(), Some(&3));
+    }
+
+    #[test]
+    fn back_updates_after_remove_last() {
+        let mut list = SkipList::<i32>::new();
+        list.push_back(1);
+        list.push_back(2);
+        list.push_back(3);
+        list.remove(2); // remove last
+        assert_eq!(list.back(), Some(&2));
+    }
+
+    #[test]
+    fn back_unchanged_after_remove_middle() {
+        let mut list = SkipList::<i32>::new();
+        list.push_back(1);
+        list.push_back(2);
+        list.push_back(3);
+        list.remove(1); // remove middle
+        assert_eq!(list.back(), Some(&3));
+    }
+
+    #[test]
+    fn back_consistent_with_get_last() {
+        let mut list = SkipList::<i32>::with_capacity(4);
+        for i in 0..20_i32 {
+            list.push_back(i);
+        }
+        assert_eq!(list.back(), list.get(list.len() - 1));
     }
 }
