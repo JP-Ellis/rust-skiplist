@@ -1,11 +1,14 @@
-//! Benchmarks for [`SkipList<T>`] comparing `push_front` against equivalent
-//! operations on [`VecDeque`] and [`LinkedList`].
+//! Benchmarks for [`SkipList<T>`] comparing insertion operations against
+//! equivalent operations on [`VecDeque`] and [`LinkedList`].
 //!
 //! | Container    | Operation    | Asymptotic complexity |
 //! | ------------ | ------------ | --------------------- |
 //! | `SkipList`   | `push_front` | O(log n) expected     |
 //! | `VecDeque`   | `push_front` | O(1) amortised        |
 //! | `LinkedList` | `push_front` | O(1)                  |
+//! | `SkipList`   | `push_back`  | O(log n) expected     |
+//! | `VecDeque`   | `push_back`  | O(1) amortised        |
+//! | `LinkedList` | `push_back`  | O(1)                  |
 //!
 //! Run with:
 //!
@@ -143,5 +146,75 @@ fn bench_push_front(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(benches, bench_push_front);
+/// Benchmark building a container of `n` elements solely via `push_back` (or
+/// the nearest equivalent).
+///
+/// Drop time is excluded from the measurement by using
+/// [`Bencher::iter_with_large_drop`].
+fn bench_push_back(c: &mut Criterion) {
+    let mut group = c.benchmark_group("push_back");
+    group.plot_config(PlotConfiguration::default().summary_scale(AxisScale::Logarithmic));
+
+    for &n in SIZES {
+        group.throughput(Throughput::Elements(
+            u64::try_from(n).expect("bench size fits in u64"),
+        ));
+
+        // ----------------------------------------------------------------
+        // SkipList — O(log n) expected per push
+        // ----------------------------------------------------------------
+        group.bench_with_input(BenchmarkId::new("SkipList", n), &n, |b, &n| {
+            b.iter_with_large_drop(|| {
+                let mut list = SkipList::new();
+                for i in 0..n {
+                    list.push_back(black_box(i));
+                }
+                list
+            });
+        });
+
+        // ----------------------------------------------------------------
+        // Vec::push — O(1) amortised; the natural O(1) append baseline
+        // ----------------------------------------------------------------
+        group.bench_with_input(BenchmarkId::new("Vec", n), &n, |b, &n| {
+            b.iter_with_large_drop(|| {
+                let mut vec: Vec<usize> = Vec::new();
+                for i in 0..n {
+                    vec.push(black_box(i));
+                }
+                vec
+            });
+        });
+
+        // ----------------------------------------------------------------
+        // VecDeque — O(1) amortised; ring-buffer append
+        // ----------------------------------------------------------------
+        group.bench_with_input(BenchmarkId::new("VecDeque", n), &n, |b, &n| {
+            b.iter_with_large_drop(|| {
+                let mut deque: VecDeque<usize> = VecDeque::new();
+                for i in 0..n {
+                    deque.push_back(black_box(i));
+                }
+                deque
+            });
+        });
+
+        // ----------------------------------------------------------------
+        // LinkedList — O(1); pointer-based append, pointer-chasing cost
+        // ----------------------------------------------------------------
+        group.bench_with_input(BenchmarkId::new("LinkedList", n), &n, |b, &n| {
+            b.iter_with_large_drop(|| {
+                let mut list: LinkedList<usize> = LinkedList::new();
+                for i in 0..n {
+                    list.push_back(black_box(i));
+                }
+                list
+            });
+        });
+    }
+
+    group.finish();
+}
+
+criterion_group!(benches, bench_push_front, bench_push_back);
 criterion_main!(benches);
