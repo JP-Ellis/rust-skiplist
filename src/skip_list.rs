@@ -573,6 +573,132 @@ impl<T, G: LevelGenerator> SkipList<T, G> {
         self.len = self.len.saturating_sub(1);
         value
     }
+
+    /// Inserts `value` at position `index`, shifting all elements at `index..`
+    /// one position to the right.
+    ///
+    /// This operation is O(log n) expected.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `index > self.len()`.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use skiplist::skip_list::SkipList;
+    ///
+    /// let mut list = SkipList::<i32>::new();
+    /// list.push_back(1);
+    /// list.push_back(3);
+    /// list.insert(1, 2);
+    /// assert_eq!(list.len(), 3);
+    /// // list is now [1, 2, 3]
+    /// ```
+    #[expect(
+        clippy::expect_used,
+        reason = "Link::new distances are computed to be ≥ 1; \
+                  increment_distance overflow requires > usize::MAX nodes; \
+                  all expects fire only on internal invariant violations, not user input"
+    )]
+    #[expect(
+        clippy::indexing_slicing,
+        reason = "l < height ≤ max_levels = new_raw.links.len(); \
+                  pred_ptr was reached at level l during traversal so pred_ptr.links.len() > l; \
+                  all accesses are bounded by max_levels = head.links.len()"
+    )]
+    #[expect(
+        clippy::multiple_unsafe_ops_per_block,
+        reason = "traversal, insertion, and link wiring all touch provably disjoint heap nodes; \
+                  splitting across blocks would require unsafe-crossing raw-pointer variables"
+    )]
+    #[inline]
+    pub fn insert(&mut self, index: usize, value: T) {
+        assert!(
+            index <= self.len,
+            "insertion index (is {index}) should be <= len (is {})",
+            self.len
+        );
+
+        let height = self.generator.level().saturating_add(1);
+        let max_levels = self.head.level();
+        // new_rank: the rank of the new node after insertion
+        // (head = rank 0; element at index i has rank i + 1).
+        let new_rank = index.saturating_add(1);
+
+        // SAFETY: All raw pointers originate from heap allocations owned by this
+        // SkipList.  No safe &mut references to any node exist while this block
+        // runs.  Different update[] entries may alias (same predecessor node,
+        // different levels) but each iteration accesses a distinct links[l]
+        // index, so no simultaneous aliasing occurs.
+        unsafe {
+            let head_ptr: *mut Node<T> = &raw mut *self.head;
+
+            // update[l] = (predecessor at level l, its rank from head).
+            // Initialised to (head, 0): head is always a valid predecessor.
+            let mut update: Vec<(*mut Node<T>, usize)> = vec![(head_ptr, 0_usize); max_levels];
+            let mut current: *mut Node<T> = head_ptr;
+            let mut current_rank: usize = 0;
+
+            for l in (0..max_levels).rev() {
+                while let Some(link) = (*current).links()[l].as_ref() {
+                    let next_rank = current_rank.saturating_add(link.distance().get());
+                    if next_rank >= new_rank {
+                        break;
+                    }
+                    current_rank = next_rank;
+                    current = NonNull::from(link.node()).as_ptr();
+                }
+                update[l] = (current, current_rank);
+            }
+
+            // Insert the new node right after the level-0 predecessor.
+            let (pred0_ptr, _) = update[0];
+            (*pred0_ptr).insert_after(Node::with_value(height, value));
+
+            // Obtain a raw pointer to the new node without holding a live &mut.
+            let new_raw: *mut Node<T> = NonNull::from(
+                (*pred0_ptr)
+                    .next_mut()
+                    .expect("node was just inserted after predecessor"),
+            )
+            .as_ptr();
+
+            // Wire skip links.
+            //
+            // For l < height (new node's tower reaches this level):
+            //   Before: pred (rank D) ---[d]---> X (rank D + d)
+            //   After:  pred (rank D) ---[new_rank − D]---> new_node (rank new_rank)
+            //           new_node      ---[D + d + 1 − new_rank]---> X (rank D + d + 1)
+            //
+            // For l ≥ height (new node has no tower here):
+            //   pred.links[l] still points to the same X (now at rank D + d + 1);
+            //   increment its distance by 1.
+            for (l, &(pred_ptr, pred_rank)) in update.iter().enumerate() {
+                if l < height {
+                    let distance = new_rank.saturating_sub(pred_rank);
+                    let old_link = (*pred_ptr).links_mut()[l].take();
+                    (*pred_ptr).links_mut()[l] =
+                        Some(Link::new(&*new_raw, distance).expect("distance >= 1"));
+                    (*new_raw).links_mut()[l] = if let Some(old) = old_link {
+                        let new_d = old
+                            .distance()
+                            .get()
+                            .saturating_sub(distance)
+                            .saturating_add(1);
+                        Some(Link::new(old.node(), new_d).expect("new_d >= 1"))
+                    } else {
+                        None
+                    };
+                } else if let Some(link) = (*pred_ptr).links_mut()[l].as_mut() {
+                    link.increment_distance()
+                        .expect("distance overflow requires > usize::MAX nodes");
+                }
+            }
+        }
+
+        self.len = self.len.saturating_add(1);
+    }
 }
 
 // MARK: Default
@@ -1071,5 +1197,179 @@ mod tests {
         assert_eq!(list.pop_back(), None);
         assert_eq!(list.pop_front(), None);
         assert_eq!(list.len(), 0);
+    }
+
+    // MARK: insert
+
+    #[test]
+    fn insert_into_empty() {
+        let mut list = SkipList::<i32>::with_capacity(1);
+        list.insert(0, 42);
+        assert_eq!(list.len(), 1);
+        assert!(!list.is_empty());
+        assert_eq!(list.head.next().and_then(|n| n.value()), Some(&42));
+        assert!(list.head.next().and_then(|n| n.next()).is_none());
+    }
+
+    #[test]
+    fn insert_at_front() {
+        let mut list = SkipList::<i32>::with_capacity(1);
+        list.push_back(2);
+        list.push_back(3);
+        list.insert(0, 1);
+        assert_eq!(list.len(), 3);
+        let n1 = list.head.next().expect("n1");
+        assert_eq!(n1.value(), Some(&1));
+        let n2 = n1.next().expect("n2");
+        assert_eq!(n2.value(), Some(&2));
+        let n3 = n2.next().expect("n3");
+        assert_eq!(n3.value(), Some(&3));
+        assert!(n3.next().is_none());
+    }
+
+    #[test]
+    fn insert_at_back() {
+        let mut list = SkipList::<i32>::with_capacity(1);
+        list.push_back(1);
+        list.push_back(2);
+        list.insert(2, 3);
+        assert_eq!(list.len(), 3);
+        let n1 = list.head.next().expect("n1");
+        assert_eq!(n1.value(), Some(&1));
+        let n2 = n1.next().expect("n2");
+        assert_eq!(n2.value(), Some(&2));
+        let n3 = n2.next().expect("n3");
+        assert_eq!(n3.value(), Some(&3));
+        assert!(n3.next().is_none());
+    }
+
+    #[test]
+    fn insert_in_middle() {
+        let mut list = SkipList::<i32>::with_capacity(1);
+        list.push_back(1);
+        list.push_back(3);
+        list.insert(1, 2);
+        assert_eq!(list.len(), 3);
+        let n1 = list.head.next().expect("n1");
+        assert_eq!(n1.value(), Some(&1));
+        let n2 = n1.next().expect("n2");
+        assert_eq!(n2.value(), Some(&2));
+        let n3 = n2.next().expect("n3");
+        assert_eq!(n3.value(), Some(&3));
+        assert!(n3.next().is_none());
+    }
+
+    #[test]
+    fn insert_len_increments() {
+        let mut list = SkipList::<usize>::new();
+        for i in 0..50_usize {
+            list.insert(0, i);
+            assert_eq!(list.len(), i.saturating_add(1));
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "insertion index (is 5) should be <= len (is 3)")]
+    fn insert_out_of_bounds() {
+        let mut list = SkipList::<i32>::with_capacity(1);
+        list.push_back(1);
+        list.push_back(2);
+        list.push_back(3);
+        list.insert(5, 99);
+    }
+
+    /// With `with_capacity(1)` the generator assigns height = 1 to every node.
+    /// Verify that links are correctly maintained after `insert(1, 2)` into [1, 3]:
+    ///
+    /// ```text
+    /// Before: head ---[1]---> n1(1) ---[1]---> n3(3, links=None)
+    /// After:  head ---[1]---> n1(1) ---[1]---> new(2) ---[1]---> n3(3, links=None)
+    /// ```
+    #[expect(
+        clippy::indexing_slicing,
+        reason = "links slice length is known to be 1 for with_capacity(1)"
+    )]
+    #[test]
+    fn insert_links_with_single_level() {
+        let mut list = SkipList::<i32>::with_capacity(1);
+        list.push_back(1); // [1]
+        list.push_back(3); // [1, 3]
+        list.insert(1, 2); // [1, 2, 3]
+
+        assert_eq!(list.len(), 3);
+        // head.links[0] → n1(1) at distance 1 (unchanged)
+        {
+            let link: &Link<_> = list.head.links()[0].as_ref().expect("head link");
+            assert_eq!(link.distance().get(), 1);
+            assert_eq!(link.node().value(), Some(&1));
+        }
+        // n1(1).links[0] → new(2) at distance 1
+        {
+            let n1 = list.head.next().expect("n1");
+            assert_eq!(n1.value(), Some(&1));
+            let link: &Link<_> = n1.links()[0].as_ref().expect("n1 link");
+            assert_eq!(link.distance().get(), 1);
+            assert_eq!(link.node().value(), Some(&2));
+        }
+        // new(2).links[0] → n3(3) at distance 1
+        {
+            let new_node = list.head.next().expect("n1").next().expect("new_node");
+            assert_eq!(new_node.value(), Some(&2));
+            let link: &Link<_> = new_node.links()[0].as_ref().expect("new_node link");
+            assert_eq!(link.distance().get(), 1);
+            assert_eq!(link.node().value(), Some(&3));
+        }
+        // n3(3).links[0] = None
+        {
+            let n3 = list
+                .head
+                .next()
+                .expect("n1")
+                .next()
+                .expect("new_node")
+                .next()
+                .expect("n3");
+            assert_eq!(n3.value(), Some(&3));
+            assert!(n3.links()[0].is_none());
+        }
+    }
+
+    #[test]
+    fn insert_interleaved_with_pop() {
+        let mut list = SkipList::<i32>::with_capacity(1);
+        list.push_back(1); // [1]
+        list.push_back(3); // [1, 3]
+        list.insert(1, 2); // [1, 2, 3]
+        assert_eq!(list.pop_front(), Some(1)); // [2, 3]
+        list.insert(0, 0); // [0, 2, 3]
+        assert_eq!(list.pop_back(), Some(3)); // [0, 2]
+        list.insert(2, 4); // [0, 2, 4]
+        assert_eq!(list.len(), 3);
+        let n1 = list.head.next().expect("n1");
+        assert_eq!(n1.value(), Some(&0));
+        let n2 = n1.next().expect("n2");
+        assert_eq!(n2.value(), Some(&2));
+        let n3 = n2.next().expect("n3");
+        assert_eq!(n3.value(), Some(&4));
+        assert!(n3.next().is_none());
+    }
+
+    #[test]
+    fn insert_multiple_positions() {
+        let mut list = SkipList::<i32>::with_capacity(1);
+        // Build [0, 1, 2, 3, 4] by inserting at various positions.
+        list.insert(0, 2); // [2]
+        list.insert(0, 0); // [0, 2]
+        list.insert(1, 1); // [0, 1, 2]
+        list.insert(3, 4); // [0, 1, 2, 4]
+        list.insert(3, 3); // [0, 1, 2, 3, 4]
+        assert_eq!(list.len(), 5);
+        let mut node = list.head.next().expect("first");
+        for expected in 0..5_i32 {
+            assert_eq!(node.value(), Some(&expected));
+            if expected < 4 {
+                node = node.next().expect("next");
+            }
+        }
     }
 }
