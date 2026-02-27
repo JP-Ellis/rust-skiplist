@@ -100,7 +100,7 @@ use core::{
     iter,
     ptr::NonNull,
 };
-#[cfg(debug_assertions)]
+#[cfg(any(debug_assertions, test))]
 use std::collections::HashMap;
 
 use crate::node::link::Link;
@@ -442,7 +442,7 @@ impl<V> Node<V> {
     }
 }
 
-#[cfg(debug_assertions)]
+#[cfg(any(debug_assertions, test))]
 #[allow(
     clippy::allow_attributes,
     clippy::use_debug,
