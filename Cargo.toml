@@ -27,12 +27,17 @@ categories = ["data-structures"]
       ".cargo/mermaid.script.html",
     ]
 
+[[bench]]
+harness = false
+name = "skip_list"
+
 [dependencies]
 rand = "0.10"
 thiserror = "2.0"
 
 [dev-dependencies]
 anyhow = "1.0"
+criterion = { version = "0.8", features = ["html_reports"] }
 insta = "1.42.2"
 pretty_assertions = { version = "1.4.1", features = ["unstable"] }
 rstest = "0.26.1"

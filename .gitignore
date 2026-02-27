@@ -46,6 +46,9 @@ target/
 # This is a library and therefore should not lock dependencies.
 Cargo.lock
 
+# Ignore benchmarking output
+criterion/
+
 ########################################
 ## Global/Archives.gitignore
 ########################################

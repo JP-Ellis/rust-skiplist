@@ -1,4 +1,23 @@
 #:schema https://json.schemastore.org/any.json
+#:tombi schema.strict = false
 
 criterion_home = "./criterion"
 plotting_backend = "plotters"
+
+# Comparison-chart colors, assigned by benchmark order within each group.
+#
+# The SkipList series is always registered first in every group, so it picks up
+# the first entry (a vivid orange) that stands out clearly against the neutral
+# grays used for the stdlib baselines.  Additional entries cover future
+# benchmark groups that may compare more than three series.
+[colors]
+comparison_colors = [
+  # 0: SkipList: vivid orange
+  { r = 230, g = 97, b = 0 },
+  # Remaining 5 entries are muted, hue-diverse baselines
+  { r = 100, g = 120, b = 155 },
+  { r = 140, g = 140, b = 140 },
+  { r = 190, g = 190, b = 190 },
+  { r = 90, g = 150, b = 140 },
+  { r = 155, g = 115, b = 130 },
+]
