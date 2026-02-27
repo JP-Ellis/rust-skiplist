@@ -13,6 +13,10 @@
 //! | `VecDeque`   | `pop_front`    | O(1) amortised        |                             |
 //! | `LinkedList` | `pop_front`    | O(1)                  |                             |
 //! | `Vec`        | `remove(0)`    | O(n)                  | Capped at n ≤ 10 000        |
+//! | `SkipList`   | `pop_back`     | O(log n) expected     |                             |
+//! | `VecDeque`   | `pop_back`     | O(1) amortised        |                             |
+//! | `LinkedList` | `pop_back`     | O(1)                  |                             |
+//! | `Vec`        | `pop`          | O(1) amortised        |                             |
 //!
 //! Run with:
 //!
@@ -330,5 +334,117 @@ fn bench_pop_front(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(benches, bench_push_front, bench_push_back, bench_pop_front);
+/// Benchmark draining a container of `n` elements via `pop_back` (or the
+/// nearest equivalent).
+///
+/// The container is pre-filled during the setup phase so that only the
+/// removal loop contributes to the measurement.  Setup time is excluded by
+/// using [`Bencher::iter_batched`] with [`BatchSize::LargeInput`].
+///
+/// Unlike `pop_front`, `Vec::pop` removes from the back in O(1) amortised
+/// time (no slice shifting), so it is benchmarked across the full size range.
+fn bench_pop_back(c: &mut Criterion) {
+    let mut group = c.benchmark_group("pop_back");
+    group.plot_config(PlotConfiguration::default().summary_scale(AxisScale::Logarithmic));
+
+    for &n in SIZES {
+        group.throughput(Throughput::Elements(
+            u64::try_from(n).expect("bench size fits in u64"),
+        ));
+
+        // ----------------------------------------------------------------
+        // SkipList — O(log n) expected per pop
+        // ----------------------------------------------------------------
+        group.bench_with_input(BenchmarkId::new("SkipList", n), &n, |b, &n| {
+            b.iter_batched(
+                || {
+                    let mut list = SkipList::new();
+                    for i in 0..n {
+                        list.push_back(black_box(i));
+                    }
+                    list
+                },
+                |mut list| {
+                    for _ in 0..n {
+                        black_box(list.pop_back());
+                    }
+                },
+                BatchSize::LargeInput,
+            );
+        });
+
+        // ----------------------------------------------------------------
+        // Vec::pop — O(1) amortised; no slice shift, so runs full size range
+        // ----------------------------------------------------------------
+        group.bench_with_input(BenchmarkId::new("Vec", n), &n, |b, &n| {
+            b.iter_batched(
+                || {
+                    let mut vec: Vec<usize> = Vec::with_capacity(n);
+                    for i in 0..n {
+                        vec.push(black_box(i));
+                    }
+                    vec
+                },
+                |mut vec| {
+                    for _ in 0..n {
+                        black_box(vec.pop());
+                    }
+                },
+                BatchSize::LargeInput,
+            );
+        });
+
+        // ----------------------------------------------------------------
+        // VecDeque — O(1) amortised; the natural O(1) back-removal baseline
+        // ----------------------------------------------------------------
+        group.bench_with_input(BenchmarkId::new("VecDeque", n), &n, |b, &n| {
+            b.iter_batched(
+                || {
+                    let mut deque: VecDeque<usize> = VecDeque::with_capacity(n);
+                    for i in 0..n {
+                        deque.push_back(black_box(i));
+                    }
+                    deque
+                },
+                |mut deque| {
+                    for _ in 0..n {
+                        black_box(deque.pop_back());
+                    }
+                },
+                BatchSize::LargeInput,
+            );
+        });
+
+        // ----------------------------------------------------------------
+        // LinkedList — O(1); pointer-based removal, pointer-chasing cost
+        // ----------------------------------------------------------------
+        group.bench_with_input(BenchmarkId::new("LinkedList", n), &n, |b, &n| {
+            b.iter_batched(
+                || {
+                    let mut list: LinkedList<usize> = LinkedList::new();
+                    for i in 0..n {
+                        list.push_back(black_box(i));
+                    }
+                    list
+                },
+                |mut list| {
+                    for _ in 0..n {
+                        black_box(list.pop_back());
+                    }
+                },
+                BatchSize::LargeInput,
+            );
+        });
+    }
+
+    group.finish();
+}
+
+criterion_group!(
+    benches,
+    bench_push_front,
+    bench_push_back,
+    bench_pop_front,
+    bench_pop_back
+);
 criterion_main!(benches);
