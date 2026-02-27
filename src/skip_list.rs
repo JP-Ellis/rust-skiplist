@@ -467,6 +467,112 @@ impl<T, G: LevelGenerator> SkipList<T, G> {
         self.len = self.len.saturating_sub(1);
         value
     }
+
+    /// Removes and returns the last element, or `None` if the list is empty.
+    ///
+    /// This operation is O(log n) expected.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use skiplist::skip_list::SkipList;
+    ///
+    /// let mut list = SkipList::<i32>::new();
+    /// list.push_back(1);
+    /// list.push_back(2);
+    /// assert_eq!(list.pop_back(), Some(2));
+    /// assert_eq!(list.pop_back(), Some(1));
+    /// assert_eq!(list.pop_back(), None);
+    /// ```
+    #[expect(
+        clippy::expect_used,
+        clippy::missing_panics_doc,
+        clippy::unwrap_in_result,
+        reason = "update[0].links[0] is Some because the list is non-empty and the traversal \
+                  stops at the predecessor of the tail; \
+                  all expects fire only on internal invariant violations, not user input"
+    )]
+    #[expect(
+        clippy::indexing_slicing,
+        reason = "l is bounded by max_levels = head.links.len(); any node reachable at level l \
+                  has links.len() > l by the skip-list invariant, so all accesses are in bounds"
+    )]
+    #[expect(
+        clippy::multiple_unsafe_ops_per_block,
+        reason = "traversal, link clearing, and node pop all touch provably disjoint heap nodes; \
+                  splitting across blocks would require unsafe-crossing raw-pointer variables"
+    )]
+    #[inline]
+    pub fn pop_back(&mut self) -> Option<T> {
+        if self.is_empty() {
+            return None;
+        }
+
+        let max_levels = self.head.level();
+
+        // SAFETY: All raw pointers originate from heap allocations owned by this
+        // SkipList.  No safe &mut references to any node exist while this block
+        // runs.  update[] entries and back_ptr are distinct heap allocations; all
+        // slice accesses are bounded by max_levels = head.links.len().
+        let value = unsafe {
+            let head_ptr: *mut Node<T> = &raw mut *self.head;
+
+            // Build the update array: for each level l, update[l] is the
+            // rightmost node from which the level-l link points to the tail
+            // (i.e., following it would reach target_rank = self.len).
+            //
+            // Invariant maintained by push_back:
+            //   For l < back_height, update[l].links[l] = Link(tail, d).
+            //   For l >= back_height, update[l].links[l] is None or points
+            //   to a node before the tail (never set by push_back at those
+            //   levels, so no level-l link reaches the tail).
+            let target_rank = self.len;
+            let mut update: Vec<*mut Node<T>> = vec![head_ptr; max_levels];
+            let mut current: *mut Node<T> = head_ptr;
+            let mut current_rank: usize = 0;
+
+            for l in (0..max_levels).rev() {
+                // Advance as far right as possible WITHOUT reaching the tail.
+                while let Some(link) = (*current).links()[l].as_ref() {
+                    let next_rank = current_rank.saturating_add(link.distance().get());
+                    if next_rank >= target_rank {
+                        break;
+                    }
+                    current_rank = next_rank;
+                    current = NonNull::from(link.node()).as_ptr();
+                }
+                update[l] = current;
+            }
+
+            // The tail is the node at level 0 immediately after update[0].
+            // The list is non-empty, so this link must exist.
+            let back_ptr: *mut Node<T> = NonNull::from(
+                (*update[0]).links()[0]
+                    .as_ref()
+                    .expect("update[0].links[0] points to tail in a non-empty list")
+                    .node(),
+            )
+            .as_ptr();
+
+            let back_height = (*back_ptr).level();
+
+            // Remove skip links that pointed to the tail.
+            // For l < back_height, update[l].links[l] = Link(tail, d) — clear it.
+            // For l >= back_height, no level-l link reaches the tail — leave as-is.
+            for (l, &pred_ptr) in update.iter().enumerate().take(back_height) {
+                (*pred_ptr).links_mut()[l] = None;
+            }
+
+            // Detach the tail from the prev/next chain.
+            // pop() sets: tail.prev.next = None
+            //             (tail.next is already None for the tail node)
+            let mut popped = (*back_ptr).pop();
+            popped.take_value()
+        };
+
+        self.len = self.len.saturating_sub(1);
+        value
+    }
 }
 
 // MARK: Default
@@ -822,6 +928,147 @@ mod tests {
         assert_eq!(list.pop_front(), Some(0)); // [2, 3]
         assert_eq!(list.pop_front(), Some(2)); // [3]
         assert_eq!(list.pop_front(), Some(3)); // []
+        assert_eq!(list.pop_front(), None);
+        assert_eq!(list.len(), 0);
+    }
+
+    // MARK: pop_back
+
+    #[test]
+    fn pop_back_from_empty() {
+        let mut list = SkipList::<i32>::new();
+        assert_eq!(list.pop_back(), None);
+    }
+
+    #[test]
+    fn pop_back_single_element() {
+        let mut list = SkipList::<i32>::with_capacity(1);
+        list.push_back(42);
+        assert_eq!(list.pop_back(), Some(42));
+        assert!(list.is_empty());
+        assert_eq!(list.len(), 0);
+        assert!(list.head.next().is_none());
+        // Second pop on now-empty list
+        assert_eq!(list.pop_back(), None);
+    }
+
+    #[test]
+    fn pop_back_returns_in_reverse_order() {
+        let mut list = SkipList::<i32>::with_capacity(1);
+        list.push_back(1);
+        list.push_back(2);
+        list.push_back(3);
+        assert_eq!(list.pop_back(), Some(3));
+        assert_eq!(list.pop_back(), Some(2));
+        assert_eq!(list.pop_back(), Some(1));
+        assert_eq!(list.pop_back(), None);
+    }
+
+    #[test]
+    fn pop_back_len_decrements() {
+        let mut list = SkipList::<usize>::new();
+        for i in 0..50_usize {
+            list.push_back(i);
+        }
+        for remaining in (0..50_usize).rev() {
+            list.pop_back();
+            assert_eq!(list.len(), remaining);
+        }
+        assert_eq!(list.pop_back(), None);
+    }
+
+    /// With `with_capacity(1)` the generator always assigns height = 1.
+    /// After three `push_back` calls followed by two `pop_back` calls
+    /// the skip-link structure must be kept consistent.
+    ///
+    /// ```text
+    /// Initial:  head → n1(10,d=1) → n2(20,d=1) → n3(30,d=1) → None
+    /// After 1st pop_back (removes 30):
+    ///   head → n1(10,d=1) → n2(20,d=1) → None
+    /// After 2nd pop_back (removes 20):
+    ///   head → n1(10,d=1) → None
+    /// ```
+    #[expect(
+        clippy::indexing_slicing,
+        reason = "links slice length is known to be 1 for with_capacity(1)"
+    )]
+    #[test]
+    fn pop_back_links_with_single_level() {
+        let mut list = SkipList::<i32>::with_capacity(1);
+        list.push_back(10);
+        list.push_back(20);
+        list.push_back(30);
+
+        // First pop_back: removes 30
+        assert_eq!(list.pop_back(), Some(30));
+        assert_eq!(list.len(), 2);
+        {
+            // head.links[0] still → node(10) at distance 1
+            let link: &Link<_> = list.head.links()[0]
+                .as_ref()
+                .expect("head link after 1st pop_back");
+            assert_eq!(link.distance().get(), 1);
+            assert_eq!(link.node().value(), Some(&10));
+        }
+        {
+            // node(10).links[0] → node(20) at distance 1
+            let n1 = list.head.next().expect("n1");
+            let link: &Link<_> = n1.links()[0].as_ref().expect("n1 link");
+            assert_eq!(link.distance().get(), 1);
+            assert_eq!(link.node().value(), Some(&20));
+        }
+        {
+            // node(20).links[0] = None (was cleared by pop_back)
+            let n2 = list.head.next().expect("n1").next().expect("n2");
+            assert!(n2.links()[0].is_none());
+        }
+
+        // Second pop_back: removes 20
+        assert_eq!(list.pop_back(), Some(20));
+        assert_eq!(list.len(), 1);
+        {
+            // head.links[0] → node(10) at distance 1
+            let link: &Link<_> = list.head.links()[0]
+                .as_ref()
+                .expect("head link after 2nd pop_back");
+            assert_eq!(link.distance().get(), 1);
+            assert_eq!(link.node().value(), Some(&10));
+        }
+
+        // Third pop_back: removes 10, head link becomes None
+        assert_eq!(list.pop_back(), Some(10));
+        assert_eq!(list.len(), 0);
+        assert!(list.head.links()[0].is_none());
+    }
+
+    #[test]
+    fn pop_back_interleaved_with_push() {
+        let mut list = SkipList::<i32>::with_capacity(1);
+        list.push_back(1); // [1]
+        list.push_back(2); // [1, 2]
+        assert_eq!(list.pop_back(), Some(2)); // [1]
+        list.push_front(0); // [0, 1]
+        list.push_back(3); // [0, 1, 3]
+        assert_eq!(list.pop_back(), Some(3)); // [0, 1]
+        assert_eq!(list.pop_back(), Some(1)); // [0]
+        assert_eq!(list.pop_back(), Some(0)); // []
+        assert_eq!(list.pop_back(), None);
+        assert_eq!(list.len(), 0);
+    }
+
+    #[test]
+    fn pop_back_and_pop_front_together() {
+        let mut list = SkipList::<i32>::with_capacity(1);
+        for i in 1..=6 {
+            list.push_back(i); // [1, 2, 3, 4, 5, 6]
+        }
+        assert_eq!(list.pop_back(), Some(6)); // [1, 2, 3, 4, 5]
+        assert_eq!(list.pop_front(), Some(1)); // [2, 3, 4, 5]
+        assert_eq!(list.pop_back(), Some(5)); // [2, 3, 4]
+        assert_eq!(list.pop_front(), Some(2)); // [3, 4]
+        assert_eq!(list.pop_back(), Some(4)); // [3]
+        assert_eq!(list.pop_front(), Some(3)); // []
+        assert_eq!(list.pop_back(), None);
         assert_eq!(list.pop_front(), None);
         assert_eq!(list.len(), 0);
     }
