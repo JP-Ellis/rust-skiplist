@@ -15,7 +15,10 @@
 //! assert_eq!(list.len(), 0);
 //! ```
 
-use core::ptr::NonNull;
+use core::{
+    ops::{Index, IndexMut},
+    ptr::NonNull,
+};
 
 use crate::{
     level_generator::{LevelGenerator, geometric::Geometric},
@@ -184,6 +187,116 @@ impl<T, G: LevelGenerator> SkipList<T, G> {
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.len == 0
+    }
+
+    /// Returns a reference to the element at position `index`, or `None` if
+    /// `index` is out of bounds.
+    ///
+    /// This operation is O(log n) expected.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use skiplist::skip_list::SkipList;
+    ///
+    /// let mut list = SkipList::<i32>::new();
+    /// list.push_back(10);
+    /// list.push_back(20);
+    /// list.push_back(30);
+    /// assert_eq!(list.get(0), Some(&10));
+    /// assert_eq!(list.get(1), Some(&20));
+    /// assert_eq!(list.get(2), Some(&30));
+    /// assert_eq!(list.get(3), None);
+    /// ```
+    #[inline]
+    #[must_use]
+    pub fn get(&self, index: usize) -> Option<&T> {
+        if index >= self.len {
+            return None;
+        }
+
+        let target_rank = index.saturating_add(1);
+        let mut current: &Node<T> = &self.head;
+        let mut current_rank: usize = 0;
+
+        for l in (0..self.head.level()).rev() {
+            while let Some(Some(link)) = current.links().get(l) {
+                let next_rank = current_rank.saturating_add(link.distance().get());
+                if next_rank >= target_rank {
+                    break;
+                }
+                current_rank = next_rank;
+                current = link.node();
+            }
+        }
+
+        current
+            .links()
+            .first()
+            .and_then(Option::as_ref)
+            .and_then(|link| link.node().value())
+    }
+
+    /// Returns a mutable reference to the element at position `index`, or
+    /// `None` if `index` is out of bounds.
+    ///
+    /// This operation is O(log n) expected.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use skiplist::skip_list::SkipList;
+    ///
+    /// let mut list = SkipList::<i32>::new();
+    /// list.push_back(10);
+    /// list.push_back(20);
+    /// if let Some(v) = list.get_mut(0) {
+    ///     *v = 42;
+    /// }
+    /// assert_eq!(list.get(0), Some(&42));
+    /// assert_eq!(list.get(1), Some(&20));
+    /// ```
+    #[expect(
+        clippy::multiple_unsafe_ops_per_block,
+        reason = "raw-pointer traversal and the final value_mut call are all on distinct, \
+                  provably non-aliasing nodes owned by self; splitting into separate unsafe \
+                  blocks would require unsafe-crossing raw-pointer variables"
+    )]
+    #[inline]
+    #[must_use]
+    pub fn get_mut(&mut self, index: usize) -> Option<&mut T> {
+        if index >= self.len {
+            return None;
+        }
+
+        let target_rank = index.saturating_add(1);
+        let max_levels = self.head.level();
+
+        // SAFETY: All raw pointers originate from heap allocations owned by this
+        // SkipList. We have &mut self, guaranteeing exclusive access to all nodes.
+        // We traverse using *const pointers (read-only) to avoid holding a live
+        // &mut while reading links. The target pointer is converted to *mut only
+        // when calling value_mut(); the returned &mut T has lifetime tied to
+        // &mut self, and no other reference to the same node can exist.
+        unsafe {
+            let mut current: *const Node<T> = &raw const *self.head;
+            let mut current_rank: usize = 0;
+
+            for l in (0..max_levels).rev() {
+                while let Some(Some(link)) = (*current).links().get(l) {
+                    let next_rank = current_rank.saturating_add(link.distance().get());
+                    if next_rank >= target_rank {
+                        break;
+                    }
+                    current_rank = next_rank;
+                    current = link.node();
+                }
+            }
+
+            let target: NonNull<Node<T>> =
+                NonNull::from((*current).links().first()?.as_ref()?.node());
+            (*target.as_ptr()).value_mut()
+        }
     }
 
     /// Inserts `value` at the front of the list.
@@ -699,6 +812,137 @@ impl<T, G: LevelGenerator> SkipList<T, G> {
 
         self.len = self.len.saturating_add(1);
     }
+
+    /// Removes and returns the element at position `index`.
+    ///
+    /// All elements after `index` shift one position to the left.
+    ///
+    /// This operation is O(log n) expected.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `index >= self.len()`.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use skiplist::skip_list::SkipList;
+    ///
+    /// let mut list = SkipList::<i32>::new();
+    /// list.push_back(1);
+    /// list.push_back(2);
+    /// list.push_back(3);
+    /// assert_eq!(list.remove(1), 2);
+    /// assert_eq!(list.len(), 2);
+    /// // list is now [1, 3]
+    /// ```
+    #[expect(
+        clippy::expect_used,
+        reason = "update[0].links[0] exists because index < len guarantees a node at target_rank; \
+                  take_value is Some for any body/tail node; \
+                  Link::new distance is computed to be >= 1; \
+                  all expects fire only on internal invariant violations, not user input"
+    )]
+    #[expect(
+        clippy::indexing_slicing,
+        reason = "l < target_height <= max_levels = target.links.len(); \
+                  update[l].0 was reached at level l so update[l].0.links.len() > l; \
+                  all accesses are bounded by max_levels = head.links.len()"
+    )]
+    #[expect(
+        clippy::multiple_unsafe_ops_per_block,
+        reason = "traversal, link rewiring, and node pop all touch provably disjoint heap nodes; \
+                  splitting across blocks would require unsafe-crossing raw-pointer variables"
+    )]
+    #[inline]
+    pub fn remove(&mut self, index: usize) -> T {
+        assert!(
+            index < self.len,
+            "removal index (is {index}) should be < len (is {})",
+            self.len
+        );
+
+        let max_levels = self.head.level();
+        // head = rank 0; the element at logical index i is at rank i + 1.
+        let target_rank = index.saturating_add(1);
+
+        // SAFETY: All raw pointers originate from heap allocations owned by this
+        // SkipList.  No safe &mut references to any node exist while this block
+        // runs.  Different update[] entries may alias (same predecessor node,
+        // different levels) but each iteration accesses a distinct links[l]
+        // index, so no simultaneous aliasing occurs.
+        let value = unsafe {
+            let head_ptr: *mut Node<T> = &raw mut *self.head;
+
+            // update[l] = (predecessor at level l, its rank from head).
+            // Initialised to (head, 0): head is always a valid predecessor.
+            let mut update: Vec<(*mut Node<T>, usize)> = vec![(head_ptr, 0_usize); max_levels];
+            let mut current: *mut Node<T> = head_ptr;
+            let mut current_rank: usize = 0;
+
+            for l in (0..max_levels).rev() {
+                while let Some(link) = (*current).links()[l].as_ref() {
+                    let next_rank = current_rank.saturating_add(link.distance().get());
+                    if next_rank >= target_rank {
+                        break;
+                    }
+                    current_rank = next_rank;
+                    current = NonNull::from(link.node()).as_ptr();
+                }
+                update[l] = (current, current_rank);
+            }
+
+            // The target is update[0]'s level-0 successor.
+            // index < len guarantees this link exists.
+            let target_ptr: *mut Node<T> = NonNull::from(
+                (*update[0].0).links()[0]
+                    .as_ref()
+                    .expect("update[0].links[0] points to the target node")
+                    .node(),
+            )
+            .as_ptr();
+
+            let target_height = (*target_ptr).level();
+
+            // Rewire skip links around the removed node.
+            //
+            // For l < target_height (target participates in the level-l list):
+            //   Before: pred (rank P) --[T−P]--> target (rank T) --[d]--> X (rank T+d)
+            //   After:  pred (rank P) --[(T−P)+d−1]--> X (now at rank T+d−1)
+            //   If target.links[l] is None (target was the last at level l):
+            //     pred.links[l] ← None
+            //
+            // For l >= target_height (target has no skip-link slot at this level):
+            //   pred.links[l] already skips over target; decrement its distance by 1.
+            //   The distance is >= 2 because pred_rank < target_rank and
+            //   next_rank > target_rank (no level-l link can point to target at these
+            //   levels, since target was never wired into this level during insertion).
+            for (l, &(pred_ptr, pred_rank)) in update.iter().enumerate() {
+                if l < target_height {
+                    let pred_to_target = target_rank.saturating_sub(pred_rank);
+                    let old_link = (*target_ptr).links_mut()[l].take();
+                    (*pred_ptr).links_mut()[l] = if let Some(target_link) = old_link {
+                        let new_dist = pred_to_target
+                            .saturating_add(target_link.distance().get())
+                            .saturating_sub(1);
+                        Some(Link::new(target_link.node(), new_dist).expect("new_dist >= 1"))
+                    } else {
+                        None
+                    };
+                } else if let Some(link) = (*pred_ptr).links_mut()[l].as_mut() {
+                    link.decrement_distance()
+                        .expect("skip list invariant: distance >= 2 before decrement");
+                }
+            }
+
+            // Detach the target node from the prev/next chain and take its value.
+            let mut popped = (*target_ptr).pop();
+            popped.take_value().expect("target node always has a value")
+        };
+
+        self.len = self.len.saturating_sub(1);
+        value
+    }
 }
 
 // MARK: Default
@@ -707,6 +951,52 @@ impl<T> Default for SkipList<T> {
     #[inline]
     fn default() -> Self {
         Self::new()
+    }
+}
+
+// MARK: Index
+
+impl<T, G: LevelGenerator> Index<usize> for SkipList<T, G> {
+    type Output = T;
+
+    /// Returns a reference to the element at `index`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `index >= self.len()`.
+    #[inline]
+    #[expect(
+        clippy::unwrap_used,
+        reason = "index < self.len was just asserted, so get() always returns Some"
+    )]
+    fn index(&self, index: usize) -> &T {
+        assert!(
+            index < self.len,
+            "index out of bounds: the len is {} but the index is {index}",
+            self.len
+        );
+        self.get(index).unwrap()
+    }
+}
+
+impl<T, G: LevelGenerator> IndexMut<usize> for SkipList<T, G> {
+    /// Returns a mutable reference to the element at `index`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `index >= self.len()`.
+    #[inline]
+    #[expect(
+        clippy::unwrap_used,
+        reason = "index < self.len was just asserted, so get_mut() always returns Some"
+    )]
+    fn index_mut(&mut self, index: usize) -> &mut T {
+        assert!(
+            index < self.len,
+            "index out of bounds: the len is {} but the index is {index}",
+            self.len
+        );
+        self.get_mut(index).unwrap()
     }
 }
 
@@ -1371,5 +1661,405 @@ mod tests {
                 node = node.next().expect("next");
             }
         }
+    }
+
+    // MARK: remove
+
+    #[test]
+    fn remove_only_element() {
+        let mut list = SkipList::<i32>::with_capacity(1);
+        list.push_back(42);
+        assert_eq!(list.remove(0), 42);
+        assert_eq!(list.len(), 0);
+        assert!(list.is_empty());
+        assert!(list.head.next().is_none());
+    }
+
+    #[test]
+    fn remove_at_front() {
+        let mut list = SkipList::<i32>::with_capacity(1);
+        list.push_back(1);
+        list.push_back(2);
+        list.push_back(3);
+        assert_eq!(list.remove(0), 1);
+        assert_eq!(list.len(), 2);
+        let n1 = list.head.next().expect("n1");
+        assert_eq!(n1.value(), Some(&2));
+        let n2 = n1.next().expect("n2");
+        assert_eq!(n2.value(), Some(&3));
+        assert!(n2.next().is_none());
+    }
+
+    #[test]
+    fn remove_at_back() {
+        let mut list = SkipList::<i32>::with_capacity(1);
+        list.push_back(1);
+        list.push_back(2);
+        list.push_back(3);
+        assert_eq!(list.remove(2), 3);
+        assert_eq!(list.len(), 2);
+        let n1 = list.head.next().expect("n1");
+        assert_eq!(n1.value(), Some(&1));
+        let n2 = n1.next().expect("n2");
+        assert_eq!(n2.value(), Some(&2));
+        assert!(n2.next().is_none());
+    }
+
+    #[test]
+    fn remove_in_middle() {
+        let mut list = SkipList::<i32>::with_capacity(1);
+        list.push_back(1);
+        list.push_back(2);
+        list.push_back(3);
+        assert_eq!(list.remove(1), 2);
+        assert_eq!(list.len(), 2);
+        let n1 = list.head.next().expect("n1");
+        assert_eq!(n1.value(), Some(&1));
+        let n2 = n1.next().expect("n2");
+        assert_eq!(n2.value(), Some(&3));
+        assert!(n2.next().is_none());
+    }
+
+    #[test]
+    fn remove_len_decrements() {
+        let mut list = SkipList::<usize>::new();
+        for i in 0..50_usize {
+            list.push_back(i);
+        }
+        for i in (0..50_usize).rev() {
+            assert_eq!(list.len(), i.saturating_add(1));
+            list.remove(0);
+        }
+        assert_eq!(list.len(), 0);
+    }
+
+    #[test]
+    #[should_panic(expected = "removal index (is 3) should be < len (is 3)")]
+    fn remove_out_of_bounds() {
+        let mut list = SkipList::<i32>::with_capacity(1);
+        list.push_back(1);
+        list.push_back(2);
+        list.push_back(3);
+        list.remove(3);
+    }
+
+    #[test]
+    #[should_panic(expected = "removal index (is 0) should be < len (is 0)")]
+    fn remove_from_empty() {
+        let mut list = SkipList::<i32>::new();
+        list.remove(0);
+    }
+
+    /// With `with_capacity(1)` the generator assigns height = 1 to every node.
+    /// Verify that links are correctly maintained after removing the middle element
+    /// from [1, 2, 3]:
+    ///
+    /// ```text
+    /// Before: head ---[1]---> n1(1) ---[1]---> n2(2) ---[1]---> n3(3, None)
+    /// After:  head ---[1]---> n1(1) ---[1]---> n3(3, None)
+    /// ```
+    #[expect(
+        clippy::indexing_slicing,
+        reason = "links slice length is known to be 1 for with_capacity(1)"
+    )]
+    #[test]
+    fn remove_links_with_single_level() {
+        let mut list = SkipList::<i32>::with_capacity(1);
+        list.push_back(1); // [1]
+        list.push_back(2); // [1, 2]
+        list.push_back(3); // [1, 2, 3]
+        assert_eq!(list.remove(1), 2); // [1, 3]
+
+        assert_eq!(list.len(), 2);
+        // head.links[0] → n1(1) at distance 1 (unchanged)
+        {
+            let link: &Link<_> = list.head.links()[0].as_ref().expect("head link");
+            assert_eq!(link.distance().get(), 1);
+            assert_eq!(link.node().value(), Some(&1));
+        }
+        // n1(1).links[0] → n3(3) at distance 1 (previously pointed to n2)
+        {
+            let n1 = list.head.next().expect("n1");
+            assert_eq!(n1.value(), Some(&1));
+            let link: &Link<_> = n1.links()[0].as_ref().expect("n1 link");
+            assert_eq!(link.distance().get(), 1);
+            assert_eq!(link.node().value(), Some(&3));
+        }
+        // n3(3).links[0] = None
+        {
+            let n3 = list.head.next().expect("n1").next().expect("n3");
+            assert_eq!(n3.value(), Some(&3));
+            assert!(n3.links()[0].is_none());
+        }
+    }
+
+    #[test]
+    fn remove_interleaved_with_insert() {
+        let mut list = SkipList::<i32>::with_capacity(1);
+        list.push_back(1); // [1]
+        list.push_back(2); // [1, 2]
+        list.push_back(3); // [1, 2, 3]
+        assert_eq!(list.remove(1), 2); // [1, 3]
+        list.insert(1, 4); // [1, 4, 3]
+        assert_eq!(list.remove(0), 1); // [4, 3]
+        list.push_back(5); // [4, 3, 5]
+        assert_eq!(list.remove(2), 5); // [4, 3]
+        assert_eq!(list.len(), 2);
+        let n1 = list.head.next().expect("n1");
+        assert_eq!(n1.value(), Some(&4));
+        let n2 = n1.next().expect("n2");
+        assert_eq!(n2.value(), Some(&3));
+        assert!(n2.next().is_none());
+    }
+
+    #[test]
+    fn remove_all_elements() {
+        let mut list = SkipList::<i32>::with_capacity(1);
+        for i in 1..=5_i32 {
+            list.push_back(i);
+        }
+        assert_eq!(list.remove(2), 3); // [1, 2, 4, 5]
+        assert_eq!(list.remove(0), 1); // [2, 4, 5]
+        assert_eq!(list.remove(2), 5); // [2, 4]
+        assert_eq!(list.remove(1), 4); // [2]
+        assert_eq!(list.remove(0), 2); // []
+        assert_eq!(list.len(), 0);
+        assert!(list.is_empty());
+    }
+
+    #[test]
+    #[expect(
+        clippy::integer_division,
+        clippy::integer_division_remainder_used,
+        reason = "removing from middle"
+    )]
+    fn remove_all_in_order_from_middle() {
+        let n = 50_usize;
+        let mut list = SkipList::<usize>::new();
+        for i in 0..n {
+            list.push_back(i);
+        }
+        while !list.is_empty() {
+            list.remove(list.len() / 2);
+        }
+        assert_eq!(list.len(), 0);
+        assert!(list.head.next().is_none());
+    }
+
+    // MARK: get / get_mut
+
+    #[test]
+    fn get_from_empty() {
+        let list = SkipList::<i32>::new();
+        assert_eq!(list.get(0), None);
+    }
+
+    #[test]
+    fn get_out_of_bounds() {
+        let mut list = SkipList::<i32>::with_capacity(1);
+        list.push_back(1);
+        list.push_back(2);
+        list.push_back(3);
+        assert_eq!(list.get(3), None);
+        assert_eq!(list.get(100), None);
+    }
+
+    #[test]
+    fn get_first() {
+        let mut list = SkipList::<i32>::with_capacity(1);
+        list.push_back(10);
+        list.push_back(20);
+        list.push_back(30);
+        assert_eq!(list.get(0), Some(&10));
+    }
+
+    #[test]
+    fn get_last() {
+        let mut list = SkipList::<i32>::with_capacity(1);
+        list.push_back(10);
+        list.push_back(20);
+        list.push_back(30);
+        assert_eq!(list.get(2), Some(&30));
+    }
+
+    #[test]
+    fn get_middle() {
+        let mut list = SkipList::<i32>::with_capacity(1);
+        list.push_back(10);
+        list.push_back(20);
+        list.push_back(30);
+        assert_eq!(list.get(1), Some(&20));
+    }
+
+    #[test]
+    fn get_all_elements() {
+        let n = 50_usize;
+        let mut list = SkipList::<usize>::new();
+        for i in 0..n {
+            list.push_back(i);
+        }
+        for i in 0..n {
+            assert_eq!(list.get(i), Some(&i));
+        }
+    }
+
+    #[test]
+    fn get_single_element() {
+        let mut list = SkipList::<i32>::with_capacity(1);
+        list.push_back(42);
+        assert_eq!(list.get(0), Some(&42));
+        assert_eq!(list.get(1), None);
+    }
+
+    #[test]
+    fn get_mut_from_empty() {
+        let mut list = SkipList::<i32>::new();
+        assert_eq!(list.get_mut(0), None);
+    }
+
+    #[test]
+    fn get_mut_out_of_bounds() {
+        let mut list = SkipList::<i32>::with_capacity(1);
+        list.push_back(1);
+        assert_eq!(list.get_mut(1), None);
+        assert_eq!(list.get_mut(99), None);
+    }
+
+    #[test]
+    fn get_mut_modify() {
+        let mut list = SkipList::<i32>::with_capacity(1);
+        list.push_back(10);
+        list.push_back(20);
+        list.push_back(30);
+
+        // Modify first element
+        if let Some(v) = list.get_mut(0) {
+            *v = 100;
+        }
+        assert_eq!(list.get(0), Some(&100));
+        assert_eq!(list.get(1), Some(&20));
+        assert_eq!(list.get(2), Some(&30));
+
+        // Modify last element
+        if let Some(v) = list.get_mut(2) {
+            *v = 300;
+        }
+        assert_eq!(list.get(0), Some(&100));
+        assert_eq!(list.get(1), Some(&20));
+        assert_eq!(list.get(2), Some(&300));
+
+        // Modify middle element
+        if let Some(v) = list.get_mut(1) {
+            *v = 200;
+        }
+        assert_eq!(list.get(0), Some(&100));
+        assert_eq!(list.get(1), Some(&200));
+        assert_eq!(list.get(2), Some(&300));
+    }
+
+    #[test]
+    fn get_mut_all_elements() {
+        let n = 30_usize;
+        let mut list = SkipList::<usize>::new();
+        for i in 0..n {
+            list.push_back(i);
+        }
+        for i in 0..n {
+            if let Some(v) = list.get_mut(i) {
+                *v = i * 10;
+            }
+        }
+        for i in 0..n {
+            assert_eq!(list.get(i), Some(&(i * 10)));
+        }
+    }
+
+    // MARK: Index / IndexMut
+
+    #[test]
+    #[expect(
+        clippy::indexing_slicing,
+        reason = "Testing valid indexing behavior with known indices"
+    )]
+    fn index_basic() {
+        let mut list = SkipList::<i32>::with_capacity(1);
+        list.push_back(10);
+        list.push_back(20);
+        list.push_back(30);
+        assert_eq!(list[0], 10);
+        assert_eq!(list[1], 20);
+        assert_eq!(list[2], 30);
+    }
+
+    #[test]
+    #[expect(
+        clippy::indexing_slicing,
+        reason = "Testing valid mut indexing behavior with known indices"
+    )]
+    fn index_mut_basic() {
+        let mut list = SkipList::<i32>::with_capacity(1);
+        list.push_back(10);
+        list.push_back(20);
+        list.push_back(30);
+        list[0] = 100;
+        list[2] = 300;
+        assert_eq!(list[0], 100);
+        assert_eq!(list[1], 20);
+        assert_eq!(list[2], 300);
+    }
+
+    #[test]
+    #[expect(
+        clippy::indexing_slicing,
+        reason = "Testing out-of-bounds indexing behavior with known indices"
+    )]
+    #[should_panic(expected = "index out of bounds: the len is 3 but the index is 3")]
+    fn index_out_of_bounds() {
+        let mut list = SkipList::<i32>::with_capacity(1);
+        list.push_back(1);
+        list.push_back(2);
+        list.push_back(3);
+        _ = list[3];
+    }
+
+    #[test]
+    #[expect(
+        clippy::indexing_slicing,
+        reason = "Testing out-of-bounds mut indexing behavior with known indices"
+    )]
+    #[should_panic(expected = "index out of bounds: the len is 0 but the index is 0")]
+    fn index_empty() {
+        let list = SkipList::<i32>::new();
+        _ = list[0];
+    }
+
+    #[test]
+    #[expect(
+        clippy::indexing_slicing,
+        reason = "Testing out-of-bounds mut indexing behavior with known indices"
+    )]
+    #[should_panic(expected = "index out of bounds: the len is 3 but the index is 5")]
+    fn index_mut_out_of_bounds() {
+        let mut list = SkipList::<i32>::with_capacity(1);
+        list.push_back(1);
+        list.push_back(2);
+        list.push_back(3);
+        list[5] = 99;
+    }
+
+    #[test]
+    #[expect(
+        clippy::indexing_slicing,
+        reason = "Testing valid indexing behavior after mutations with known indices"
+    )]
+    fn index_after_mutations() {
+        let mut list = SkipList::<i32>::new();
+        for i in 0..10_i32 {
+            list.push_back(i);
+        }
+        list.remove(3); // [0,1,2,4,5,6,7,8,9]
+        list.insert(3, 42); // [0,1,2,42,4,5,6,7,8,9]
+        assert_eq!(list[3], 42);
+        assert_eq!(list[4], 4);
     }
 }

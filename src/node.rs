@@ -252,7 +252,7 @@ impl<V> Node<V> {
 
     /// Get a mutable reference to the value.
     #[inline]
-    fn value_mut(&mut self) -> Option<&mut V> {
+    pub(crate) fn value_mut(&mut self) -> Option<&mut V> {
         self.value.as_mut()
     }
 

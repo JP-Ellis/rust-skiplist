@@ -1,28 +1,5 @@
 //! Benchmarks for [`SkipList<T>`] comparing insertion and removal operations
 //! against equivalent operations on [`Vec`], [`VecDeque`], and [`LinkedList`].
-//!
-//! | Container    | Operation      | Asymptotic complexity | Notes                       |
-//! | ------------ | -------------- | --------------------- | --------------------------- |
-//! | `SkipList`   | `push_front`   | O(log n) expected     |                             |
-//! | `VecDeque`   | `push_front`   | O(1) amortised        |                             |
-//! | `LinkedList` | `push_front`   | O(1)                  |                             |
-//! | `SkipList`   | `push_back`    | O(log n) expected     |                             |
-//! | `VecDeque`   | `push_back`    | O(1) amortised        |                             |
-//! | `LinkedList` | `push_back`    | O(1)                  |                             |
-//! | `SkipList`   | `pop_front`    | O(log n) expected     |                             |
-//! | `VecDeque`   | `pop_front`    | O(1) amortised        |                             |
-//! | `LinkedList` | `pop_front`    | O(1)                  |                             |
-//! | `Vec`        | `remove(0)`    | O(n)                  | Capped at n ≤ 10 000        |
-//! | `SkipList`   | `pop_back`     | O(log n) expected     |                             |
-//! | `VecDeque`   | `pop_back`     | O(1) amortised        |                             |
-//! | `LinkedList` | `pop_back`     | O(1)                  |                             |
-//! | `Vec`        | `pop`          | O(1) amortised        |                             |
-//!
-//! Run with:
-//!
-//! ```shell
-//! cargo bench --bench skip_list
-//! ```
 
 #![expect(
     clippy::expect_used,
@@ -440,11 +417,350 @@ fn bench_pop_back(c: &mut Criterion) {
     group.finish();
 }
 
+/// Benchmark inserting `n` elements at random indices.
+///
+/// Each benchmark iteration starts with an empty container and inserts `n`
+/// values one at a time; the `i`-th insertion uses a pre-generated index drawn
+/// uniformly from `0..=i` (valid for a container of `i` elements).
+///
+/// Insertion indices are generated once per size with a seeded [`SmallRng`] and
+/// then cloned into each timed batch, so the benchmark measures only the insert
+/// overhead — not RNG overhead.
+///
+/// `Vec::insert` and `VecDeque::insert` shift `O(n)` elements per call, making
+/// a full build `O(n²)`.  Both are therefore capped at 10 000 elements to keep
+/// measurement time practical.
+fn bench_insert_random(c: &mut Criterion) {
+    let mut group = c.benchmark_group("insert_random");
+    group.plot_config(PlotConfiguration::default().summary_scale(AxisScale::Logarithmic));
+
+    for &n in SIZES {
+        group.throughput(Throughput::Elements(
+            u64::try_from(n).expect("bench size fits in u64"),
+        ));
+
+        // Pre-generate insertion indices outside the timed section.
+        // indices[i] ∈ 0..=i so it is always a valid insertion point into
+        // a container currently holding i elements.
+        let indices: Vec<usize> = {
+            let mut rng = SmallRng::seed_from_u64(42);
+            (0..n).map(|i| rng.random_range(0..=i)).collect()
+        };
+
+        // ----------------------------------------------------------------
+        // SkipList — O(log n) expected per random-index insert
+        // ----------------------------------------------------------------
+        group.bench_with_input(BenchmarkId::new("SkipList", n), &n, |b, _| {
+            b.iter_batched(
+                || indices.clone(),
+                |idx_list| {
+                    let mut list = SkipList::new();
+                    for (i, &idx) in idx_list.iter().enumerate() {
+                        list.insert(black_box(idx), black_box(i));
+                    }
+                    list
+                },
+                BatchSize::LargeInput,
+            );
+        });
+
+        // ----------------------------------------------------------------
+        // Vec::insert — O(n) per call; capped to avoid O(n²) at scale
+        // ----------------------------------------------------------------
+        if n <= 100_000 {
+            group.bench_with_input(BenchmarkId::new("Vec", n), &n, |b, _| {
+                b.iter_batched(
+                    || indices.clone(),
+                    |idx_list| {
+                        let mut vec: Vec<usize> = Vec::new();
+                        for (i, &idx) in idx_list.iter().enumerate() {
+                            vec.insert(black_box(idx), black_box(i));
+                        }
+                        vec
+                    },
+                    BatchSize::LargeInput,
+                );
+            });
+        }
+
+        // ----------------------------------------------------------------
+        // VecDeque::insert — O(n) per call; capped to avoid O(n²) at scale
+        // ----------------------------------------------------------------
+        if n <= 100_000 {
+            group.bench_with_input(BenchmarkId::new("VecDeque", n), &n, |b, _| {
+                b.iter_batched(
+                    || indices.clone(),
+                    |idx_list| {
+                        let mut deque: VecDeque<usize> = VecDeque::new();
+                        for (i, &idx) in idx_list.iter().enumerate() {
+                            deque.insert(black_box(idx), black_box(i));
+                        }
+                        deque
+                    },
+                    BatchSize::LargeInput,
+                );
+            });
+        }
+
+        // ----------------------------------------------------------------
+        // LinkedList — no insert(idx) method; simulate with split_off +
+        // push_back + append.  O(n) per insertion (split_off scans to idx);
+        // capped to avoid O(n²) at scale.
+        // ----------------------------------------------------------------
+        if n <= 20_000 {
+            group.bench_with_input(BenchmarkId::new("LinkedList", n), &n, |b, _| {
+                b.iter_batched(
+                    || indices.clone(),
+                    |idx_list| {
+                        let mut list: LinkedList<usize> = LinkedList::new();
+                        for (i, &idx) in idx_list.iter().enumerate() {
+                            let mut tail = list.split_off(black_box(idx));
+                            list.push_back(black_box(i));
+                            list.append(&mut tail);
+                        }
+                        list
+                    },
+                    BatchSize::LargeInput,
+                );
+            });
+        }
+    }
+
+    group.finish();
+}
+
+/// Benchmark removing a single element at a random index from a container of
+/// `n` elements.
+///
+/// Each benchmark iteration starts with a pre-filled container and removes the
+/// element at a pre-generated random index.  The container is rebuilt during
+/// the setup phase so that only the single removal contributes to the
+/// measurement.  Setup time is excluded by using [`Bencher::iter_batched`] with
+/// [`BatchSize::LargeInput`].
+///
+/// The removal index is generated once per size with a seeded [`SmallRng`]
+/// (drawn uniformly from `0..n`) and reused across all container variants and
+/// benchmark iterations.
+///
+/// Each iteration performs exactly one removal, so there is no O(n²)
+/// accumulation even for O(n)-per-call containers — all containers are
+/// benchmarked across the full size range.
+///
+/// `LinkedList` has no `remove(idx)` method; it is simulated with
+/// `split_off(idx) + pop_front + append`.
+fn bench_remove_random(c: &mut Criterion) {
+    let mut group = c.benchmark_group("remove_random");
+    group.plot_config(PlotConfiguration::default().summary_scale(AxisScale::Logarithmic));
+
+    for &n in SIZES {
+        // Throughput of 1: each iteration performs a single removal.
+        group.throughput(Throughput::Elements(1));
+
+        // Pre-generate one random removal index outside the timed section.
+        let idx = {
+            let mut rng = SmallRng::seed_from_u64(42);
+            rng.random_range(0..n)
+        };
+
+        // ----------------------------------------------------------------
+        // SkipList — O(log n) expected per removal
+        // ----------------------------------------------------------------
+        group.bench_with_input(BenchmarkId::new("SkipList", n), &n, |b, &n| {
+            b.iter_batched(
+                || {
+                    let mut list = SkipList::new();
+                    for i in 0..n {
+                        list.push_back(black_box(i));
+                    }
+                    list
+                },
+                |mut list| {
+                    black_box(list.remove(idx));
+                },
+                BatchSize::LargeInput,
+            );
+        });
+
+        // ----------------------------------------------------------------
+        // Vec::remove — O(n) per call (shifts remaining slice)
+        // ----------------------------------------------------------------
+        group.bench_with_input(BenchmarkId::new("Vec", n), &n, |b, &n| {
+            b.iter_batched(
+                || {
+                    let mut vec: Vec<usize> = Vec::with_capacity(n);
+                    for i in 0..n {
+                        vec.push(black_box(i));
+                    }
+                    vec
+                },
+                |mut vec| {
+                    black_box(vec.remove(idx));
+                },
+                BatchSize::LargeInput,
+            );
+        });
+
+        // ----------------------------------------------------------------
+        // VecDeque::remove — O(n) per call (shifts half the ring buffer)
+        // ----------------------------------------------------------------
+        group.bench_with_input(BenchmarkId::new("VecDeque", n), &n, |b, &n| {
+            b.iter_batched(
+                || {
+                    let mut deque: VecDeque<usize> = VecDeque::with_capacity(n);
+                    for i in 0..n {
+                        deque.push_back(black_box(i));
+                    }
+                    deque
+                },
+                |mut deque| {
+                    black_box(deque.remove(idx));
+                },
+                BatchSize::LargeInput,
+            );
+        });
+
+        // ----------------------------------------------------------------
+        // LinkedList — no remove(idx) method; simulate with split_off(idx) +
+        // pop_front + append.  O(idx) for the split_off scan.
+        // ----------------------------------------------------------------
+        group.bench_with_input(BenchmarkId::new("LinkedList", n), &n, |b, &n| {
+            b.iter_batched(
+                || (0..n).collect::<LinkedList<usize>>(),
+                |mut list| {
+                    let mut tail = list.split_off(idx);
+                    black_box(tail.pop_front());
+                    list.append(&mut tail);
+                },
+                BatchSize::LargeInput,
+            );
+        });
+    }
+
+    group.finish();
+}
+
+/// Benchmark `n` random-index lookups on a pre-filled container of `n` elements.
+///
+/// Each benchmark iteration starts with a pre-built container and performs `n`
+/// reads at pre-generated random indices (seeded for reproducibility).  Setup
+/// time (construction + index generation) is excluded via
+/// [`Bencher::iter_batched`] with [`BatchSize::LargeInput`].
+///
+/// `SkipList::get` is O(log n) per call; `Vec` and `VecDeque` indexing is O(1).
+/// This benchmark quantifies the constant factor overhead of skip-link
+/// traversal relative to direct array access.
+///
+/// `LinkedList` has no O(1) random-access method; `iter().nth(idx)` is used as
+/// the equivalent.
+///
+/// Throughput is reported as `n` elements (one per lookup within the batch).
+fn bench_get_random(c: &mut Criterion) {
+    let mut group = c.benchmark_group("get_random");
+    group.plot_config(PlotConfiguration::default().summary_scale(AxisScale::Logarithmic));
+
+    for &n in SIZES {
+        group.throughput(Throughput::Elements(
+            u64::try_from(n).expect("bench size fits in u64"),
+        ));
+
+        // Pre-generate `n` random indices in `0..n` outside the timed section.
+        let indices: Vec<usize> = {
+            let mut rng = SmallRng::seed_from_u64(42);
+            std::iter::repeat_with(|| rng.random_range(0..n))
+                .take(n)
+                .collect()
+        };
+
+        // ----------------------------------------------------------------
+        // SkipList — O(log n) per random-index get
+        // ----------------------------------------------------------------
+        group.bench_with_input(BenchmarkId::new("SkipList", n), &n, |b, &n| {
+            b.iter_batched(
+                || {
+                    let mut list = SkipList::new();
+                    for i in 0..n {
+                        list.push_back(black_box(i));
+                    }
+                    (list, indices.clone())
+                },
+                |(list, idx_list)| {
+                    for &idx in &idx_list {
+                        black_box(list.get(black_box(idx)));
+                    }
+                },
+                BatchSize::LargeInput,
+            );
+        });
+
+        // ----------------------------------------------------------------
+        // Vec — O(1) per random-index get
+        // ----------------------------------------------------------------
+        group.bench_with_input(BenchmarkId::new("Vec", n), &n, |b, &n| {
+            b.iter_batched(
+                || {
+                    let vec: Vec<usize> = (0..n).collect();
+                    (vec, indices.clone())
+                },
+                |(vec, idx_list)| {
+                    for &idx in &idx_list {
+                        black_box(vec.get(black_box(idx)));
+                    }
+                },
+                BatchSize::LargeInput,
+            );
+        });
+
+        // ----------------------------------------------------------------
+        // VecDeque — O(1) per random-index get
+        // ----------------------------------------------------------------
+        group.bench_with_input(BenchmarkId::new("VecDeque", n), &n, |b, &n| {
+            b.iter_batched(
+                || {
+                    let deque: VecDeque<usize> = (0..n).collect();
+                    (deque, indices.clone())
+                },
+                |(deque, idx_list)| {
+                    for &idx in &idx_list {
+                        black_box(deque.get(black_box(idx)));
+                    }
+                },
+                BatchSize::LargeInput,
+            );
+        });
+
+        // ----------------------------------------------------------------
+        // LinkedList — no O(1) get; iter().nth(idx) is O(n) per lookup.
+        // n × O(n) = O(n²) total; capped to avoid impractical run times.
+        // ----------------------------------------------------------------
+        if n <= 100_000 {
+            group.bench_with_input(BenchmarkId::new("LinkedList", n), &n, |b, &n| {
+                b.iter_batched(
+                    || {
+                        let list: LinkedList<usize> = (0..n).collect();
+                        (list, indices.clone())
+                    },
+                    |(list, idx_list)| {
+                        for &idx in &idx_list {
+                            black_box(list.iter().nth(black_box(idx)));
+                        }
+                    },
+                    BatchSize::LargeInput,
+                );
+            });
+        }
+    }
+
+    group.finish();
+}
+
 criterion_group!(
     benches,
     bench_push_front,
     bench_push_back,
     bench_pop_front,
-    bench_pop_back
+    bench_pop_back,
+    bench_insert_random,
+    bench_remove_middle,
+    bench_get_random
 );
 criterion_main!(benches);
