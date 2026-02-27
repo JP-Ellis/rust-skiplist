@@ -412,6 +412,161 @@ impl<T, G: LevelGenerator> SkipList<T, G> {
         unsafe { self.tail?.as_mut().value_mut() }
     }
 
+    /// Removes all elements from the list.
+    ///
+    /// The level generator is preserved; elements can be inserted again
+    /// immediately after calling `clear`.
+    ///
+    /// This operation is O(n): all n elements must be dropped.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use skiplist::skip_list::SkipList;
+    ///
+    /// let mut list = SkipList::<i32>::new();
+    /// list.push_back(1);
+    /// list.push_back(2);
+    /// list.push_back(3);
+    /// list.clear();
+    /// assert!(list.is_empty());
+    /// assert_eq!(list.len(), 0);
+    /// ```
+    #[inline]
+    pub fn clear(&mut self) {
+        let max_levels = self.head.level();
+        // Replacing `*self.head` with a fresh sentinel node drops the old
+        // sentinel in-place.  `Node::drop` iterates the entire `next` chain
+        // and frees each node one at a time, so this is O(n) and
+        // non-recursive regardless of list length.
+        *self.head = Node::new(max_levels);
+        self.tail = None;
+        self.len = 0;
+    }
+
+    /// Shortens the list, keeping only the first `len` elements and dropping
+    /// the rest.
+    ///
+    /// If `len >= self.len()`, this is a no-op.
+    ///
+    /// This operation is O(log n + k) where k = `self.len() − len` is the
+    /// number of elements removed: O(log n) to locate the new tail and update
+    /// the skip links, then O(k) to drop k values.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use skiplist::skip_list::SkipList;
+    ///
+    /// let mut list = SkipList::<i32>::new();
+    /// for i in 1..=5 {
+    ///     list.push_back(i);
+    /// }
+    /// list.truncate(3);
+    /// assert_eq!(list.len(), 3);
+    /// assert_eq!(list.get(0), Some(&1));
+    /// assert_eq!(list.get(1), Some(&2));
+    /// assert_eq!(list.get(2), Some(&3));
+    /// assert_eq!(list.get(3), None);
+    /// ```
+    #[expect(
+        clippy::expect_used,
+        clippy::missing_panics_doc,
+        reason = "the node at rank `len` exists because 0 < len < self.len was checked before \
+                  entering the unsafe block; the expect fires only on invariant violations"
+    )]
+    #[expect(
+        clippy::indexing_slicing,
+        reason = "l < max_levels = head.links.len(); every node in update[] was reached \
+                  via a level-l link so its links.len() > l; all accesses are in bounds"
+    )]
+    #[expect(
+        clippy::multiple_unsafe_ops_per_block,
+        reason = "traversal, link clearing, and truncate_next all touch provably disjoint \
+                  heap nodes; splitting across blocks would require unsafe-crossing raw-pointer \
+                  variables"
+    )]
+    #[inline]
+    pub fn truncate(&mut self, len: usize) {
+        if len >= self.len {
+            return;
+        }
+        if len == 0 {
+            self.clear();
+            return;
+        }
+
+        // 0 < len < self.len: keep elements at ranks 1..=len; drop the rest.
+        let max_levels = self.head.level();
+
+        // SAFETY: All raw pointers come from heap allocations owned by this
+        // SkipList.  No safe references to any node exist while this block
+        // runs.  Each node in update[] is distinct from the others (they are
+        // at different levels in a skip-list traversal), and each links[] slot
+        // is accessed at most once per level.
+        let new_tail_ptr: *mut Node<T> = unsafe {
+            let head_ptr: *mut Node<T> = &raw mut *self.head;
+
+            // update[l] = (predecessor at level l, its rank).
+            // Using target_rank = len and break when next_rank >= len means
+            // update[l] holds the last node at level l with rank < len.
+            // Therefore update[0].links[0] points to the new tail at rank len.
+            let mut update: Vec<(*mut Node<T>, usize)> = vec![(head_ptr, 0_usize); max_levels];
+            let mut current: *mut Node<T> = head_ptr;
+            let mut current_rank: usize = 0;
+
+            for l in (0..max_levels).rev() {
+                while let Some(link) = (*current).links()[l].as_ref() {
+                    let next_rank = current_rank.saturating_add(link.distance().get());
+                    if next_rank >= len {
+                        break;
+                    }
+                    current_rank = next_rank;
+                    current = NonNull::from(link.node()).as_ptr();
+                }
+                update[l] = (current, current_rank);
+            }
+
+            // The new tail is the level-0 successor of update[0].
+            // It exists because 0 < len < self.len.
+            let new_tail_ptr: *mut Node<T> = NonNull::from(
+                (*update[0].0).links()[0]
+                    .as_ref()
+                    .expect("the node at rank `len` exists because len < self.len")
+                    .node(),
+            )
+            .as_ptr();
+
+            let new_tail_height = (*new_tail_ptr).level();
+
+            // Clear the new tail's own forward skip links: they point to
+            // nodes that are about to be freed.
+            for link in (*new_tail_ptr).links_mut() {
+                *link = None;
+            }
+
+            // For levels at or above the new tail's height, the new tail does
+            // not participate in those skip-link lists.  The predecessor at
+            // each such level may have a skip link that spans past the cut;
+            // clear it.
+            for l in new_tail_height..max_levels {
+                (*update[l].0).links_mut()[l] = None;
+            }
+
+            // Iteratively free all nodes after the new tail.
+            // truncate_next() sets new_tail.next = None and drops the rest
+            // of the chain in O(k) without recursion.
+            (*new_tail_ptr).truncate_next();
+
+            new_tail_ptr
+        };
+
+        // SAFETY: new_tail_ptr is a live, heap-allocated node owned by this
+        // SkipList; it will not be freed until the list itself is dropped.
+        self.tail = Some(unsafe { NonNull::new_unchecked(new_tail_ptr) });
+        self.len = len;
+    }
+
     /// Inserts `value` at the front of the list.
     ///
     /// The new element becomes the element at index 0, shifting all existing
@@ -2427,5 +2582,218 @@ mod tests {
             list.push_back(i);
         }
         assert_eq!(list.back(), list.get(list.len() - 1));
+    }
+
+    // MARK: clear
+
+    #[test]
+    fn clear_empty_list() {
+        let mut list = SkipList::<i32>::new();
+        list.clear();
+        assert!(list.is_empty());
+        assert_eq!(list.len(), 0);
+        assert_eq!(list.front(), None);
+        assert_eq!(list.back(), None);
+    }
+
+    #[test]
+    fn clear_single_element() {
+        let mut list = SkipList::<i32>::new();
+        list.push_back(42);
+        list.clear();
+        assert!(list.is_empty());
+        assert_eq!(list.len(), 0);
+        assert_eq!(list.front(), None);
+        assert_eq!(list.back(), None);
+    }
+
+    #[test]
+    fn clear_multiple_elements() {
+        let mut list = SkipList::<i32>::new();
+        for i in 1..=10 {
+            list.push_back(i);
+        }
+        list.clear();
+        assert!(list.is_empty());
+        assert_eq!(list.len(), 0);
+        assert_eq!(list.front(), None);
+        assert_eq!(list.back(), None);
+        assert!(list.head.next().is_none());
+    }
+
+    #[test]
+    fn clear_usable_after_clear() {
+        // After clear, the list can accept new insertions.
+        let mut list = SkipList::<i32>::new();
+        for i in 1..=5 {
+            list.push_back(i);
+        }
+        list.clear();
+        list.push_back(99);
+        list.push_front(0);
+        assert_eq!(list.len(), 2);
+        assert_eq!(list.front(), Some(&0));
+        assert_eq!(list.back(), Some(&99));
+    }
+
+    #[test]
+    fn clear_then_clear_again() {
+        let mut list = SkipList::<i32>::new();
+        list.push_back(1);
+        list.clear();
+        list.clear(); // second clear on already-empty list
+        assert!(list.is_empty());
+    }
+
+    #[test]
+    fn clear_large_list() {
+        // Large list to exercise the iterative Drop path.
+        let n = 1_000_usize;
+        let mut list = SkipList::<usize>::new();
+        for i in 0..n {
+            list.push_back(i);
+        }
+        list.clear();
+        assert_eq!(list.len(), 0);
+        assert!(list.is_empty());
+    }
+
+    // MARK: truncate
+
+    #[test]
+    fn truncate_noop_when_len_equals_current() {
+        let mut list = SkipList::<i32>::with_capacity(1);
+        list.push_back(1);
+        list.push_back(2);
+        list.push_back(3);
+        list.truncate(3);
+        assert_eq!(list.len(), 3);
+        assert_eq!(list.front(), Some(&1));
+        assert_eq!(list.back(), Some(&3));
+    }
+
+    #[test]
+    fn truncate_noop_when_len_greater() {
+        let mut list = SkipList::<i32>::with_capacity(1);
+        list.push_back(1);
+        list.push_back(2);
+        list.truncate(5);
+        assert_eq!(list.len(), 2);
+    }
+
+    #[test]
+    fn truncate_to_zero_clears_list() {
+        let mut list = SkipList::<i32>::with_capacity(1);
+        list.push_back(1);
+        list.push_back(2);
+        list.push_back(3);
+        list.truncate(0);
+        assert!(list.is_empty());
+        assert_eq!(list.len(), 0);
+        assert_eq!(list.front(), None);
+        assert_eq!(list.back(), None);
+    }
+
+    #[test]
+    fn truncate_to_one() {
+        let mut list = SkipList::<i32>::with_capacity(1);
+        list.push_back(1);
+        list.push_back(2);
+        list.push_back(3);
+        list.truncate(1);
+        assert_eq!(list.len(), 1);
+        assert_eq!(list.front(), Some(&1));
+        assert_eq!(list.back(), Some(&1));
+        assert!(list.head.next().and_then(|n| n.next()).is_none());
+    }
+
+    #[test]
+    fn truncate_keeps_correct_elements() {
+        let mut list = SkipList::<i32>::with_capacity(1);
+        for i in 1..=5 {
+            list.push_back(i); // [1, 2, 3, 4, 5]
+        }
+        list.truncate(3); // [1, 2, 3]
+        assert_eq!(list.len(), 3);
+        assert_eq!(list.get(0), Some(&1));
+        assert_eq!(list.get(1), Some(&2));
+        assert_eq!(list.get(2), Some(&3));
+        assert_eq!(list.get(3), None);
+    }
+
+    #[test]
+    fn truncate_back_pointer_updated() {
+        let mut list = SkipList::<i32>::new();
+        for i in 1..=5 {
+            list.push_back(i);
+        }
+        list.truncate(3);
+        assert_eq!(list.back(), Some(&3));
+    }
+
+    #[test]
+    fn truncate_front_unchanged() {
+        let mut list = SkipList::<i32>::new();
+        for i in 1..=5 {
+            list.push_back(i);
+        }
+        list.truncate(3);
+        assert_eq!(list.front(), Some(&1));
+    }
+
+    #[test]
+    fn truncate_empty_list() {
+        let mut list = SkipList::<i32>::new();
+        list.truncate(0);
+        assert!(list.is_empty());
+        list.truncate(5);
+        assert!(list.is_empty());
+    }
+
+    #[test]
+    fn truncate_usable_after_truncate() {
+        let mut list = SkipList::<i32>::with_capacity(1);
+        for i in 1..=5 {
+            list.push_back(i);
+        }
+        list.truncate(2); // [1, 2]
+        list.push_back(99); // [1, 2, 99]
+        assert_eq!(list.len(), 3);
+        assert_eq!(list.get(0), Some(&1));
+        assert_eq!(list.get(1), Some(&2));
+        assert_eq!(list.get(2), Some(&99));
+        assert_eq!(list.back(), Some(&99));
+    }
+
+    #[test]
+    fn truncate_then_truncate_more() {
+        let mut list = SkipList::<i32>::new();
+        for i in 1..=10 {
+            list.push_back(i);
+        }
+        list.truncate(7); // [1..=7]
+        list.truncate(4); // [1..=4]
+        assert_eq!(list.len(), 4);
+        assert_eq!(list.back(), Some(&4));
+        assert_eq!(list.get(0), Some(&1));
+        assert_eq!(list.get(1), Some(&2));
+        assert_eq!(list.get(2), Some(&3));
+        assert_eq!(list.get(3), Some(&4));
+    }
+
+    #[test]
+    fn truncate_large_list() {
+        const N: usize = 1_000;
+        const HALF: usize = 500;
+        let mut list = SkipList::<usize>::new();
+        for i in 0..N {
+            list.push_back(i);
+        }
+        list.truncate(HALF); // keep first 500
+        assert_eq!(list.len(), HALF);
+        for i in 0..HALF {
+            assert_eq!(list.get(i), Some(&i));
+        }
+        assert_eq!(list.back(), Some(&(HALF - 1)));
     }
 }

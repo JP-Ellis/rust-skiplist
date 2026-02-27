@@ -368,6 +368,36 @@ impl<V> Node<V> {
         unsafe { Box::from_raw(self) }
     }
 
+    /// Drops all nodes following `self` and sets `self.next` to `None`.
+    ///
+    /// This is an `$O(k)$` iterative operation, where k is the number of nodes
+    /// freed.  The caller is responsible for clearing any skip links that
+    /// pointed to the freed nodes before or after this call.
+    ///
+    /// # Safety
+    ///
+    /// The caller must ensure that no live references (including non-owning
+    /// skip-link pointers that will be dereferenced) to the nodes being freed
+    /// remain after this call.
+    #[inline]
+    pub(crate) fn truncate_next(&mut self) {
+        // Same iterative pattern as `Drop for Node<V>`, applied to the tail
+        // of the chain rather than the node itself.
+        let mut current = self.next.take();
+        while let Some(ptr) = current {
+            // SAFETY: Every node reachable via `next` was heap-allocated via
+            // `Box::new` and then leaked through `Box::leak` in
+            // `insert_after`.  We take ownership by removing the pointer from
+            // the previous node's `next` before reconstructing the `Box`, so
+            // no other owner exists.
+            let mut boxed: Box<Self> = unsafe { Box::from_raw(ptr.as_ptr()) };
+            current = boxed.next.take();
+            // Drop `boxed` here.  Because `next` was already taken, the
+            // node's own `Drop` impl will do nothing further.
+            drop(boxed);
+        }
+    }
+
     /// Join two sequences of nodes.
     ///
     /// Joins a head node to a tail node, creating a single sequence of nodes.
