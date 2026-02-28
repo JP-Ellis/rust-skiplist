@@ -1512,6 +1512,230 @@ impl<T, G: LevelGenerator> SkipList<T, G> {
         )
     }
 
+    /// Splits the list at the given index, returning a new list containing
+    /// all elements from index `at` onward.
+    ///
+    /// After the call, `self` contains elements at indices `[0, at)` and the
+    /// returned list contains elements previously at indices `[at, len)`,
+    /// renumbered from 0 in the returned list.
+    ///
+    /// Skip links are rebuilt for both halves in a single O(n) pass each.
+    /// Navigation to the split point is O(log n).
+    ///
+    /// # Panics
+    ///
+    /// Panics if `at > self.len()`.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use skiplist::skip_list::SkipList;
+    ///
+    /// let mut a = SkipList::<i32>::new();
+    /// for i in 1..=5 {
+    ///     a.push_back(i);
+    /// }
+    ///
+    /// let b = a.split_off(3);
+    /// let a_vals: Vec<i32> = a.iter().copied().collect();
+    /// let b_vals: Vec<i32> = b.iter().copied().collect();
+    /// assert_eq!(a_vals, [1, 2, 3]);
+    /// assert_eq!(b_vals, [4, 5]);
+    /// ```
+    #[expect(
+        clippy::expect_used,
+        reason = "`take_next_chain` returns None only if there is no successor, \
+                  which cannot happen when at < self.len (validated above); \
+                  Link::new(dist) succeeds because dist >= 1 by construction"
+    )]
+    #[expect(
+        clippy::multiple_unsafe_ops_per_block,
+        reason = "take_next_chain, set_head_next, NonNull::new_unchecked, and \
+                  rebuild_skip_links all touch provably disjoint heap nodes; \
+                  splitting across blocks would require unsafe-crossing raw-pointer \
+                  variables"
+    )]
+    #[inline]
+    #[must_use]
+    pub fn split_off(&mut self, at: usize) -> Self
+    where
+        G: Default,
+    {
+        assert!(
+            at <= self.len,
+            "split_off index {at} is out of bounds (len = {})",
+            self.len
+        );
+
+        let tail_len = self.len.saturating_sub(at);
+        let max_levels = self.head.level();
+
+        // ── Edge case: nothing to split off ──────────────────────────────
+        if tail_len == 0 {
+            return Self {
+                head: Box::new(Node::new(max_levels)),
+                tail: None,
+                len: 0,
+                generator: G::default(),
+            };
+        }
+
+        // ── Edge case: split at position 0 — transfer everything ─────────
+        if at == 0 {
+            let old_len = self.len;
+            let mut result = Self {
+                head: Box::new(Node::new(max_levels)),
+                tail: None, // set by rebuild below
+                len: old_len,
+                generator: G::default(),
+            };
+
+            // Transfer the entire node chain from self.head to result.head.
+            // SAFETY: We hold &mut self; no other references to any node
+            // exist.  take_next_chain detaches cleanly.  set_head_next
+            // wires the first node to result.head.
+            unsafe {
+                let head_ptr: *mut Node<T> = &raw mut *self.head;
+                if let Some(first_nn) = (*head_ptr).take_next_chain() {
+                    result.head.set_head_next(first_nn);
+                }
+            }
+
+            // Clear self.head's skip links (now all-None).
+            for link in self.head.links_mut() {
+                *link = None;
+            }
+            self.tail = None;
+            self.len = 0;
+
+            // Rebuild result's skip links (result.head is new; data nodes'
+            // inter-node links are stale for the new head).
+            // SAFETY: result.head is exclusively owned; all nodes reachable
+            // via result.head.next are live heap allocations.
+            unsafe {
+                result.tail = Self::rebuild_skip_links(&mut result.head, max_levels);
+            }
+
+            return result;
+        }
+
+        // ── General case: 0 < at < self.len ──────────────────────────────
+        //
+        // Navigate to the pivot (node[at − 1], the last node to keep in
+        // self), detach the tail chain, wire it to a fresh head, then
+        // rebuild skip links for both halves.
+        //
+        // SAFETY: at > 0 and at < self.len, so node_ptr_at(at − 1) returns
+        // a valid data node.  We hold &mut self, so exclusive access is
+        // guaranteed throughout.
+        unsafe {
+            let pivot: *mut Node<T> = self.node_ptr_at(at.saturating_sub(1)).as_ptr();
+
+            // Detach nodes [at ..] from the pivot.  Guaranteed to succeed
+            // because at < self.len means the pivot has at least one
+            // successor.
+            let first_of_tail = (*pivot)
+                .take_next_chain()
+                .expect("pivot has a successor because at < self.len");
+
+            // Build the returned list.
+            let mut result = Self {
+                head: Box::new(Node::new(max_levels)),
+                tail: None, // set by rebuild below
+                len: tail_len,
+                generator: G::default(),
+            };
+            result.head.set_head_next(first_of_tail);
+
+            // Update self's tail and length.
+            self.tail = Some(NonNull::new_unchecked(pivot));
+            self.len = at;
+
+            // Rebuild skip links for self (nodes 0 .. at).
+            self.tail = Self::rebuild_skip_links(&mut self.head, max_levels);
+
+            // Rebuild skip links for result (nodes at .. original_len).
+            result.tail = Self::rebuild_skip_links(&mut result.head, max_levels);
+
+            result
+        }
+    }
+
+    /// Rebuilds all skip links for the list rooted at `head` in a single
+    /// O(n) forward pass.  Returns the last data node as a `NonNull`, or
+    /// `None` if the list is empty.
+    ///
+    /// After the call every skip link in every node (including `head`) is
+    /// consistent with the current prev/next chain.
+    ///
+    /// # Safety
+    ///
+    /// `head` must be the exclusively-owned head sentinel of a valid
+    /// prev/next chain of heap-allocated [`Node<T>`] instances.  No other
+    /// live reference to any node in the chain may exist.
+    #[expect(
+        clippy::expect_used,
+        reason = "Link::new(dist) succeeds because dist >= 1 by construction \
+                  (new_rank is incremented before use and pred_rank < new_rank)"
+    )]
+    #[expect(
+        clippy::indexing_slicing,
+        clippy::needless_range_loop,
+        reason = "l < node_height <= max_levels = predecessors.len() = head.links.len(); \
+                  l indexes both predecessors[l] and links_mut()[l] simultaneously"
+    )]
+    #[expect(
+        clippy::multiple_unsafe_ops_per_block,
+        reason = "raw-pointer traversal, link clearing, and link wiring all touch \
+                  provably disjoint heap nodes; grouping them avoids unsafe-crossing \
+                  raw-pointer variables"
+    )]
+    unsafe fn rebuild_skip_links(
+        head: &mut Node<T>,
+        max_levels: usize,
+    ) -> Option<NonNull<Node<T>>> {
+        // Clear head's skip links; they will be fully rebuilt below.
+        for link in head.links_mut() {
+            *link = None;
+        }
+
+        let head_ptr: *mut Node<T> = head as *mut Node<T>;
+        let mut predecessors: Vec<(*mut Node<T>, usize)> = vec![(head_ptr, 0_usize); max_levels];
+        let mut new_rank: usize = 0;
+        let mut new_tail: Option<NonNull<Node<T>>> = None;
+
+        // SAFETY: head_ptr and all nodes reachable via next are live,
+        // exclusively-owned, heap-allocated Node<T> instances.  We do not
+        // create any overlapping references.
+        unsafe {
+            let mut cur_opt = (*head_ptr).next().map(NonNull::from);
+            while let Some(cur_nn) = cur_opt {
+                let cur: *mut Node<T> = cur_nn.as_ptr();
+                cur_opt = (*cur).next().map(NonNull::from);
+
+                new_rank = new_rank.saturating_add(1);
+                new_tail = Some(cur_nn);
+
+                // Clear this node's forward skip links; they will be re-wired
+                // when its successors are processed.
+                for link in (*cur).links_mut() {
+                    *link = None;
+                }
+
+                let height = (*cur).level();
+                for l in 0..height {
+                    let (pred_ptr, pred_rank) = predecessors[l];
+                    let dist = new_rank.saturating_sub(pred_rank);
+                    (*pred_ptr).links_mut()[l] =
+                        Some(Link::new(&*cur, dist).expect("dist >= 1 by construction"));
+                    predecessors[l] = (cur, new_rank);
+                }
+            }
+        }
+
+        new_tail
+    }
+
     /// Retains only the elements specified by the predicate.
     ///
     /// In other words, removes all elements `e` for which `f(&e)` returns
@@ -5420,5 +5644,169 @@ mod tests {
             list.push_back(i);
         }
         _ = list.range(0..10);
+    }
+
+    // MARK: split_off
+
+    #[test]
+    fn split_off_empty_list() {
+        let mut a = SkipList::<i32>::new();
+        let b = a.split_off(0);
+        assert!(a.is_empty());
+        assert!(b.is_empty());
+    }
+
+    #[test]
+    fn split_off_at_end_returns_empty() {
+        let mut a = SkipList::<i32>::new();
+        for i in 1..=5 {
+            a.push_back(i);
+        }
+        let b = a.split_off(5);
+        assert_eq!(a.len(), 5);
+        assert!(b.is_empty());
+        let a_vals: Vec<i32> = a.iter().copied().collect();
+        assert_eq!(a_vals, [1, 2, 3, 4, 5]);
+    }
+
+    #[test]
+    fn split_off_at_zero_transfers_all() {
+        let mut a = SkipList::<i32>::new();
+        for i in 1..=5 {
+            a.push_back(i);
+        }
+        let b = a.split_off(0);
+        assert!(a.is_empty());
+        assert_eq!(b.len(), 5);
+        let b_vals: Vec<i32> = b.iter().copied().collect();
+        assert_eq!(b_vals, [1, 2, 3, 4, 5]);
+    }
+
+    #[test]
+    fn split_off_middle() {
+        let mut a = SkipList::<i32>::new();
+        for i in 1..=5 {
+            a.push_back(i);
+        }
+        let b = a.split_off(3);
+        let a_vals: Vec<i32> = a.iter().copied().collect();
+        let b_vals: Vec<i32> = b.iter().copied().collect();
+        assert_eq!(a_vals, [1, 2, 3]);
+        assert_eq!(b_vals, [4, 5]);
+    }
+
+    #[test]
+    fn split_off_len_correct() {
+        let mut a = SkipList::<i32>::new();
+        for i in 0..10 {
+            a.push_back(i);
+        }
+        let b = a.split_off(4);
+        assert_eq!(a.len(), 4);
+        assert_eq!(b.len(), 6);
+    }
+
+    #[test]
+    fn split_off_front_back_correct() {
+        let mut a = SkipList::<i32>::new();
+        for i in 1..=6 {
+            a.push_back(i);
+        }
+        let b = a.split_off(3);
+        assert_eq!(a.front(), Some(&1));
+        assert_eq!(a.back(), Some(&3));
+        assert_eq!(b.front(), Some(&4));
+        assert_eq!(b.back(), Some(&6));
+    }
+
+    #[test]
+    #[expect(
+        clippy::as_conversions,
+        clippy::cast_possible_truncation,
+        clippy::cast_possible_wrap,
+        reason = "Numbers are small in test, and therefore not affected"
+    )]
+    fn split_off_get_works_after() {
+        let mut a = SkipList::<i32>::new();
+        for i in 0..10 {
+            a.push_back(i);
+        }
+        let b = a.split_off(5);
+        for i in 0..5 {
+            assert_eq!(a.get(i), Some(&(i as i32)));
+        }
+        for i in 0..5 {
+            assert_eq!(b.get(i), Some(&((i + 5) as i32)));
+        }
+    }
+
+    #[test]
+    fn split_off_single_element_at_zero() {
+        let mut a = SkipList::<i32>::new();
+        a.push_back(42);
+        let b = a.split_off(0);
+        assert!(a.is_empty());
+        assert_eq!(b.len(), 1);
+        assert_eq!(b.get(0), Some(&42));
+    }
+
+    #[test]
+    fn split_off_single_element_at_one() {
+        let mut a = SkipList::<i32>::new();
+        a.push_back(42);
+        let b = a.split_off(1);
+        assert_eq!(a.len(), 1);
+        assert_eq!(a.get(0), Some(&42));
+        assert!(b.is_empty());
+    }
+
+    #[test]
+    fn split_off_then_push() {
+        let mut a = SkipList::<i32>::new();
+        for i in 1..=4 {
+            a.push_back(i);
+        }
+        let mut b = a.split_off(2);
+        a.push_back(99);
+        b.push_back(100);
+        let a_vals: Vec<i32> = a.iter().copied().collect();
+        let b_vals: Vec<i32> = b.iter().copied().collect();
+        assert_eq!(a_vals, [1, 2, 99]);
+        assert_eq!(b_vals, [3, 4, 100]);
+    }
+
+    #[test]
+    #[should_panic(expected = "out of bounds")]
+    fn split_off_out_of_bounds_panics() {
+        let mut a = SkipList::<i32>::new();
+        for i in 1..=3 {
+            a.push_back(i);
+        }
+        _ = a.split_off(4);
+    }
+
+    #[test]
+    fn split_off_large_list() {
+        let n: usize = 200;
+        let mut a = SkipList::<usize>::new();
+        for i in 0..n {
+            a.push_back(i);
+        }
+        #[expect(
+            clippy::integer_division,
+            clippy::integer_division_remainder_used,
+            reason = "clearer to express the intent of splitting at one-third of the list length"
+        )]
+        let at = n / 3;
+        let b = a.split_off(at);
+        assert_eq!(a.len(), at);
+        assert_eq!(b.len(), n - at);
+        // Verify every element via get() to exercise skip links.
+        for i in 0..at {
+            assert_eq!(a.get(i), Some(&i));
+        }
+        for i in 0..(n - at) {
+            assert_eq!(b.get(i), Some(&(i + at)));
+        }
     }
 }

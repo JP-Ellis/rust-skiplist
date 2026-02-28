@@ -479,6 +479,168 @@ impl<V> Node<V> {
         // Finally, update self's 'next' pointer to point to the new node
         self.next = Some(node_ptr);
     }
+
+    /// Detaches the chain of nodes that follow `self` and returns a raw
+    /// pointer to the first detached node, or `None` if there is no successor.
+    ///
+    /// After this call:
+    /// - `self.next` is `None`.
+    /// - The returned node's `prev` is `None`.
+    ///
+    /// The caller takes ownership of the detached chain and must eventually
+    /// free it (typically by passing it to [`Node::set_head_next`] to attach
+    /// it to a fresh head sentinel).
+    ///
+    /// # Safety
+    ///
+    /// The caller must hold exclusive access to `self` and to all nodes in
+    /// the detached chain.  No other live reference to those nodes may exist
+    /// after this call.
+    #[inline]
+    pub(crate) unsafe fn take_next_chain(&mut self) -> Option<NonNull<Self>> {
+        let first = self.next.take()?;
+        // SAFETY: `first` is a live, heap-allocated node.  We took ownership
+        // via `self.next.take()`, establishing exclusive access before
+        // clearing the back-pointer.
+        unsafe { &mut *first.as_ptr() }.prev = None;
+        Some(first)
+    }
+
+    /// Wires `first` as the immediate successor of this head sentinel.
+    ///
+    /// After this call, `self.next = Some(first)` and
+    /// `first.prev = Some(NonNull(self))`.
+    ///
+    /// # Safety
+    ///
+    /// - `self.next` must be `None` before this call.
+    /// - `first` must point to a live, heap-allocated node with `prev == None`.
+    #[inline]
+    pub(crate) unsafe fn set_head_next(&mut self, first: NonNull<Self>) {
+        debug_assert!(self.next.is_none(), "set_head_next: self.next must be None");
+        let self_nn = NonNull::from(&mut *self);
+        // SAFETY: `first` is a live, heap-allocated node with `prev == None`.
+        // We are the exclusive owner of both `self` and `first` at this point.
+        unsafe { &mut *first.as_ptr() }.prev = Some(self_nn);
+        self.next = Some(first);
+    }
+
+    /// Filter and rebuild skip links in a single `$O(n)$` forward pass.
+    ///
+    /// Walks the `next` chain starting from `head` (the head sentinel).
+    /// For each data node:
+    ///
+    /// - If `keep(raw_ptr)` returns `true`, the node is retained and its skip
+    ///   links are re-wired into the rebuilt list.
+    /// - If `keep(raw_ptr)` returns `false`, `on_drop(boxed_node)` is called
+    ///   and the node is removed from the chain.
+    ///
+    /// Returns `(new_len, new_tail)` where `new_len` is the count of retained
+    /// nodes and `new_tail` is the last retained node, or `None` if all nodes
+    /// were removed.
+    ///
+    /// # Safety
+    ///
+    /// - `head` must be the exclusively-owned head sentinel of a valid
+    ///   prev/next chain of heap-allocated [`Node<V>`] instances.
+    /// - No other live reference to any node in the chain may exist during the
+    ///   call.
+    /// - The `keep` closure must not structurally modify the chain (no
+    ///   insertion, removal, or pointer update).  It may read or mutate node
+    ///   values before returning.
+    #[expect(
+        clippy::expect_used,
+        reason = "Link::new(dist) returns Err only when dist == 0; \
+                  dist = new_rank - pred_rank and new_rank > pred_rank \
+                  whenever a predecessor is recorded, so dist >= 1 always"
+    )]
+    #[expect(
+        clippy::indexing_slicing,
+        clippy::needless_range_loop,
+        reason = "l < node_height <= max_levels = predecessors.len() = self.level(); \
+                  l indexes both predecessors[l] and links_mut()[l] so a plain index \
+                  loop is the clearest expression"
+    )]
+    #[expect(
+        clippy::multiple_unsafe_ops_per_block,
+        reason = "raw-pointer traversal, link clearing, optional pop, and link wiring \
+                  all touch provably disjoint heap nodes; grouping them avoids \
+                  unsafe-crossing raw-pointer variables"
+    )]
+    pub(crate) unsafe fn filter_rebuild<F, D>(
+        &mut self,
+        mut keep: F,
+        mut on_drop: D,
+    ) -> (usize, Option<NonNull<Self>>)
+    where
+        F: FnMut(*mut Self) -> bool,
+        D: FnMut(Box<Self>),
+    {
+        let head_ptr: *mut Self = core::ptr::from_mut(self);
+        let max_levels = self.level();
+        let mut predecessors: Vec<(*mut Self, usize)> = vec![(head_ptr, 0_usize); max_levels];
+        let mut new_rank: usize = 0;
+        let mut new_tail: Option<NonNull<Self>> = None;
+
+        // SAFETY: head_ptr and all nodes reachable via next are live,
+        // exclusively-owned, heap-allocated Node<V> instances.  `keep` does
+        // not structurally modify the chain before returning.
+        unsafe {
+            for link in (*head_ptr).links_mut() {
+                *link = None;
+            }
+
+            let mut current_opt = (*head_ptr).next().map(NonNull::from);
+            while let Some(cur_nn) = current_opt {
+                let cur: *mut Self = cur_nn.as_ptr();
+                // Save successor before any structural mutation.
+                let next_opt = (*cur).next().map(NonNull::from);
+
+                if keep(cur) {
+                    new_rank = new_rank.saturating_add(1);
+                    new_tail = Some(cur_nn);
+
+                    // Clear this node's forward links; they will be re-wired.
+                    for link in (*cur).links_mut() {
+                        *link = None;
+                    }
+
+                    let height = (*cur).level();
+                    for l in 0..height {
+                        let (pred_ptr, pred_rank) = predecessors[l];
+                        let dist = new_rank.saturating_sub(pred_rank);
+                        (*pred_ptr).links_mut()[l] =
+                            Some(Link::new(&*cur, dist).expect("dist >= 1 by construction"));
+                        predecessors[l] = (cur, new_rank);
+                    }
+                } else {
+                    on_drop((*cur).pop());
+                }
+
+                current_opt = next_opt;
+            }
+        }
+
+        (new_rank, new_tail)
+    }
+
+    /// Rebuilds all skip links in a single `$O(n)$` forward pass, retaining every
+    /// node.
+    ///
+    /// This is the keep-all specialisation of [`filter_rebuild`](Self::filter_rebuild).
+    /// Returns the last data node as a [`NonNull`], or `None` if the chain is empty.
+    ///
+    /// # Safety
+    ///
+    /// Same as [`filter_rebuild`](Self::filter_rebuild): `self` must be the
+    /// exclusively-owned head sentinel of a valid prev/next chain, with no
+    /// other live references to any node in the chain.
+    #[inline]
+    pub(crate) unsafe fn rebuild(&mut self) -> Option<NonNull<Self>> {
+        // SAFETY: forwarded from caller.
+        let (_, tail) = unsafe { self.filter_rebuild(|_| true, |_| {}) };
+        tail
+    }
 }
 
 #[cfg(any(debug_assertions, test))]

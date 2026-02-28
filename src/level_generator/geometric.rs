@@ -96,6 +96,34 @@ impl Geometric {
     }
 }
 
+impl Default for Geometric {
+    /// Creates a `Geometric` level generator with 16 levels and `p = 0.5`.
+    ///
+    /// These defaults match the standard skip list configuration and provide a
+    /// good balance between memory usage and search performance for most use
+    /// cases.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use skiplist::level_generator::LevelGenerator;
+    /// use skiplist::level_generator::geometric::Geometric;
+    ///
+    /// let mut generator = Geometric::default();
+    /// assert_eq!(generator.total(), 16);
+    /// ```
+    #[inline]
+    fn default() -> Self {
+        #[expect(
+            clippy::expect_used,
+            reason = "16 levels and p = 0.5 are compile-time constants whose \
+                      validity is guaranteed by the Geometric invariants"
+        )]
+        Geometric::new(16, 0.5)
+            .expect("16 levels and p = 0.5 are always valid Geometric parameters")
+    }
+}
+
 impl LevelGenerator for Geometric {
     #[inline]
     fn total(&self) -> usize {
