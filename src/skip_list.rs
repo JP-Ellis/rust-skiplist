@@ -1725,6 +1725,49 @@ impl<T, G: LevelGenerator> SkipList<T, G> {
             _marker: PhantomData,
         }
     }
+
+    /// Creates a lazy iterator that removes and yields every element for
+    /// which `pred` returns `true`.
+    ///
+    /// Elements for which `pred` returns `false` are kept in the list.
+    /// The predicate receives a `&mut T` so it may inspect or mutate the
+    /// element before deciding whether to extract it.
+    ///
+    /// If the `ExtractIf` iterator is dropped before being fully consumed,
+    /// the predicate is **not** called for the remaining elements — they all
+    /// stay in the list.  The list remains valid and fully usable after the
+    /// iterator is dropped.
+    ///
+    /// This operation is O(n) for a full traversal.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use skiplist::skip_list::SkipList;
+    ///
+    /// let mut list = SkipList::<i32>::new();
+    /// for i in 1..=5 {
+    ///     list.push_back(i);
+    /// }
+    ///
+    /// let evens: Vec<i32> = list.extract_if(|x| *x % 2 == 0).collect();
+    /// assert_eq!(evens, [2, 4]);
+    /// let remaining: Vec<i32> = list.iter().copied().collect();
+    /// assert_eq!(remaining, [1, 3, 5]);
+    /// ```
+    #[inline]
+    pub fn extract_if<F>(&mut self, pred: F) -> ExtractIf<'_, T, G, F>
+    where
+        F: FnMut(&mut T) -> bool,
+    {
+        let current = self.head.next().map(NonNull::from);
+        ExtractIf {
+            current,
+            any_removed: false,
+            list: self,
+            pred,
+        }
+    }
 }
 
 // MARK: Default
@@ -2219,6 +2262,237 @@ impl<T> DoubleEndedIterator for Drain<'_, T> {
 }
 
 impl<T> FusedIterator for Drain<'_, T> {}
+
+// MARK: ExtractIf
+
+/// A lazy iterator that removes and yields elements satisfying a predicate.
+///
+/// This struct is created by the [`SkipList::extract_if`] method.  The
+/// predicate is called once per element, in forward order.  Elements for
+/// which it returns `true` are removed from the list and yielded; all others
+/// remain in place.
+///
+/// If the iterator is dropped before being fully consumed the predicate is
+/// **not** called for the remaining elements — they all stay in the list and
+/// the list remains fully usable.
+///
+/// Does **not** implement [`DoubleEndedIterator`] or [`ExactSizeIterator`].
+///
+/// # Examples
+///
+/// ```rust
+/// use skiplist::skip_list::SkipList;
+///
+/// let mut list = SkipList::<i32>::new();
+/// for i in 1..=5 {
+///     list.push_back(i);
+/// }
+///
+/// let evens: Vec<i32> = list.extract_if(|x| *x % 2 == 0).collect();
+/// assert_eq!(evens, [2, 4]);
+/// let remaining: Vec<i32> = list.iter().copied().collect();
+/// assert_eq!(remaining, [1, 3, 5]);
+/// ```
+#[must_use = "iterators are lazy and do nothing unless consumed"]
+pub struct ExtractIf<'a, T, G: LevelGenerator = Geometric, F = fn(&mut T) -> bool>
+where
+    F: FnMut(&mut T) -> bool,
+{
+    /// Mutable borrow of the owning list (needed to rebuild skip links on
+    /// drop and to update `len` and `tail` on each removal).
+    list: &'a mut SkipList<T, G>,
+    /// Raw pointer to the next node to visit, or `None` when the iterator
+    /// has been exhausted.
+    current: Option<NonNull<Node<T>>>,
+    /// Set to `true` the first time an element is removed.  Used to skip
+    /// the O(n) skip-link rebuild in `Drop::drop` when nothing was removed.
+    any_removed: bool,
+    /// User-supplied filter predicate.
+    pred: F,
+}
+
+// SAFETY: ExtractIf<'a, T, G, F> yields owned T values and holds
+// &'a mut SkipList<T, G>.  Sending it to another thread requires
+// T: Send, G: Send, and F: Send.
+unsafe impl<T: Send, G: LevelGenerator + Send, F: Send> Send for ExtractIf<'_, T, G, F> where
+    F: FnMut(&mut T) -> bool
+{
+}
+
+// SAFETY: Sharing &ExtractIf<'a, T, G, F> requires T: Sync, G: Sync, F: Sync.
+// Advancing the iterator requires &mut ExtractIf, preventing concurrent mutation.
+unsafe impl<T: Sync, G: LevelGenerator + Sync, F: Sync> Sync for ExtractIf<'_, T, G, F> where
+    F: FnMut(&mut T) -> bool
+{
+}
+
+impl<T: fmt::Debug, G: LevelGenerator, F> fmt::Debug for ExtractIf<'_, T, G, F>
+where
+    F: FnMut(&mut T) -> bool,
+{
+    #[inline]
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // Display the unvisited elements reachable from `current`.
+        // We hold &self so no mutable access is in progress.
+        let mut builder = f.debug_list();
+        let mut ptr = self.current;
+        while let Some(nn) = ptr {
+            // SAFETY: nn points to a live Node<T> owned by the SkipList that
+            // created this ExtractIf.  We only read through it here, and
+            // &self prevents concurrent mutable access.
+            let node = unsafe { nn.as_ref() };
+            if let Some(v) = node.value() {
+                builder.entry(v);
+            }
+            ptr = node.next().map(NonNull::from);
+        }
+        builder.finish()
+    }
+}
+
+impl<T, G: LevelGenerator, F> Iterator for ExtractIf<'_, T, G, F>
+where
+    F: FnMut(&mut T) -> bool,
+{
+    type Item = T;
+
+    #[expect(
+        clippy::unwrap_in_result,
+        clippy::expect_used,
+        reason = "`value_mut()` and `take_value()` return None only for the head \
+              sentinel, which is never reachable via the data-node walk; the \
+              expect fires only on invariant violations"
+    )]
+    #[expect(
+        clippy::multiple_unsafe_ops_per_block,
+        reason = "raw-pointer dereference, value_mut(), tail-update read, and pop() \
+              all touch provably disjoint heap nodes; splitting across blocks \
+              would require unsafe-crossing raw-pointer variables"
+    )]
+    #[inline]
+    fn next(&mut self) -> Option<T> {
+        // Walk forward until the predicate matches or the list is exhausted.
+        loop {
+            let current_nn = self.current?;
+            // SAFETY: current_nn was derived from a heap-allocated Node<T>
+            // owned by the SkipList that created this ExtractIf.  We hold
+            // &'a mut SkipList exclusively for the iterator's lifetime,
+            // ensuring every node remains allocated and non-aliased.
+            // We capture next_opt before any mutation of the current node.
+            unsafe {
+                let current: *mut Node<T> = current_nn.as_ptr();
+                let next_opt = (*current).next().map(NonNull::from);
+
+                let value_ref = (*current).value_mut().expect("data node has value");
+                if (self.pred)(value_ref) {
+                    self.current = next_opt;
+                    self.any_removed = true;
+                    self.list.len = self.list.len.saturating_sub(1);
+                    // If this node was the tail, update the tail pointer to
+                    // the predecessor data node (or None if the list is now
+                    // empty).
+                    if self.list.tail == Some(current_nn) {
+                        self.list.tail = (*current)
+                            .prev()
+                            .filter(|p| p.value().is_some())
+                            .map(NonNull::from);
+                    }
+                    let mut boxed = (*current).pop();
+                    return Some(boxed.take_value().expect("data node has value"));
+                }
+                self.current = next_opt;
+            }
+        }
+    }
+
+    #[inline]
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        // The predicate outcome is unknown, so the lower bound is 0.
+        // At most all remaining list elements could be extracted.
+        (0, Some(self.list.len))
+    }
+}
+
+impl<T, G: LevelGenerator, F> FusedIterator for ExtractIf<'_, T, G, F> where F: FnMut(&mut T) -> bool
+{}
+
+impl<T, G: LevelGenerator, F> Drop for ExtractIf<'_, T, G, F>
+where
+    F: FnMut(&mut T) -> bool,
+{
+    #[expect(
+        clippy::expect_used,
+        reason = "`Link::new` returns None only when dist == 0, which cannot happen \
+              because dist = new_rank - pred_rank and new_rank > pred_rank \
+              whenever a predecessor exists"
+    )]
+    #[expect(
+        clippy::indexing_slicing,
+        clippy::needless_range_loop,
+        reason = "l < node_height ≤ max_levels = predecessors.len() = head.links.len(); \
+              l is used for both predecessors[l] and links_mut()[l] so an index \
+              loop is the clearest expression"
+    )]
+    #[expect(
+        clippy::multiple_unsafe_ops_per_block,
+        reason = "raw-pointer traversal, link clearing, and link wiring all touch \
+              provably disjoint heap nodes; splitting across blocks would require \
+              unsafe-crossing raw-pointer variables"
+    )]
+    #[inline]
+    fn drop(&mut self) {
+        if !self.any_removed {
+            // Nothing was removed; skip links are still valid.
+            return;
+        }
+        // Rebuild all skip links in one O(n) forward pass over the prev/next
+        // chain.  The same algorithm is used by `retain` and `retain_mut`.
+        // The prev/next chain is already correct (each `pop()` in `next()`
+        // spliced out the removed node), so we only need to re-derive the
+        // level-indexed skip links.
+        //
+        // SAFETY: &'a mut SkipList is held exclusively.  All raw pointers
+        // originate from its heap allocations.  We save the successor before
+        // clearing links, so traversal is correct throughout.
+        unsafe {
+            let head_ptr: *mut Node<T> = &raw mut *self.list.head;
+            let max_levels = (*head_ptr).level();
+
+            for link in (*head_ptr).links_mut() {
+                *link = None;
+            }
+
+            let mut predecessors: Vec<(*mut Node<T>, usize)> =
+                vec![(head_ptr, 0_usize); max_levels];
+            let mut new_rank: usize = 0;
+            let mut new_tail: Option<NonNull<Node<T>>> = None;
+
+            let mut cur_opt = (*head_ptr).next().map(NonNull::from);
+            while let Some(cur_nn) = cur_opt {
+                let cur: *mut Node<T> = cur_nn.as_ptr();
+                cur_opt = (*cur).next().map(NonNull::from);
+
+                new_rank = new_rank.saturating_add(1);
+                new_tail = Some(cur_nn);
+
+                for link in (*cur).links_mut() {
+                    *link = None;
+                }
+                let height = (*cur).level();
+                for l in 0..height {
+                    let (pred_ptr, pred_rank) = predecessors[l];
+                    let dist = new_rank.saturating_sub(pred_rank);
+                    (*pred_ptr).links_mut()[l] =
+                        Some(Link::new(&*cur, dist).expect("dist = new_rank - pred_rank ≥ 1"));
+                    predecessors[l] = (cur, new_rank);
+                }
+            }
+            self.list.tail = new_tail;
+            // self.list.len is already correct: decremented in Iterator::next
+            // once per removed element.
+        }
+    }
+}
 
 // MARK: Tests
 
@@ -4630,5 +4904,208 @@ mod tests {
             list.push_back(i);
         }
         _ = list.drain(0..10);
+    }
+
+    // MARK: extract_if
+
+    #[test]
+    fn extract_if_empty() {
+        let mut list = SkipList::<i32>::new();
+        let extracted: Vec<i32> = list.extract_if(|_| true).collect();
+        assert!(extracted.is_empty());
+        assert!(list.is_empty());
+    }
+
+    #[test]
+    fn extract_if_none_match() {
+        let mut list = SkipList::<i32>::new();
+        for i in 1..=5 {
+            list.push_back(i);
+        }
+        let extracted: Vec<i32> = list.extract_if(|_| false).collect();
+        assert!(extracted.is_empty());
+        assert_eq!(list.len(), 5);
+        let remaining: Vec<i32> = list.iter().copied().collect();
+        assert_eq!(remaining, [1, 2, 3, 4, 5]);
+    }
+
+    #[test]
+    fn extract_if_all_match() {
+        let mut list = SkipList::<i32>::new();
+        for i in 1..=5 {
+            list.push_back(i);
+        }
+        let extracted: Vec<i32> = list.extract_if(|_| true).collect();
+        assert_eq!(extracted, [1, 2, 3, 4, 5]);
+        assert!(list.is_empty());
+        assert_eq!(list.len(), 0);
+    }
+
+    #[test]
+    fn extract_if_evens() {
+        let mut list = SkipList::<i32>::new();
+        for i in 1..=5 {
+            list.push_back(i);
+        }
+        #[expect(
+            clippy::integer_division_remainder_used,
+            reason = "clearer to express the intent of extracting even numbers"
+        )]
+        let extracted: Vec<i32> = list.extract_if(|x| *x % 2 == 0).collect();
+        assert_eq!(extracted, [2, 4]);
+        let remaining: Vec<i32> = list.iter().copied().collect();
+        assert_eq!(remaining, [1, 3, 5]);
+    }
+
+    #[test]
+    fn extract_if_preserves_order() {
+        let mut list = SkipList::<i32>::new();
+        for i in [5, 1, 4, 2, 3] {
+            list.push_back(i);
+        }
+        // Extract values > 3; they appear in insertion order.
+        let extracted: Vec<i32> = list.extract_if(|x| *x > 3).collect();
+        assert_eq!(extracted, [5, 4]);
+        let remaining: Vec<i32> = list.iter().copied().collect();
+        assert_eq!(remaining, [1, 2, 3]);
+    }
+
+    #[test]
+    fn extract_if_remaining_in_list() {
+        let mut list = SkipList::<i32>::new();
+        for i in 1..=6 {
+            list.push_back(i);
+        }
+        // Extract odd numbers.
+        #[expect(
+            clippy::integer_division_remainder_used,
+            reason = "clearer to express the intent of extracting odd numbers"
+        )]
+        let extracted: Vec<i32> = list.extract_if(|x| *x % 2 != 0).collect();
+        assert_eq!(extracted, [1, 3, 5]);
+        assert_eq!(list.len(), 3);
+        let remaining: Vec<i32> = list.iter().copied().collect();
+        assert_eq!(remaining, [2, 4, 6]);
+    }
+
+    #[test]
+    #[expect(
+        clippy::integer_division_remainder_used,
+        reason = "clearer to express the intent of extracting multiples of 3"
+    )]
+    fn extract_if_links_consistent() {
+        let mut list = SkipList::<i32>::new();
+        for i in 0..10 {
+            list.push_back(i);
+        }
+        // Extract elements divisible by 3: 0, 3, 6, 9.
+        _ = list.extract_if(|x| *x % 3 == 0).count();
+        // Remaining: 1, 2, 4, 5, 7, 8
+        let expected = [1, 2, 4, 5, 7, 8];
+        assert_eq!(list.len(), expected.len());
+        for (idx, &v) in expected.iter().enumerate() {
+            assert_eq!(list.get(idx), Some(&v));
+        }
+        assert_eq!(list.get(list.len()), None);
+    }
+
+    #[test]
+    fn extract_if_drop_early() {
+        // Drop the ExtractIf mid-iteration; unvisited elements stay in the list.
+        let mut list = SkipList::<i32>::new();
+        for i in 1..=5 {
+            list.push_back(i);
+        }
+        {
+            #[expect(
+                clippy::integer_division_remainder_used,
+                reason = "clearer to express the intent of extracting even numbers"
+            )]
+            let mut it = list.extract_if(|x| *x % 2 == 0);
+            // Advance once: visits 1 (kept), then 2 (extracted).
+            assert_eq!(it.next(), Some(2));
+            // Drop here; 3, 4, 5 are not visited and stay in the list.
+        }
+        // 1 was kept, 2 was extracted, 3/4/5 were never visited.
+        assert_eq!(list.len(), 4);
+        let remaining: Vec<i32> = list.iter().copied().collect();
+        assert_eq!(remaining, [1, 3, 4, 5]);
+    }
+
+    #[test]
+    fn extract_if_tail_updated() {
+        // Verify that back() returns the correct node after the tail is removed.
+        let mut list = SkipList::<i32>::new();
+        for i in 1..=4 {
+            list.push_back(i);
+        }
+        // Extract elements >= 3 (i.e. 3 and 4, including the tail).
+        let extracted: Vec<i32> = list.extract_if(|x| *x >= 3).collect();
+        assert_eq!(extracted, [3, 4]);
+        assert_eq!(list.back(), Some(&2));
+    }
+
+    #[test]
+    fn extract_if_len_correct() {
+        // Verify that `list.len` is decremented on each extraction, observable
+        // via `size_hint` (whose upper bound reflects the current list length).
+        let mut list = SkipList::<i32>::new();
+        for i in 1..=5 {
+            list.push_back(i);
+        }
+        #[expect(
+            clippy::integer_division_remainder_used,
+            reason = "clearer to express the intent of extracting even numbers"
+        )]
+        let mut it = list.extract_if(|x| *x % 2 == 0);
+        // Before any extraction: upper bound = 5.
+        assert_eq!(it.size_hint(), (0, Some(5)));
+        // Extract 2 (visits 1 kept, 2 extracted).
+        assert_eq!(it.next(), Some(2));
+        // list.len is now 4.
+        assert_eq!(it.size_hint(), (0, Some(4)));
+        // Extract 4 (visits 3 kept, 4 extracted).
+        assert_eq!(it.next(), Some(4));
+        // list.len is now 3.
+        assert_eq!(it.size_hint(), (0, Some(3)));
+        drop(it);
+        assert_eq!(list.len(), 3);
+    }
+
+    #[test]
+    fn extract_if_fused() {
+        let mut list = SkipList::<i32>::new();
+        list.push_back(1);
+        let mut it = list.extract_if(|_| true);
+        assert_eq!(it.next(), Some(1));
+        assert_eq!(it.next(), None);
+        assert_eq!(it.next(), None);
+    }
+
+    #[test]
+    fn extract_if_mut_predicate() {
+        // Predicate receives &mut T — verify it can mutate values before keeping.
+        let mut list = SkipList::<i32>::new();
+        for i in 1..=4 {
+            list.push_back(i);
+        }
+        // Double even elements, extract only the odd ones.
+        #[expect(
+            clippy::integer_division_remainder_used,
+            reason = "clearer to express the intent of modifying even numbers in place and extracting odd numbers"
+        )]
+        let extracted: Vec<i32> = list
+            .extract_if(|x| {
+                if *x % 2 == 0 {
+                    *x *= 10;
+                    false
+                } else {
+                    true
+                }
+            })
+            .collect();
+        assert_eq!(extracted, [1, 3]);
+        let remaining: Vec<i32> = list.iter().copied().collect();
+        assert_eq!(remaining, [20, 40]);
     }
 }

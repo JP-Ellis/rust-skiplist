@@ -2,7 +2,6 @@
 #:tombi schema.strict = false
 
 criterion_home = "./criterion"
-plotting_backend = "plotters"
 
 # Comparison-chart colors, assigned by benchmark order within each group.
 #
