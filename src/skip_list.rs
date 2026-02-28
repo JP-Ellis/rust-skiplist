@@ -1340,6 +1340,178 @@ impl<T, G: LevelGenerator> SkipList<T, G> {
         }
     }
 
+    /// Returns an iterator over shared references to elements within the
+    /// given index range.
+    ///
+    /// The iterator supports [`DoubleEndedIterator`], [`ExactSizeIterator`],
+    /// and [`FusedIterator`].  Setting up the iterator navigates to the
+    /// start and end nodes in O(log n) via the skip links.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the start of the range is greater than the end, or if the
+    /// end is greater than [`self.len()`][SkipList::len].
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use skiplist::skip_list::SkipList;
+    ///
+    /// let mut list = SkipList::<i32>::new();
+    /// for i in 1..=5 {
+    ///     list.push_back(i);
+    /// }
+    ///
+    /// let slice: Vec<i32> = list.range(1..4).copied().collect();
+    /// assert_eq!(slice, [2, 3, 4]);
+    ///
+    /// let reversed: Vec<i32> = list.range(1..4).copied().rev().collect();
+    /// assert_eq!(reversed, [4, 3, 2]);
+    /// ```
+    #[inline]
+    pub fn range<R: RangeBounds<usize>>(&self, range: R) -> Iter<'_, T> {
+        let start = match range.start_bound() {
+            Bound::Included(&s) => s,
+            Bound::Excluded(&s) => s.saturating_add(1),
+            Bound::Unbounded => 0,
+        };
+        let end = match range.end_bound() {
+            Bound::Included(&e) => e.saturating_add(1),
+            Bound::Excluded(&e) => e,
+            Bound::Unbounded => self.len,
+        };
+        assert!(
+            start <= end,
+            "range start (is {start}) must be ≤ end (is {end})"
+        );
+        assert!(
+            end <= self.len,
+            "range end (is {end}) must be ≤ len (is {})",
+            self.len
+        );
+        let count = end.saturating_sub(start);
+        if count == 0 {
+            return Iter {
+                front: None,
+                back: None,
+                len: 0,
+                _marker: PhantomData,
+            };
+        }
+        Iter {
+            front: Some(self.node_ptr_at(start)),
+            back: Some(self.node_ptr_at(end.saturating_sub(1))),
+            len: count,
+            _marker: PhantomData,
+        }
+    }
+
+    /// Returns an iterator over mutable references to elements within the
+    /// given index range.
+    ///
+    /// The iterator supports [`DoubleEndedIterator`], [`ExactSizeIterator`],
+    /// and [`FusedIterator`].  Setting up the iterator navigates to the
+    /// start and end nodes in O(log n) via the skip links.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the start of the range is greater than the end, or if the
+    /// end is greater than [`self.len()`][SkipList::len].
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use skiplist::skip_list::SkipList;
+    ///
+    /// let mut list = SkipList::<i32>::new();
+    /// for i in 1..=5 {
+    ///     list.push_back(i);
+    /// }
+    ///
+    /// for v in list.range_mut(1..4) {
+    ///     *v *= 10;
+    /// }
+    /// let collected: Vec<i32> = list.iter().copied().collect();
+    /// assert_eq!(collected, [1, 20, 30, 40, 5]);
+    /// ```
+    #[inline]
+    pub fn range_mut<R: RangeBounds<usize>>(&mut self, range: R) -> IterMut<'_, T> {
+        let start = match range.start_bound() {
+            Bound::Included(&s) => s,
+            Bound::Excluded(&s) => s.saturating_add(1),
+            Bound::Unbounded => 0,
+        };
+        let end = match range.end_bound() {
+            Bound::Included(&e) => e.saturating_add(1),
+            Bound::Excluded(&e) => e,
+            Bound::Unbounded => self.len,
+        };
+        assert!(
+            start <= end,
+            "range start (is {start}) must be ≤ end (is {end})"
+        );
+        assert!(
+            end <= self.len,
+            "range end (is {end}) must be ≤ len (is {})",
+            self.len
+        );
+        let count = end.saturating_sub(start);
+        if count == 0 {
+            return IterMut {
+                front: None,
+                back: None,
+                len: 0,
+                _marker: PhantomData,
+            };
+        }
+        IterMut {
+            front: Some(self.node_ptr_at(start)),
+            back: Some(self.node_ptr_at(end.saturating_sub(1))),
+            len: count,
+            _marker: PhantomData,
+        }
+    }
+
+    /// Returns a [`NonNull`] pointer to the data node at the given 0-based
+    /// `index`.  The caller must ensure `index < self.len`.
+    #[expect(
+        clippy::expect_used,
+        reason = "the level-0 successor of the found predecessor is guaranteed to \
+                  exist because callers (range / range_mut / split_off) validate \
+                  index < self.len before calling this helper; the expect fires \
+                  only on internal invariant violations"
+    )]
+    #[inline]
+    fn node_ptr_at(&self, index: usize) -> NonNull<Node<T>> {
+        debug_assert!(
+            index < self.len,
+            "index {index} out of bounds (len={})",
+            self.len
+        );
+        let target_rank = index.saturating_add(1);
+        let mut current: &Node<T> = &self.head;
+        let mut current_rank: usize = 0;
+        let levels = self.head.level();
+        for l in (0..levels).rev() {
+            while let Some(Some(link)) = current.links().get(l) {
+                let next_rank = current_rank.saturating_add(link.distance().get());
+                if next_rank >= target_rank {
+                    break;
+                }
+                current_rank = next_rank;
+                current = link.node();
+            }
+        }
+        NonNull::from(
+            current
+                .links()
+                .first()
+                .and_then(Option::as_ref)
+                .expect("node at index exists because index < self.len")
+                .node(),
+        )
+    }
+
     /// Retains only the elements specified by the predicate.
     ///
     /// In other words, removes all elements `e` for which `f(&e)` returns
@@ -5107,5 +5279,146 @@ mod tests {
         assert_eq!(extracted, [1, 3]);
         let remaining: Vec<i32> = list.iter().copied().collect();
         assert_eq!(remaining, [20, 40]);
+    }
+
+    // MARK: range
+
+    #[test]
+    fn range_empty_list() {
+        let list = SkipList::<i32>::new();
+        let v: Vec<i32> = list.range(0..0).copied().collect();
+        assert!(v.is_empty());
+    }
+
+    #[test]
+    fn range_empty_range() {
+        let mut list = SkipList::<i32>::new();
+        for i in 1..=5 {
+            list.push_back(i);
+        }
+        let v: Vec<i32> = list.range(2..2).copied().collect();
+        assert!(v.is_empty());
+    }
+
+    #[test]
+    fn range_full() {
+        let mut list = SkipList::<i32>::new();
+        for i in 1..=5 {
+            list.push_back(i);
+        }
+        let from_range: Vec<i32> = list.range(..).copied().collect();
+        let from_iter: Vec<i32> = list.iter().copied().collect();
+        assert_eq!(from_range, from_iter);
+    }
+
+    #[test]
+    fn range_half_open() {
+        let mut list = SkipList::<i32>::new();
+        for i in 1..=5 {
+            list.push_back(i);
+        }
+        let v: Vec<i32> = list.range(1..4).copied().collect();
+        assert_eq!(v, [2, 3, 4]);
+    }
+
+    #[test]
+    fn range_inclusive() {
+        let mut list = SkipList::<i32>::new();
+        for i in 1..=5 {
+            list.push_back(i);
+        }
+        let v: Vec<i32> = list.range(1..=3).copied().collect();
+        assert_eq!(v, [2, 3, 4]);
+    }
+
+    #[test]
+    fn range_single() {
+        let mut list = SkipList::<i32>::new();
+        for i in 1..=5 {
+            list.push_back(i);
+        }
+        let v: Vec<i32> = list.range(2..=2).copied().collect();
+        assert_eq!(v, [3]);
+    }
+
+    #[test]
+    fn range_double_ended() {
+        let mut list = SkipList::<i32>::new();
+        for i in 1..=5 {
+            list.push_back(i);
+        }
+        let mut it = list.range(1..4);
+        assert_eq!(it.next(), Some(&2));
+        assert_eq!(it.next_back(), Some(&4));
+        assert_eq!(it.next(), Some(&3));
+        assert_eq!(it.next(), None);
+        assert_eq!(it.next_back(), None);
+    }
+
+    #[test]
+    fn range_rev() {
+        let mut list = SkipList::<i32>::new();
+        for i in 1..=5 {
+            list.push_back(i);
+        }
+        let v: Vec<i32> = list.range(1..4).copied().rev().collect();
+        assert_eq!(v, [4, 3, 2]);
+    }
+
+    #[test]
+    fn range_exact_size() {
+        let mut list = SkipList::<i32>::new();
+        for i in 1..=5 {
+            list.push_back(i);
+        }
+        let it = list.range(1..4);
+        assert_eq!(it.len(), 3);
+    }
+
+    #[test]
+    fn range_mut_modify() {
+        let mut list = SkipList::<i32>::new();
+        for i in 1..=5 {
+            list.push_back(i);
+        }
+        for v in list.range_mut(1..4) {
+            *v *= 10;
+        }
+        let collected: Vec<i32> = list.iter().copied().collect();
+        assert_eq!(collected, [1, 20, 30, 40, 5]);
+    }
+
+    #[test]
+    fn range_mut_double_ended() {
+        let mut list = SkipList::<i32>::new();
+        for i in 1..=5 {
+            list.push_back(i);
+        }
+        let v: Vec<i32> = list.range_mut(1..4).map(|x| *x).rev().collect();
+        assert_eq!(v, [4, 3, 2]);
+    }
+
+    #[test]
+    #[expect(
+        clippy::reversed_empty_ranges,
+        reason = "Intentional test of invalid range handling in range()"
+    )]
+    #[should_panic(expected = "range start")]
+    fn range_panic_start_gt_end() {
+        let mut list = SkipList::<i32>::new();
+        for i in 1..=5 {
+            list.push_back(i);
+        }
+        _ = list.range(3..1);
+    }
+
+    #[test]
+    #[should_panic(expected = "range end")]
+    fn range_panic_end_gt_len() {
+        let mut list = SkipList::<i32>::new();
+        for i in 1..=5 {
+            list.push_back(i);
+        }
+        _ = list.range(0..10);
     }
 }
