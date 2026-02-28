@@ -16,6 +16,9 @@
 //! ```
 
 use core::{
+    fmt,
+    iter::FusedIterator,
+    marker::PhantomData,
     ops::{Index, IndexMut},
     ptr::NonNull,
 };
@@ -477,8 +480,11 @@ impl<T, G: LevelGenerator> SkipList<T, G> {
     )]
     #[expect(
         clippy::indexing_slicing,
+        clippy::needless_range_loop,
         reason = "l < max_levels = head.links.len(); every node in update[] was reached \
-                  via a level-l link so its links.len() > l; all accesses are in bounds"
+                  via a level-l link so its links.len() > l; all accesses are in bounds; \
+                  l is used for both update[l] and links_mut()[l] so a plain index loop is \
+                  the clearest expression"
     )]
     #[expect(
         clippy::multiple_unsafe_ops_per_block,
@@ -1258,6 +1264,44 @@ impl<T, G: LevelGenerator> SkipList<T, G> {
         self.len = self.len.saturating_sub(1);
         value
     }
+
+    // MARK: Iteration
+
+    /// Returns an iterator over shared references to the elements of the list,
+    /// from front to back.
+    ///
+    /// The iterator also supports [`DoubleEndedIterator`], allowing traversal
+    /// in reverse order.  Advancing from both ends toward the middle is also
+    /// supported: calls to [`Iterator::next`] and
+    /// [`DoubleEndedIterator::next_back`] can be interleaved freely.
+    ///
+    /// This operation is O(1).
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use skiplist::skip_list::SkipList;
+    ///
+    /// let mut list = SkipList::<i32>::new();
+    /// list.push_back(1);
+    /// list.push_back(2);
+    /// list.push_back(3);
+    ///
+    /// let collected: Vec<i32> = list.iter().copied().collect();
+    /// assert_eq!(collected, [1, 2, 3]);
+    ///
+    /// let reversed: Vec<i32> = list.iter().copied().rev().collect();
+    /// assert_eq!(reversed, [3, 2, 1]);
+    /// ```
+    #[inline]
+    pub fn iter(&self) -> Iter<'_, T> {
+        Iter {
+            front: self.head.next().map(NonNull::from),
+            back: self.tail,
+            len: self.len,
+            _marker: PhantomData,
+        }
+    }
 }
 
 // MARK: Default
@@ -1314,6 +1358,142 @@ impl<T, G: LevelGenerator> IndexMut<usize> for SkipList<T, G> {
         self.get_mut(index).unwrap()
     }
 }
+
+// MARK: IntoIterator
+
+impl<'a, T, G: LevelGenerator> IntoIterator for &'a SkipList<T, G> {
+    type Item = &'a T;
+    type IntoIter = Iter<'a, T>;
+
+    #[inline]
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
+    }
+}
+
+// MARK: Iter
+
+/// An iterator over shared references to the elements of a [`SkipList`].
+///
+/// This struct is created by the [`SkipList::iter`] method.  See its
+/// documentation for more.
+///
+/// # Examples
+///
+/// ```rust
+/// use skiplist::skip_list::SkipList;
+///
+/// let mut list = SkipList::<i32>::new();
+/// list.push_back(1);
+/// list.push_back(2);
+/// list.push_back(3);
+///
+/// let mut iter = list.iter();
+/// assert_eq!(iter.next(), Some(&1));
+/// assert_eq!(iter.next_back(), Some(&3));
+/// assert_eq!(iter.next(), Some(&2));
+/// assert_eq!(iter.next(), None);
+/// ```
+#[must_use = "iterators are lazy and do nothing unless consumed"]
+pub struct Iter<'a, T> {
+    /// Pointer to the next element to yield from the front, or `None` when
+    /// the iterator is exhausted or the list was empty.
+    front: Option<NonNull<Node<T>>>,
+    /// Pointer to the next element to yield from the back, or `None` when
+    /// the iterator is exhausted or the list was empty.
+    back: Option<NonNull<Node<T>>>,
+    /// Number of elements remaining.  Guards against yielding more than
+    /// `len` items even when `front` and `back` pointers become stale after
+    /// crossing mid-list during interleaved `next`/`next_back` calls.
+    len: usize,
+    /// Ties the iterator's lifetime to `&'a SkipList` and expresses
+    /// covariance in `T`.
+    _marker: PhantomData<&'a T>,
+}
+
+// SAFETY: Iter<'a, T> yields `&'a T` (shared, non-owning references).
+// Sending it to another thread requires T: Sync because the receiving
+// thread will read T values through a shared reference derived from the
+// raw pointer carried by this type.
+unsafe impl<T: Sync> Send for Iter<'_, T> {}
+
+// SAFETY: Sharing &Iter<'a, T> across threads is safe when T: Sync.
+// Concurrent callers need &mut Iter to advance it, so data races on the
+// iterator's own fields are prevented by the requirement for exclusive
+// access through &mut.
+unsafe impl<T: Sync> Sync for Iter<'_, T> {}
+
+impl<T> Clone for Iter<'_, T> {
+    #[inline]
+    fn clone(&self) -> Self {
+        Iter {
+            front: self.front,
+            back: self.back,
+            len: self.len,
+            _marker: PhantomData,
+        }
+    }
+}
+
+impl<T: fmt::Debug> fmt::Debug for Iter<'_, T> {
+    #[inline]
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_list().entries(self.clone()).finish()
+    }
+}
+
+impl<'a, T> Iterator for Iter<'a, T> {
+    type Item = &'a T;
+
+    #[inline]
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.len == 0 {
+            return None;
+        }
+        let front_ptr = self.front?;
+        // SAFETY: front_ptr was derived from a heap-allocated Node<T> owned
+        // by the SkipList that created this Iter.  The iterator holds a
+        // shared borrow of that list for lifetime 'a, ensuring every node
+        // remains allocated and reachable for the iterator's entire lifetime.
+        // No &mut references to any node exist while this shared Iter is
+        // alive.
+        let node: &'a Node<T> = unsafe { front_ptr.as_ref() };
+        self.front = node.next().map(NonNull::from);
+        self.len = self.len.saturating_sub(1);
+        node.value()
+    }
+
+    #[inline]
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        (self.len, Some(self.len))
+    }
+}
+
+impl<'a, T> DoubleEndedIterator for Iter<'a, T> {
+    #[inline]
+    fn next_back(&mut self) -> Option<Self::Item> {
+        if self.len == 0 {
+            return None;
+        }
+        let back_ptr = self.back?;
+        // SAFETY: Same provenance argument as front_ptr in next().
+        // back_ptr points to a live data node for the 'a lifetime.
+        let node: &'a Node<T> = unsafe { back_ptr.as_ref() };
+        // Walk backward.  The head sentinel has no value; the filter ensures
+        // `back` becomes None when we step past the first data node.
+        // `len` independently prevents accessing a stale `back` pointer.
+        self.back = node
+            .prev()
+            .filter(|p| p.value().is_some())
+            .map(NonNull::from);
+        self.len = self.len.saturating_sub(1);
+        node.value()
+    }
+}
+
+impl<T> ExactSizeIterator for Iter<'_, T> {}
+
+impl<T> FusedIterator for Iter<'_, T> {}
 
 // MARK: Tests
 
@@ -2795,5 +2975,230 @@ mod tests {
             assert_eq!(list.get(i), Some(&i));
         }
         assert_eq!(list.back(), Some(&(HALF - 1)));
+    }
+
+    // MARK: iter
+
+    #[test]
+    fn iter_empty() {
+        let list = SkipList::<i32>::new();
+        let mut iter = list.iter();
+        assert_eq!(iter.next(), None);
+        assert_eq!(iter.next_back(), None);
+    }
+
+    #[test]
+    fn iter_single_element() {
+        let mut list = SkipList::<i32>::new();
+        list.push_back(42);
+        let mut iter = list.iter();
+        assert_eq!(iter.next(), Some(&42));
+        assert_eq!(iter.next(), None);
+    }
+
+    #[test]
+    fn iter_single_element_from_back() {
+        let mut list = SkipList::<i32>::new();
+        list.push_back(42);
+        let mut iter = list.iter();
+        assert_eq!(iter.next_back(), Some(&42));
+        assert_eq!(iter.next_back(), None);
+    }
+
+    #[test]
+    fn iter_forward_order() {
+        let mut list = SkipList::<i32>::with_capacity(1);
+        list.push_back(1);
+        list.push_back(2);
+        list.push_back(3);
+        let collected: Vec<i32> = list.iter().copied().collect();
+        assert_eq!(collected, [1, 2, 3]);
+    }
+
+    #[test]
+    fn iter_backward_order() {
+        let mut list = SkipList::<i32>::with_capacity(1);
+        list.push_back(1);
+        list.push_back(2);
+        list.push_back(3);
+        let collected: Vec<i32> = list.iter().copied().rev().collect();
+        assert_eq!(collected, [3, 2, 1]);
+    }
+
+    #[test]
+    fn iter_double_ended_alternating() {
+        let mut list = SkipList::<i32>::with_capacity(1);
+        for i in 1..=5_i32 {
+            list.push_back(i);
+        }
+        let mut iter = list.iter();
+        assert_eq!(iter.next(), Some(&1));
+        assert_eq!(iter.next_back(), Some(&5));
+        assert_eq!(iter.next(), Some(&2));
+        assert_eq!(iter.next_back(), Some(&4));
+        assert_eq!(iter.next(), Some(&3));
+        assert_eq!(iter.next(), None);
+        assert_eq!(iter.next_back(), None);
+    }
+
+    #[test]
+    fn iter_double_ended_meets_in_middle_odd() {
+        // 3 elements: consume 1 from front, 1 from back → 1 left in middle
+        let mut list = SkipList::<i32>::with_capacity(1);
+        list.push_back(10);
+        list.push_back(20);
+        list.push_back(30);
+        let mut iter = list.iter();
+        assert_eq!(iter.next(), Some(&10));
+        assert_eq!(iter.next_back(), Some(&30));
+        // Only the middle element remains
+        assert_eq!(iter.next(), Some(&20));
+        assert_eq!(iter.next(), None);
+        assert_eq!(iter.next_back(), None);
+    }
+
+    #[test]
+    fn iter_double_ended_meets_in_middle_even() {
+        // 4 elements: alternate until both are exhausted
+        let mut list = SkipList::<i32>::with_capacity(1);
+        list.push_back(10);
+        list.push_back(20);
+        list.push_back(30);
+        list.push_back(40);
+        let mut iter = list.iter();
+        assert_eq!(iter.next(), Some(&10));
+        assert_eq!(iter.next_back(), Some(&40));
+        assert_eq!(iter.next(), Some(&20));
+        assert_eq!(iter.next_back(), Some(&30));
+        assert_eq!(iter.next(), None);
+        assert_eq!(iter.next_back(), None);
+    }
+
+    #[test]
+    fn iter_size_hint_decrements() {
+        let mut list = SkipList::<i32>::with_capacity(1);
+        list.push_back(1);
+        list.push_back(2);
+        list.push_back(3);
+        let mut iter = list.iter();
+        assert_eq!(iter.size_hint(), (3, Some(3)));
+        iter.next();
+        assert_eq!(iter.size_hint(), (2, Some(2)));
+        iter.next_back();
+        assert_eq!(iter.size_hint(), (1, Some(1)));
+        iter.next();
+        assert_eq!(iter.size_hint(), (0, Some(0)));
+    }
+
+    #[test]
+    fn iter_exact_size() {
+        let mut list = SkipList::<i32>::new();
+        for i in 0..10_i32 {
+            list.push_back(i);
+        }
+        let mut iter = list.iter();
+        assert_eq!(iter.len(), 10);
+        iter.next();
+        assert_eq!(iter.len(), 9);
+        iter.next_back();
+        assert_eq!(iter.len(), 8);
+    }
+
+    #[test]
+    fn iter_fused_returns_none_repeatedly() {
+        let mut list = SkipList::<i32>::new();
+        list.push_back(1);
+        let mut iter = list.iter();
+        assert_eq!(iter.next(), Some(&1));
+        // Exhausted — subsequent calls must all return None (FusedIterator)
+        assert_eq!(iter.next(), None);
+        assert_eq!(iter.next(), None);
+        assert_eq!(iter.next_back(), None);
+        assert_eq!(iter.next_back(), None);
+    }
+
+    #[test]
+    fn iter_clone_yields_same_elements() {
+        let mut list = SkipList::<i32>::with_capacity(1);
+        list.push_back(1);
+        list.push_back(2);
+        list.push_back(3);
+        let iter = list.iter();
+        let clone = iter.clone();
+        let v1: Vec<i32> = iter.copied().collect();
+        let v2: Vec<i32> = clone.copied().collect();
+        assert_eq!(v1, v2);
+        assert_eq!(v1, [1, 2, 3]);
+    }
+
+    #[test]
+    fn iter_does_not_consume_list() {
+        let mut list = SkipList::<i32>::with_capacity(1);
+        list.push_back(1);
+        list.push_back(2);
+        list.push_back(3);
+        // Iterating multiple times yields the same elements each time.
+        let v1: Vec<i32> = list.iter().copied().collect();
+        let v2: Vec<i32> = list.iter().copied().collect();
+        assert_eq!(v1, v2);
+        assert_eq!(list.len(), 3);
+    }
+
+    #[test]
+    fn into_iter_for_ref() {
+        let mut list = SkipList::<i32>::with_capacity(1);
+        list.push_back(1);
+        list.push_back(2);
+        list.push_back(3);
+        let collected: Vec<i32> = (&list).into_iter().copied().collect();
+        assert_eq!(collected, [1, 2, 3]);
+    }
+
+    #[test]
+    fn iter_after_push_front() {
+        let mut list = SkipList::<i32>::with_capacity(1);
+        list.push_back(3);
+        list.push_front(2);
+        list.push_front(1);
+        let collected: Vec<i32> = list.iter().copied().collect();
+        assert_eq!(collected, [1, 2, 3]);
+        let reversed: Vec<i32> = list.iter().copied().rev().collect();
+        assert_eq!(reversed, [3, 2, 1]);
+    }
+
+    #[test]
+    fn iter_after_mutations() {
+        let mut list = SkipList::<i32>::with_capacity(1);
+        for i in 1..=5_i32 {
+            list.push_back(i); // [1, 2, 3, 4, 5]
+        }
+        list.remove(2); // [1, 2, 4, 5]
+        list.insert(2, 9); // [1, 2, 9, 4, 5]
+        let collected: Vec<i32> = list.iter().copied().collect();
+        assert_eq!(collected, [1, 2, 9, 4, 5]);
+    }
+
+    #[test]
+    fn iter_large_list_forward() {
+        const N: usize = 200;
+        let mut list = SkipList::<usize>::new();
+        for i in 0..N {
+            list.push_back(i);
+        }
+        for (i, v) in list.iter().enumerate() {
+            assert_eq!(*v, i);
+        }
+    }
+
+    #[test]
+    fn iter_large_list_backward() {
+        const N: usize = 200;
+        let mut list = SkipList::<usize>::new();
+        for i in 0..N {
+            list.push_back(i);
+        }
+        for (i, v) in list.iter().rev().enumerate() {
+            assert_eq!(*v, N - 1 - i);
+        }
     }
 }
