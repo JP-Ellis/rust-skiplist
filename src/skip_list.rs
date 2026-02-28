@@ -19,7 +19,7 @@ use core::{
     fmt,
     iter::FusedIterator,
     marker::PhantomData,
-    ops::{Index, IndexMut},
+    ops::{Bound, Index, IndexMut, RangeBounds},
     ptr::NonNull,
 };
 
@@ -1339,6 +1339,392 @@ impl<T, G: LevelGenerator> SkipList<T, G> {
             _marker: PhantomData,
         }
     }
+
+    /// Retains only the elements specified by the predicate.
+    ///
+    /// In other words, removes all elements `e` for which `f(&e)` returns
+    /// `false`.  The elements are visited in order and, in the kept subset,
+    /// their relative order is preserved.
+    ///
+    /// This operation is O(n): every element is visited once and skip links
+    /// are rebuilt in a single linear pass.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use skiplist::skip_list::SkipList;
+    ///
+    /// let mut list = SkipList::<i32>::new();
+    /// for i in 1..=5 {
+    ///     list.push_back(i);
+    /// }
+    /// list.retain(|&x| x % 2 == 0);
+    /// let collected: Vec<i32> = list.iter().copied().collect();
+    /// assert_eq!(collected, [2, 4]);
+    /// ```
+    #[expect(
+        clippy::expect_used,
+        clippy::missing_panics_doc,
+        reason = "`value()` returns None only for the head sentinel, which is never \
+                  visited in the data-node walk; the expect fires only on invariant violations"
+    )]
+    #[expect(
+        clippy::indexing_slicing,
+        clippy::needless_range_loop,
+        reason = "l < node_height ≤ max_levels = predecessors.len() = head.links.len(); \
+                  l is used for both predecessors[l] and links_mut()[l] so an index loop \
+                  is the clearest expression"
+    )]
+    #[expect(
+        clippy::multiple_unsafe_ops_per_block,
+        reason = "raw-pointer traversal, link clearing, link wiring, and node pop all \
+                  touch provably disjoint heap nodes; splitting across blocks would \
+                  require unsafe-crossing raw-pointer variables"
+    )]
+    #[inline]
+    pub fn retain<F>(&mut self, mut f: F)
+    where
+        F: FnMut(&T) -> bool,
+    {
+        if self.is_empty() {
+            return;
+        }
+
+        let max_levels = self.head.level();
+
+        // SAFETY: All raw pointers originate from heap allocations owned by
+        // this SkipList.  We hold &mut self so no other reference to any node
+        // exists.  We save `next_opt` before calling `pop()`, so the walk
+        // remains correct even after removing a node.  Each level's predecessor
+        // pointer is set once (when its successor is processed) and then only
+        // read, so there is no simultaneous aliasing.
+        unsafe {
+            let head_ptr: *mut Node<T> = &raw mut *self.head;
+
+            // Clear head's skip links; they will be fully rebuilt below.
+            for link in (*head_ptr).links_mut() {
+                *link = None;
+            }
+
+            // predecessors[l] = (node_ptr, rank_of_that_node_in_new_list)
+            let mut predecessors: Vec<(*mut Node<T>, usize)> =
+                vec![(head_ptr, 0_usize); max_levels];
+            let mut new_rank: usize = 0;
+            let mut new_tail: Option<NonNull<Node<T>>> = None;
+
+            let mut current_opt: Option<NonNull<Node<T>>> = (*head_ptr).next().map(NonNull::from);
+
+            while let Some(current_nn) = current_opt {
+                let current: *mut Node<T> = current_nn.as_ptr();
+                // Save the successor before any mutation.
+                let next_opt: Option<NonNull<Node<T>>> = (*current).next().map(NonNull::from);
+
+                let keep = f((*current).value().expect("data node has a value"));
+
+                if keep {
+                    new_rank = new_rank.saturating_add(1);
+                    new_tail = Some(current_nn);
+
+                    // Clear this node's own forward skip links; they will be
+                    // re-wired when its successors are processed below.
+                    for link in (*current).links_mut() {
+                        *link = None;
+                    }
+
+                    // Wire each predecessor level to this node.
+                    let node_height = (*current).level();
+                    for l in 0..node_height {
+                        let (pred_ptr, pred_rank) = predecessors[l];
+                        let dist = new_rank.saturating_sub(pred_rank);
+                        (*pred_ptr).links_mut()[l] = Some(
+                            Link::new(&*current, dist).expect("dist = new_rank - pred_rank ≥ 1"),
+                        );
+                        predecessors[l] = (current, new_rank);
+                    }
+                } else {
+                    // Detach from the prev/next chain and free.
+                    let boxed = (*current).pop();
+                    drop(boxed);
+                }
+
+                current_opt = next_opt;
+            }
+
+            self.tail = new_tail;
+            self.len = new_rank;
+        }
+    }
+
+    /// Retains only the elements specified by the predicate, passing a mutable
+    /// reference to each element.
+    ///
+    /// In other words, removes all elements `e` for which `f(&mut e)` returns
+    /// `false`.  The elements are visited in order; the predicate may mutate
+    /// retained elements before it returns `true`.
+    ///
+    /// This operation is O(n).
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use skiplist::skip_list::SkipList;
+    ///
+    /// let mut list = SkipList::<i32>::new();
+    /// for i in 1..=5 {
+    ///     list.push_back(i);
+    /// }
+    /// list.retain_mut(|x| {
+    ///     if *x % 2 == 0 {
+    ///         *x *= 10;
+    ///         true
+    ///     } else {
+    ///         false
+    ///     }
+    /// });
+    /// let collected: Vec<i32> = list.iter().copied().collect();
+    /// assert_eq!(collected, [20, 40]);
+    /// ```
+    #[expect(
+        clippy::expect_used,
+        clippy::missing_panics_doc,
+        reason = "`value_mut()` returns None only for the head sentinel, which is never \
+                  visited in the data-node walk; the expect fires only on invariant violations"
+    )]
+    #[expect(
+        clippy::indexing_slicing,
+        clippy::needless_range_loop,
+        reason = "l < node_height ≤ max_levels = predecessors.len() = head.links.len(); \
+                  l is used for both predecessors[l] and links_mut()[l] so an index loop \
+                  is the clearest expression"
+    )]
+    #[expect(
+        clippy::multiple_unsafe_ops_per_block,
+        reason = "raw-pointer traversal, link clearing, link wiring, and node pop all \
+                  touch provably disjoint heap nodes; splitting across blocks would \
+                  require unsafe-crossing raw-pointer variables"
+    )]
+    #[inline]
+    pub fn retain_mut<F>(&mut self, mut f: F)
+    where
+        F: FnMut(&mut T) -> bool,
+    {
+        if self.is_empty() {
+            return;
+        }
+
+        let max_levels = self.head.level();
+
+        // SAFETY: All raw pointers originate from heap allocations owned by
+        // this SkipList.  We hold &mut self so no other reference to any node
+        // exists.  `value_mut()` yields an exclusive reference that expires
+        // before we call `links_mut()` or `pop()` on the same node —
+        // the predicate returns its `bool` result before any structural
+        // mutation occurs.  We save `next_opt` before any mutation.
+        unsafe {
+            let head_ptr: *mut Node<T> = &raw mut *self.head;
+
+            // Clear head's skip links; they will be fully rebuilt below.
+            for link in (*head_ptr).links_mut() {
+                *link = None;
+            }
+
+            let mut predecessors: Vec<(*mut Node<T>, usize)> =
+                vec![(head_ptr, 0_usize); max_levels];
+            let mut new_rank: usize = 0;
+            let mut new_tail: Option<NonNull<Node<T>>> = None;
+
+            let mut current_opt: Option<NonNull<Node<T>>> = (*head_ptr).next().map(NonNull::from);
+
+            while let Some(current_nn) = current_opt {
+                let current: *mut Node<T> = current_nn.as_ptr();
+                let next_opt: Option<NonNull<Node<T>>> = (*current).next().map(NonNull::from);
+
+                // The &mut T borrow ends when `f` returns; no aliasing with
+                // the subsequent `links_mut()` / `pop()` calls.
+                let keep = f((*current).value_mut().expect("data node has a value"));
+
+                if keep {
+                    new_rank = new_rank.saturating_add(1);
+                    new_tail = Some(current_nn);
+
+                    for link in (*current).links_mut() {
+                        *link = None;
+                    }
+
+                    let node_height = (*current).level();
+                    for l in 0..node_height {
+                        let (pred_ptr, pred_rank) = predecessors[l];
+                        let dist = new_rank.saturating_sub(pred_rank);
+                        (*pred_ptr).links_mut()[l] = Some(
+                            Link::new(&*current, dist).expect("dist = new_rank - pred_rank ≥ 1"),
+                        );
+                        predecessors[l] = (current, new_rank);
+                    }
+                } else {
+                    let boxed = (*current).pop();
+                    drop(boxed);
+                }
+
+                current_opt = next_opt;
+            }
+
+            self.tail = new_tail;
+            self.len = new_rank;
+        }
+    }
+
+    /// Removes the elements in the given index range from the list and returns
+    /// them as an iterator.
+    ///
+    /// The range is specified by index (0-based, same as [`SkipList::get`]).
+    /// All valid Rust range expressions are supported: `..`, `a..`, `..b`,
+    /// `..=b`, `a..b`, `a..=b`.
+    ///
+    /// Elements outside the range are retained and remain accessible via the
+    /// list after the `Drain` is consumed or dropped.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the start of the range is greater than the end, or if the end
+    /// is greater than `self.len()`.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use skiplist::skip_list::SkipList;
+    ///
+    /// let mut list = SkipList::<i32>::new();
+    /// for i in 1..=5 {
+    ///     list.push_back(i);
+    /// }
+    ///
+    /// // Drain the middle three elements.
+    /// let drained: Vec<i32> = list.drain(1..4).collect();
+    /// assert_eq!(drained, [2, 3, 4]);
+    /// assert_eq!(list.len(), 2);
+    /// let remaining: Vec<i32> = list.iter().copied().collect();
+    /// assert_eq!(remaining, [1, 5]);
+    /// ```
+    #[expect(
+        clippy::expect_used,
+        reason = "`take_value()` returns None only for the head sentinel, which is never \
+                  in the drain range; the expect fires only on invariant violations"
+    )]
+    #[expect(
+        clippy::indexing_slicing,
+        clippy::needless_range_loop,
+        reason = "l < node_height ≤ max_levels = predecessors.len() = head.links.len(); \
+                  l is used for both predecessors[l] and links_mut()[l] so an index loop \
+                  is the clearest expression"
+    )]
+    #[expect(
+        clippy::multiple_unsafe_ops_per_block,
+        reason = "raw-pointer traversal, link clearing, link wiring, and node pop all \
+                  touch provably disjoint heap nodes; splitting across blocks would \
+                  require unsafe-crossing raw-pointer variables"
+    )]
+    #[inline]
+    pub fn drain<R>(&mut self, range: R) -> Drain<'_, T>
+    where
+        R: RangeBounds<usize>,
+    {
+        let start = match range.start_bound() {
+            Bound::Included(&s) => s,
+            Bound::Excluded(&s) => s.saturating_add(1),
+            Bound::Unbounded => 0,
+        };
+        let end = match range.end_bound() {
+            Bound::Included(&e) => e.saturating_add(1),
+            Bound::Excluded(&e) => e,
+            Bound::Unbounded => self.len,
+        };
+
+        assert!(
+            start <= end,
+            "drain range start (is {start}) must be ≤ end (is {end})"
+        );
+        assert!(
+            end <= self.len,
+            "drain range end (is {end}) must be ≤ len (is {})",
+            self.len
+        );
+
+        let drain_count = end.saturating_sub(start);
+        let mut drained: Vec<T> = Vec::with_capacity(drain_count);
+
+        if drain_count == 0 {
+            return Drain {
+                iter: drained.into_iter(),
+                _marker: PhantomData,
+            };
+        }
+
+        let max_levels = self.head.level();
+
+        // SAFETY: Same as retain — all raw pointers come from heap allocations
+        // owned by this SkipList.  We hold &mut self.  next_opt is saved before
+        // any mutation.  Drained nodes are popped (prev/next updated) and then
+        // freed after their value is extracted.
+        unsafe {
+            let head_ptr: *mut Node<T> = &raw mut *self.head;
+
+            // Clear head's skip links; rebuilt below.
+            for link in (*head_ptr).links_mut() {
+                *link = None;
+            }
+
+            let mut predecessors: Vec<(*mut Node<T>, usize)> =
+                vec![(head_ptr, 0_usize); max_levels];
+            let mut new_rank: usize = 0;
+            let mut new_tail: Option<NonNull<Node<T>>> = None;
+            let mut current_index: usize = 0;
+
+            let mut current_opt: Option<NonNull<Node<T>>> = (*head_ptr).next().map(NonNull::from);
+
+            while let Some(current_nn) = current_opt {
+                let current: *mut Node<T> = current_nn.as_ptr();
+                let next_opt: Option<NonNull<Node<T>>> = (*current).next().map(NonNull::from);
+
+                let in_drain_range = current_index >= start && current_index < end;
+
+                if in_drain_range {
+                    // Extract value then free the node.
+                    let mut boxed = (*current).pop();
+                    drained.push(boxed.take_value().expect("data node has a value"));
+                    drop(boxed);
+                } else {
+                    // Keep this node and wire skip links.
+                    new_rank = new_rank.saturating_add(1);
+                    new_tail = Some(current_nn);
+
+                    for link in (*current).links_mut() {
+                        *link = None;
+                    }
+
+                    let node_height = (*current).level();
+                    for l in 0..node_height {
+                        let (pred_ptr, pred_rank) = predecessors[l];
+                        let dist = new_rank.saturating_sub(pred_rank);
+                        (*pred_ptr).links_mut()[l] = Some(
+                            Link::new(&*current, dist).expect("dist = new_rank - pred_rank ≥ 1"),
+                        );
+                        predecessors[l] = (current, new_rank);
+                    }
+                }
+
+                current_index = current_index.saturating_add(1);
+                current_opt = next_opt;
+            }
+
+            self.tail = new_tail;
+            self.len = new_rank;
+        }
+
+        Drain {
+            iter: drained.into_iter(),
+            _marker: PhantomData,
+        }
+    }
 }
 
 // MARK: Default
@@ -1757,6 +2143,82 @@ impl<T, G: LevelGenerator> DoubleEndedIterator for IntoIter<T, G> {
 impl<T, G: LevelGenerator> ExactSizeIterator for IntoIter<T, G> {}
 
 impl<T, G: LevelGenerator> FusedIterator for IntoIter<T, G> {}
+
+// MARK: Drain
+
+/// An owning iterator over a sub-range of elements drained from a
+/// [`SkipList`].
+///
+/// This struct is created by the [`SkipList::drain`] method.  Elements in the
+/// specified range are removed from the list eagerly when `drain` is called.
+/// The removed elements are yielded by this iterator.  Elements outside the
+/// range remain in the list regardless of whether the `Drain` is fully
+/// consumed.
+///
+/// Supports both forward and backward iteration
+/// ([`DoubleEndedIterator`]).  Does **not** implement
+/// [`ExactSizeIterator`].
+///
+/// # Examples
+///
+/// ```rust
+/// use skiplist::skip_list::SkipList;
+///
+/// let mut list = SkipList::<i32>::new();
+/// for i in 1..=5 {
+///     list.push_back(i);
+/// }
+///
+/// let drained: Vec<i32> = list.drain(1..4).collect();
+/// assert_eq!(drained, [2, 3, 4]);
+/// assert_eq!(list.len(), 2);
+/// ```
+#[must_use = "iterators are lazy and do nothing unless consumed"]
+pub struct Drain<'a, T> {
+    /// The already-removed values in front-to-back order.
+    iter: std::vec::IntoIter<T>,
+    /// Ties the `Drain`'s lifetime to the `&'a mut SkipList` that created it,
+    /// preventing the list from being used while this `Drain` is alive.
+    _marker: PhantomData<&'a mut T>,
+}
+
+// SAFETY: Drain<'a, T> owns its yielded elements.  Sending it to another
+// thread requires T: Send because the receiving thread will own T values.
+unsafe impl<T: Send> Send for Drain<'_, T> {}
+
+// SAFETY: Sharing &Drain<'a, T> across threads is safe when T: Sync.
+// Advancing the iterator requires &mut Drain, preventing concurrent mutation.
+unsafe impl<T: Sync> Sync for Drain<'_, T> {}
+
+impl<T: fmt::Debug> fmt::Debug for Drain<'_, T> {
+    #[inline]
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_list().entries(self.iter.as_slice()).finish()
+    }
+}
+
+impl<T> Iterator for Drain<'_, T> {
+    type Item = T;
+
+    #[inline]
+    fn next(&mut self) -> Option<Self::Item> {
+        self.iter.next()
+    }
+
+    #[inline]
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.iter.size_hint()
+    }
+}
+
+impl<T> DoubleEndedIterator for Drain<'_, T> {
+    #[inline]
+    fn next_back(&mut self) -> Option<Self::Item> {
+        self.iter.next_back()
+    }
+}
+
+impl<T> FusedIterator for Drain<'_, T> {}
 
 // MARK: Tests
 
@@ -3790,5 +4252,383 @@ mod tests {
             sum += v;
         }
         assert_eq!(sum, 60);
+    }
+
+    // MARK: retain
+
+    #[test]
+    fn retain_empty() {
+        let mut list = SkipList::<i32>::new();
+        list.retain(|_| true);
+        assert!(list.is_empty());
+        list.retain(|_| false);
+        assert!(list.is_empty());
+    }
+
+    #[test]
+    fn retain_all_kept() {
+        let mut list = SkipList::<i32>::new();
+        for i in 1..=5 {
+            list.push_back(i);
+        }
+        list.retain(|_| true);
+        assert_eq!(list.len(), 5);
+        let got: Vec<i32> = list.iter().copied().collect();
+        assert_eq!(got, [1, 2, 3, 4, 5]);
+    }
+
+    #[test]
+    fn retain_all_dropped() {
+        let mut list = SkipList::<i32>::new();
+        for i in 1..=5 {
+            list.push_back(i);
+        }
+        list.retain(|_| false);
+        assert!(list.is_empty());
+        assert_eq!(list.len(), 0);
+        assert_eq!(list.front(), None);
+        assert_eq!(list.back(), None);
+    }
+
+    #[test]
+    fn retain_even_elements() {
+        let mut list = SkipList::<i32>::new();
+        for i in 1..=6 {
+            list.push_back(i);
+        }
+        #[expect(
+            clippy::integer_division_remainder_used,
+            reason = "clearer to express the intent of keeping even numbers"
+        )]
+        list.retain(|&x| x % 2 == 0);
+        assert_eq!(list.len(), 3);
+        let got: Vec<i32> = list.iter().copied().collect();
+        assert_eq!(got, [2, 4, 6]);
+    }
+
+    #[test]
+    fn retain_preserves_order() {
+        let mut list = SkipList::<i32>::new();
+        for i in 0..10 {
+            list.push_back(i);
+        }
+        // Keep 0, 3, 6, 9
+        #[expect(
+            clippy::integer_division_remainder_used,
+            reason = "clearer to express the intent of keeping multiples of 3"
+        )]
+        list.retain(|&x| x % 3 == 0);
+        let got: Vec<i32> = list.iter().copied().collect();
+        assert_eq!(got, [0, 3, 6, 9]);
+    }
+
+    #[test]
+    fn retain_links_consistent() {
+        let mut list = SkipList::<i32>::new();
+        for i in 0..20 {
+            list.push_back(i);
+        }
+        #[expect(
+            clippy::integer_division_remainder_used,
+            reason = "clearer to express the intent of keeping even numbers"
+        )]
+        list.retain(|&x| x % 2 == 0);
+        for (idx, expected) in (0..20).step_by(2).enumerate() {
+            assert_eq!(list.get(idx), Some(&expected));
+        }
+        assert_eq!(list.get(list.len()), None);
+    }
+
+    #[test]
+    fn retain_single_element_kept() {
+        let mut list = SkipList::<i32>::new();
+        list.push_back(42);
+        list.retain(|_| true);
+        assert_eq!(list.len(), 1);
+        assert_eq!(list.front(), Some(&42));
+        assert_eq!(list.back(), Some(&42));
+        assert_eq!(list.get(0), Some(&42));
+    }
+
+    #[test]
+    fn retain_single_element_dropped() {
+        let mut list = SkipList::<i32>::new();
+        list.push_back(42);
+        list.retain(|_| false);
+        assert!(list.is_empty());
+        assert_eq!(list.front(), None);
+        assert_eq!(list.back(), None);
+    }
+
+    #[test]
+    fn retain_tail_pointer_correct() {
+        // Verify that back() returns the last retained element.
+        let mut list = SkipList::<i32>::new();
+        for i in 1..=5 {
+            list.push_back(i);
+        }
+        // Keep 1, 2, 3; drop 4 and 5
+        list.retain(|&x| x <= 3);
+        assert_eq!(list.back(), Some(&3));
+        assert_eq!(list.len(), 3);
+    }
+
+    #[test]
+    fn retain_after_retain_is_correct() {
+        let mut list = SkipList::<i32>::new();
+        for i in 0..10 {
+            list.push_back(i);
+        }
+        #[expect(
+            clippy::integer_division_remainder_used,
+            reason = "clearer to express the intent of keeping even numbers"
+        )]
+        list.retain(|&x| x % 2 == 0); // 0,2,4,6,8
+        list.retain(|&x| x > 2); // 4,6,8
+        let got: Vec<i32> = list.iter().copied().collect();
+        assert_eq!(got, [4, 6, 8]);
+    }
+
+    // MARK: retain_mut
+
+    #[test]
+    fn retain_mut_can_modify_before_keeping() {
+        let mut list = SkipList::<i32>::new();
+        for i in 1..=5 {
+            list.push_back(i);
+        }
+        #[expect(
+            clippy::integer_division_remainder_used,
+            reason = "clearer to express the intent of modifying even numbers in place and keeping them"
+        )]
+        list.retain_mut(|x| {
+            if *x % 2 == 0 {
+                *x *= 10;
+                true
+            } else {
+                false
+            }
+        });
+        let got: Vec<i32> = list.iter().copied().collect();
+        assert_eq!(got, [20, 40]);
+    }
+
+    #[test]
+    fn retain_mut_drops_correctly() {
+        let mut list = SkipList::<i32>::new();
+        for i in 0..5 {
+            list.push_back(i);
+        }
+        list.retain_mut(|_| false);
+        assert!(list.is_empty());
+    }
+
+    #[test]
+    fn retain_mut_links_consistent() {
+        let mut list = SkipList::<i32>::new();
+        for i in 0..20 {
+            list.push_back(i);
+        }
+        #[expect(
+            clippy::integer_division_remainder_used,
+            reason = "clearer to express the intent of keeping multiples of 3 \
+                and modifying them in place"
+        )]
+        list.retain_mut(|x| {
+            if *x % 3 == 0 {
+                *x += 100;
+                true
+            } else {
+                false
+            }
+        });
+        // Retained: 0+100=100, 3+100=103, 6+100=106, 9+100=109, 12+100=112, 15+100=115, 18+100=118
+        let got: Vec<i32> = list.iter().copied().collect();
+        assert_eq!(got, [100, 103, 106, 109, 112, 115, 118]);
+        for (i, v) in got.iter().enumerate() {
+            assert_eq!(list.get(i), Some(v));
+        }
+    }
+
+    // MARK: drain
+
+    #[test]
+    fn drain_full_range() {
+        let mut list = SkipList::<i32>::new();
+        for i in 1..=5 {
+            list.push_back(i);
+        }
+        let got: Vec<i32> = list.drain(..).collect();
+        assert_eq!(got, [1, 2, 3, 4, 5]);
+        assert!(list.is_empty());
+    }
+
+    #[test]
+    fn drain_empty_range() {
+        let mut list = SkipList::<i32>::new();
+        for i in 1..=5 {
+            list.push_back(i);
+        }
+        let got: Vec<i32> = list.drain(2..2).collect();
+        assert!(got.is_empty());
+        assert_eq!(list.len(), 5);
+        let remaining: Vec<i32> = list.iter().copied().collect();
+        assert_eq!(remaining, [1, 2, 3, 4, 5]);
+    }
+
+    #[test]
+    fn drain_front() {
+        let mut list = SkipList::<i32>::new();
+        for i in 1..=5 {
+            list.push_back(i);
+        }
+        let got: Vec<i32> = list.drain(..2).collect();
+        assert_eq!(got, [1, 2]);
+        assert_eq!(list.len(), 3);
+        let remaining: Vec<i32> = list.iter().copied().collect();
+        assert_eq!(remaining, [3, 4, 5]);
+    }
+
+    #[test]
+    fn drain_back() {
+        let mut list = SkipList::<i32>::new();
+        for i in 1..=5 {
+            list.push_back(i);
+        }
+        let got: Vec<i32> = list.drain(3..).collect();
+        assert_eq!(got, [4, 5]);
+        assert_eq!(list.len(), 3);
+        let remaining: Vec<i32> = list.iter().copied().collect();
+        assert_eq!(remaining, [1, 2, 3]);
+    }
+
+    #[test]
+    fn drain_middle() {
+        let mut list = SkipList::<i32>::new();
+        for i in 1..=5 {
+            list.push_back(i);
+        }
+        let got: Vec<i32> = list.drain(1..4).collect();
+        assert_eq!(got, [2, 3, 4]);
+        assert_eq!(list.len(), 2);
+        let remaining: Vec<i32> = list.iter().copied().collect();
+        assert_eq!(remaining, [1, 5]);
+    }
+
+    #[test]
+    fn drain_inclusive_range() {
+        let mut list = SkipList::<i32>::new();
+        for i in 1..=5 {
+            list.push_back(i);
+        }
+        let got: Vec<i32> = list.drain(1..=3).collect();
+        assert_eq!(got, [2, 3, 4]);
+        assert_eq!(list.len(), 2);
+    }
+
+    #[test]
+    fn drain_double_ended() {
+        let mut list = SkipList::<i32>::new();
+        for i in 1..=5 {
+            list.push_back(i);
+        }
+        let mut drain = list.drain(..);
+        assert_eq!(drain.next(), Some(1));
+        assert_eq!(drain.next_back(), Some(5));
+        assert_eq!(drain.next(), Some(2));
+        assert_eq!(drain.next_back(), Some(4));
+        assert_eq!(drain.next(), Some(3));
+        assert_eq!(drain.next(), None);
+        assert_eq!(drain.next_back(), None);
+    }
+
+    #[test]
+    fn drain_drop_remaining() {
+        // Drop the Drain without consuming all elements; list must still be valid.
+        let mut list = SkipList::<i32>::new();
+        for i in 1..=5 {
+            list.push_back(i);
+        }
+        {
+            let mut drain = list.drain(1..4);
+            // Consume just one element and drop the rest.
+            assert_eq!(drain.next(), Some(2));
+            // `drain` is dropped here; 3 and 4 are freed.
+        }
+        assert_eq!(list.len(), 2);
+        let remaining: Vec<i32> = list.iter().copied().collect();
+        assert_eq!(remaining, [1, 5]);
+    }
+
+    #[test]
+    fn drain_len_correct_after() {
+        let mut list = SkipList::<i32>::new();
+        for i in 0..10 {
+            list.push_back(i);
+        }
+        _ = list.drain(3..7);
+        assert_eq!(list.len(), 6);
+    }
+
+    #[test]
+    fn drain_links_consistent_after() {
+        let mut list = SkipList::<i32>::new();
+        for i in 0..10 {
+            list.push_back(i);
+        }
+        _ = list.drain(3..7);
+        // Remaining: 0,1,2,7,8,9
+        let expected = [0, 1, 2, 7, 8, 9];
+        for (idx, &v) in expected.iter().enumerate() {
+            assert_eq!(list.get(idx), Some(&v));
+        }
+        assert_eq!(list.get(list.len()), None);
+    }
+
+    #[test]
+    fn drain_size_hint() {
+        let mut list = SkipList::<i32>::new();
+        for i in 1..=5 {
+            list.push_back(i);
+        }
+        let mut drain = list.drain(1..4);
+        assert_eq!(drain.size_hint(), (3, Some(3)));
+        drain.next();
+        assert_eq!(drain.size_hint(), (2, Some(2)));
+    }
+
+    #[test]
+    fn drain_fused() {
+        let mut list = SkipList::<i32>::new();
+        list.push_back(1);
+        let mut drain = list.drain(..);
+        assert_eq!(drain.next(), Some(1));
+        assert_eq!(drain.next(), None);
+        assert_eq!(drain.next(), None);
+        assert_eq!(drain.next_back(), None);
+    }
+
+    #[test]
+    #[expect(
+        clippy::reversed_empty_ranges,
+        reason = "Intentional test of invalid range handling in drain()"
+    )]
+    #[should_panic(expected = "drain range start")]
+    fn drain_panics_start_gt_end() {
+        let mut list = SkipList::<i32>::new();
+        for i in 0..5 {
+            list.push_back(i);
+        }
+        _ = list.drain(3..1);
+    }
+
+    #[test]
+    #[should_panic(expected = "drain range end")]
+    fn drain_panics_end_gt_len() {
+        let mut list = SkipList::<i32>::new();
+        for i in 0..5 {
+            list.push_back(i);
+        }
+        _ = list.drain(0..10);
     }
 }
