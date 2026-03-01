@@ -28,10 +28,6 @@ use crate::{
     node::{Node, link::Link},
 };
 
-/// Default number of levels used by [`SkipList::new`] and
-/// [`SkipList::with_capacity`].
-const DEFAULT_LEVELS: usize = 16;
-
 /// Default promotion probability used by [`SkipList::new`] and
 /// [`SkipList::with_capacity`].
 const DEFAULT_P: f64 = 0.5;
@@ -92,14 +88,7 @@ impl<T> SkipList<T> {
     #[inline]
     #[must_use]
     pub fn new() -> Self {
-        #[expect(
-            clippy::expect_used,
-            reason = "DEFAULT_LEVELS and DEFAULT_P are compile-time constants \
-                      whose validity is guaranteed by their definitions"
-        )]
-        let generator = Geometric::new(DEFAULT_LEVELS, DEFAULT_P)
-            .expect("DEFAULT_LEVELS and DEFAULT_P are valid Geometric parameters");
-        Self::with_level_generator(generator)
+        Self::with_level_generator(Geometric::default())
     }
 
     /// Creates an empty skip list with `max_levels` as the level-count hint.
