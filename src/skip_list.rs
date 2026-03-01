@@ -2760,6 +2760,34 @@ impl<'a, T: Copy + 'a, G: LevelGenerator> Extend<&'a T> for SkipList<T, G> {
     }
 }
 
+// MARK: FromIterator / From
+
+impl<T> FromIterator<T> for SkipList<T> {
+    /// Creates a list from an iterator by appending each item to the back.
+    #[inline]
+    fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
+        let mut list = Self::new();
+        list.extend(iter);
+        list
+    }
+}
+
+impl<T, const N: usize> From<[T; N]> for SkipList<T> {
+    /// Creates a list from a fixed-size array.
+    #[inline]
+    fn from(arr: [T; N]) -> Self {
+        arr.into_iter().collect()
+    }
+}
+
+impl<T> From<Vec<T>> for SkipList<T> {
+    /// Creates a list from a `Vec`, consuming it.
+    #[inline]
+    fn from(vec: Vec<T>) -> Self {
+        vec.into_iter().collect()
+    }
+}
+
 // MARK: Index
 
 impl<T, G: LevelGenerator> Index<usize> for SkipList<T, G> {
@@ -6853,6 +6881,49 @@ mod tests {
         let a = SkipList::<i32>::new();
         let b = SkipList::<i32>::new();
         assert_eq!(a.partial_cmp(&b), Some(core::cmp::Ordering::Equal));
+    }
+
+    // MARK: FromIterator / From
+
+    #[test]
+    fn from_iterator_empty() {
+        let list: SkipList<i32> = core::iter::empty().collect();
+        assert!(list.is_empty());
+    }
+
+    #[test]
+    fn from_iterator_elements() {
+        let list: SkipList<i32> = [1, 2, 3, 4, 5].into_iter().collect();
+        let got: Vec<i32> = list.into_iter().collect();
+        assert_eq!(got, [1, 2, 3, 4, 5]);
+    }
+
+    #[test]
+    fn from_array() {
+        let list = SkipList::<i32>::from([10, 20, 30]);
+        let got: Vec<i32> = list.into_iter().collect();
+        assert_eq!(got, [10, 20, 30]);
+    }
+
+    #[test]
+    fn from_array_empty() {
+        #[expect(clippy::as_conversions, reason = "safe conversion of empty list")]
+        let list = SkipList::<i32>::from([] as [i32; 0]);
+        assert!(list.is_empty());
+    }
+
+    #[test]
+    fn from_vec() {
+        let v = vec![7, 8, 9];
+        let list = SkipList::<i32>::from(v);
+        let got: Vec<i32> = list.into_iter().collect();
+        assert_eq!(got, [7, 8, 9]);
+    }
+
+    #[test]
+    fn from_vec_empty() {
+        let list = SkipList::<i32>::from(Vec::<i32>::new());
+        assert!(list.is_empty());
     }
 
     // MARK: Extend
