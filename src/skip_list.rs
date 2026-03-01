@@ -16,6 +16,7 @@
 //! ```
 
 use core::{
+    cmp::Ordering,
     fmt,
     iter::FusedIterator,
     marker::PhantomData,
@@ -2681,6 +2682,27 @@ impl<T: Clone, G: LevelGenerator + Clone> Clone for SkipList<T, G> {
             new_list.push_back(item.clone());
         }
         new_list
+    }
+}
+
+// MARK: PartialOrd / Ord
+
+impl<T: PartialOrd, G: LevelGenerator> PartialOrd for SkipList<T, G> {
+    /// Compares two lists lexicographically.
+    ///
+    /// Returns `None` if any pair of corresponding elements returns `None`
+    /// from their own `partial_cmp`.
+    #[inline]
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        self.iter().partial_cmp(other.iter())
+    }
+}
+
+impl<T: Ord, G: LevelGenerator> Ord for SkipList<T, G> {
+    /// Compares two lists lexicographically.
+    #[inline]
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.iter().cmp(other.iter())
     }
 }
 
@@ -6748,6 +6770,52 @@ mod tests {
         list.dedup_by_key(|i| *i / 10);
         let got: Vec<i32> = list.iter().copied().collect();
         assert_eq!(got, [10, 20, 30]);
+    }
+
+    // MARK: PartialOrd / Ord
+
+    #[test]
+    fn ord_equal_lists() {
+        let mut a = SkipList::<i32>::new();
+        let mut b = SkipList::<i32>::new();
+        for i in [1, 2, 3] {
+            a.push_back(i);
+            b.push_back(i);
+        }
+        assert_eq!(a.cmp(&b), core::cmp::Ordering::Equal);
+    }
+
+    #[test]
+    fn ord_shorter_is_less() {
+        let mut a = SkipList::<i32>::new();
+        let mut b = SkipList::<i32>::new();
+        for i in [1, 2] {
+            a.push_back(i);
+        }
+        for i in [1, 2, 3] {
+            b.push_back(i);
+        }
+        assert!(a < b);
+    }
+
+    #[test]
+    fn ord_earlier_element_wins() {
+        let mut a = SkipList::<i32>::new();
+        let mut b = SkipList::<i32>::new();
+        for i in [1, 3] {
+            a.push_back(i);
+        }
+        for i in [1, 2, 99] {
+            b.push_back(i);
+        }
+        assert!(a > b);
+    }
+
+    #[test]
+    fn partial_ord_empty_equal() {
+        let a = SkipList::<i32>::new();
+        let b = SkipList::<i32>::new();
+        assert_eq!(a.partial_cmp(&b), Some(core::cmp::Ordering::Equal));
     }
 
     // MARK: PartialEq / Eq
