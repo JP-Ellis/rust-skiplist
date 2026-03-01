@@ -91,26 +91,59 @@ impl<T> SkipList<T> {
         Self::with_level_generator(Geometric::default())
     }
 
-    /// Creates an empty skip list with `max_levels` as the level-count hint.
+    /// Creates an empty skip list pre-configured for the expected number of
+    /// elements.
     ///
-    /// The level count controls how many skip-link levels the internal
-    /// structure will maintain.  A larger value improves performance for very
-    /// large lists at the cost of slightly higher per-node memory use.
-    /// `max_levels` is clamped to a minimum of 1.
+    /// Use this when you know roughly how many elements the list will hold.
+    /// The skip list will be tuned so that skip links span the right number of
+    /// nodes for that size, giving good average-case performance without
+    /// wasting memory on unnecessary levels for small lists or degrading for
+    /// large ones.
     ///
     /// The default `p = 0.5` promotion probability is used.
     ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use skiplist::skip_list::SkipList;
+    ///
+    /// // Expect around a hundred elements.
+    /// let list = SkipList::<i32>::with_capacity(100);
+    /// assert!(list.is_empty());
+    ///
+    /// // Expect a large number of elements.
+    /// let big = SkipList::<i32>::with_capacity(240_000_000);
+    /// assert!(big.is_empty());
+    /// ```
+    ///
     /// # Panics
     ///
-    /// Never panics; `max_levels` is clamped to `>= 1` and the default
-    /// `p = 0.5` is always a valid [`Geometric`] probability.
+    /// Never panics.
     #[inline]
     #[must_use]
-    pub fn with_capacity(max_levels: usize) -> Self {
-        let levels = max_levels.max(1);
+    pub fn with_capacity(capacity: usize) -> Self {
+        // Derive 1 + ceil(log2(capacity)), clamped to a minimum of 1.
+        //
+        // With p = 0.5 this is the level count at which the expected number of
+        // nodes at the topmost level is ~1 when the list holds `capacity`
+        // elements.
+        //
+        // ceil(log2(n)) = bit_width(n - 1) = BITS - leading_zeros(n - 1)  for n >= 2.
+        let levels = if capacity <= 1 {
+            1
+        } else {
+            #[expect(
+                clippy::as_conversions,
+                reason = "usize::BITS is a u32 value, but should always a valid usize value, \
+                even if usize is smaller than 32 bits."
+            )]
+            let ceil_log2 =
+                usize::BITS.saturating_sub(capacity.saturating_sub(1).leading_zeros()) as usize;
+            ceil_log2.saturating_add(1)
+        };
         #[expect(
             clippy::expect_used,
-            reason = "`levels` is clamped to >= 1 and DEFAULT_P is a valid probability"
+            reason = "`levels` is always >= 1 and DEFAULT_P is a valid probability"
         )]
         let generator = Geometric::new(levels, DEFAULT_P)
             .expect("`levels >= 1` and `DEFAULT_P` are valid Geometric parameters");
@@ -2909,7 +2942,7 @@ mod tests {
 
     #[test]
     fn with_capacity_zero_clamped() {
-        // max_levels = 0 is clamped to 1; must not panic
+        // capacity = 0 results in 1 level; must not panic
         let list = SkipList::<i32>::with_capacity(0);
         assert!(list.is_empty());
     }
