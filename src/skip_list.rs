@@ -2662,6 +2662,28 @@ impl<T: fmt::Debug, G: LevelGenerator> fmt::Debug for SkipList<T, G> {
     }
 }
 
+// MARK: Clone
+
+impl<T: Clone, G: LevelGenerator + Clone> Clone for SkipList<T, G> {
+    /// Returns a deep clone of the list.
+    ///
+    /// The cloned list has the same elements in the same order.  The level
+    /// generator is cloned as well, so the clone shares the same probability
+    /// distribution for future insertions (but has its own independent RNG
+    /// state).
+    ///
+    /// This operation is O(n log n) — each element is inserted via
+    /// [`push_back`](SkipList::push_back), which is O(log n).
+    #[inline]
+    fn clone(&self) -> Self {
+        let mut new_list = Self::with_level_generator(self.generator.clone());
+        for item in self {
+            new_list.push_back(item.clone());
+        }
+        new_list
+    }
+}
+
 // MARK: Index
 
 impl<T, G: LevelGenerator> Index<usize> for SkipList<T, G> {
@@ -6709,6 +6731,39 @@ mod tests {
         list.dedup_by_key(|i| *i / 10);
         let got: Vec<i32> = list.iter().copied().collect();
         assert_eq!(got, [10, 20, 30]);
+    }
+
+    // MARK: Clone
+
+    #[test]
+    fn clone_empty() {
+        let list = SkipList::<i32>::new();
+        let cloned = list.clone();
+        assert!(cloned.is_empty());
+    }
+
+    #[test]
+    fn clone_elements() {
+        let mut list = SkipList::<i32>::new();
+        for i in [1, 2, 3, 4, 5] {
+            list.push_back(i);
+        }
+        let cloned = list.clone();
+        let got: Vec<i32> = cloned.into_iter().collect();
+        assert_eq!(got, [1, 2, 3, 4, 5]);
+    }
+
+    #[test]
+    fn clone_is_independent() {
+        let mut list = SkipList::<i32>::new();
+        for i in [10, 20, 30] {
+            list.push_back(i);
+        }
+        let mut cloned = list.clone();
+        cloned.push_back(40);
+        // Original is unchanged.
+        assert_eq!(list.len(), 3);
+        assert_eq!(cloned.len(), 4);
     }
 
     // MARK: Debug
