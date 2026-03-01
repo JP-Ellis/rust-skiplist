@@ -975,8 +975,7 @@ where
         //
         // SAFETY: &'a mut SkipList is held exclusively.  All raw pointers
         // originate from its heap allocations.
-        let (_, new_tail) =
-            unsafe { self.list.head.filter_rebuild(|_| true, |_| {}) };
+        let (_, new_tail) = unsafe { self.list.head.filter_rebuild(|_| true, |_| {}) };
         self.list.tail = new_tail;
         // self.list.len is already correct: decremented in Iterator::next
         // once per removed element.

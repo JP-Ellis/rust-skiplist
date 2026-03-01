@@ -66,10 +66,8 @@ impl<T, G: LevelGenerator> SkipList<T, G> {
                         Some(prev_ptr) => {
                             // SAFETY: cur and prev_ptr point to distinct, live,
                             // heap-allocated Nodes; their value_mut references do not alias.
-                            let a: &mut T =
-                                (*cur).value_mut().expect("data node has a value");
-                            let b: &mut T =
-                                (*prev_ptr).value_mut().expect("data node has a value");
+                            let a: &mut T = (*cur).value_mut().expect("data node has a value");
+                            let b: &mut T = (*prev_ptr).value_mut().expect("data node has a value");
                             !same_bucket(a, b)
                         }
                     };
