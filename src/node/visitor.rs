@@ -33,9 +33,12 @@ mod index_mut;
 mod ord;
 mod ord_mut;
 
+pub(crate) use index::IndexVisitor;
+pub(crate) use index_mut::IndexMutVisitor;
+
 /// Outcome of a single [`Visitor::step`] call.
 #[derive(Debug, PartialEq, Eq)]
-enum Step<NodeRef> {
+pub(crate) enum Step<NodeRef> {
     /// The visitor advanced to a new node.
     Advanced(NodeRef),
     /// The visitor has reached its target and can step no further.
@@ -47,7 +50,7 @@ enum Step<NodeRef> {
 /// Basic interface for a visitor.
 ///
 /// This trait defines the interface for visiting nodes.
-trait Visitor {
+pub(crate) trait Visitor {
     /// Node reference associated type.
     type NodeRef;
 
@@ -109,7 +112,7 @@ trait Visitor {
 /// whose skip-link at level `l` points to the target position or beyond.
 /// These precursor nodes are the ones whose links must be rewritten when
 /// a node is inserted or removed.
-trait VisitorMut: Visitor {
+pub(crate) trait VisitorMut: Visitor {
     /// Mutable node reference returned by [`current_mut`][VisitorMut::current_mut].
     type NodeMut;
 

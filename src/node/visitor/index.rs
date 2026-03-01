@@ -10,7 +10,7 @@ use crate::node::{
 /// This visitor is used to find a node by its index. It starts at the head
 /// of the skiplist and traverses down the list until it reaches the target
 /// index.
-struct IndexVisitor<'a, T> {
+pub(crate) struct IndexVisitor<'a, T> {
     /// The current node being visited.
     current: &'a Node<T>,
     /// The current index of the visitor.
@@ -31,7 +31,7 @@ impl<'a, T> IndexVisitor<'a, T> {
     ///
     /// - `node`: The head of the skiplist.
     /// - `target`: The target index to find.
-    fn new(node: &'a Node<T>, target: usize) -> Self {
+    pub(crate) fn new(node: &'a Node<T>, target: usize) -> Self {
         Self {
             current: node,
             index: 0,

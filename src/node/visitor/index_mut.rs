@@ -24,7 +24,7 @@ use crate::node::{
 ///
 /// The visitor borrows `head` mutably for its lifetime `'a`.  All `NonNull`
 /// pointers inside it point into the same list and are valid for `'a`.
-struct IndexMutVisitor<'a, T> {
+pub(crate) struct IndexMutVisitor<'a, T> {
     /// Raw pointer to the current node.
     ///
     /// Stored as `NonNull` rather than `&'a mut` to avoid holding an exclusive
@@ -58,7 +58,7 @@ impl<'a, T> IndexMutVisitor<'a, T> {
     ///
     /// - `head`: The head node of the skip list.
     /// - `target`: The 0-based index to locate.
-    fn new(head: &'a mut Node<T>, target: usize) -> Self {
+    pub(crate) fn new(head: &'a mut Node<T>, target: usize) -> Self {
         let max_levels = head.level();
         let current = NonNull::from(&*head);
         Self {
@@ -80,8 +80,21 @@ impl<'a, T> IndexMutVisitor<'a, T> {
     /// `precursor_distances()[l]` is the total distance traversed at level
     /// `l` before the precursor at that level was recorded.  Used by insert
     /// and remove operations to compute new link distances.
-    fn precursor_distances(&self) -> &[usize] {
+    pub(crate) fn precursor_distances(&self) -> &[usize] {
         &self.precursor_distances
+    }
+
+    /// Consume the visitor, releasing the `&mut` borrow on the head node and
+    /// returning the internal state as owned values.
+    ///
+    /// Returns `(current, precursors, precursor_distances)` where:
+    /// - `current` is the last node advanced to during traversal (the tail node
+    ///   for an exhausted traversal, or the target node if found).
+    /// - `precursors[l]` is the last node at level `l` before the target.
+    /// - `precursor_distances[l]` is the cumulative rank of that precursor.
+    #[expect(clippy::type_complexity, reason = "internal code")]
+    pub(crate) fn into_parts(self) -> (NonNull<Node<T>>, Vec<NonNull<Node<T>>>, Vec<usize>) {
+        (self.current, self.precursors, self.precursor_distances)
     }
 }
 

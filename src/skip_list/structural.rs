@@ -5,7 +5,11 @@ use core::ptr::NonNull;
 
 use crate::{
     level_generator::LevelGenerator,
-    node::{Node, link::Link},
+    node::{
+        Node,
+        link::Link,
+        visitor::{IndexMutVisitor, Visitor},
+    },
     skip_list::SkipList,
 };
 
@@ -71,21 +75,20 @@ impl<T, G: LevelGenerator> SkipList<T, G> {
         clippy::expect_used,
         clippy::missing_panics_doc,
         reason = "the node at rank `len` exists because 0 < len < self.len was checked before \
-                  entering the unsafe block; the expect fires only on invariant violations"
+                  the traversal; the expect fires only on invariant violations"
     )]
     #[expect(
         clippy::indexing_slicing,
         clippy::needless_range_loop,
-        reason = "l < max_levels = head.links.len(); every node in update[] was reached \
+        reason = "l < max_levels = head.links.len(); every node in precursors[] was reached \
                   via a level-l link so its links.len() > l; all accesses are in bounds; \
-                  l is used for both update[l] and links_mut()[l] so a plain index loop is \
+                  l is used for both precursors[l] and links_mut()[l] so a plain index loop is \
                   the clearest expression"
     )]
     #[expect(
         clippy::multiple_unsafe_ops_per_block,
-        reason = "traversal, link clearing, and truncate_next all touch provably disjoint \
-                  heap nodes; splitting across blocks would require unsafe-crossing raw-pointer \
-                  variables"
+        reason = "link clearing and truncate_next touch provably disjoint heap nodes; \
+                  splitting across blocks would require unsafe-crossing raw-pointer variables"
     )]
     #[inline]
     pub fn truncate(&mut self, len: usize) {
@@ -100,38 +103,23 @@ impl<T, G: LevelGenerator> SkipList<T, G> {
         // 0 < len < self.len: keep elements at ranks 1..=len; drop the rest.
         let max_levels = self.head.level();
 
-        // SAFETY: All raw pointers come from heap allocations owned by this
-        // SkipList.  No safe references to any node exist while this block
-        // runs.  Each node in update[] is distinct from the others (they are
-        // at different levels in a skip-list traversal), and each links[] slot
-        // is accessed at most once per level.
+        // IndexMutVisitor with target = len records, for each level l, the last
+        // node at level l with rank < len.  precursors[0].links[0] points to the
+        // new tail at rank len.  into_parts() releases the &mut borrow.
+        let (_, precursors, _) = {
+            let mut visitor = IndexMutVisitor::new(&mut self.head, len);
+            visitor.traverse();
+            visitor.into_parts()
+        };
+
+        // SAFETY: All raw pointers come from NonNull<Node<T>> captured during
+        // traversal.  They originate from heap allocations owned by this SkipList.
+        // No safe references to any node exist while this block runs.
         let new_tail_ptr: *mut Node<T> = unsafe {
-            let head_ptr: *mut Node<T> = &raw mut *self.head;
-
-            // update[l] = (predecessor at level l, its rank).
-            // Using target_rank = len and break when next_rank >= len means
-            // update[l] holds the last node at level l with rank < len.
-            // Therefore update[0].links[0] points to the new tail at rank len.
-            let mut update: Vec<(*mut Node<T>, usize)> = vec![(head_ptr, 0_usize); max_levels];
-            let mut current: *mut Node<T> = head_ptr;
-            let mut current_rank: usize = 0;
-
-            for l in (0..max_levels).rev() {
-                while let Some(link) = (*current).links()[l].as_ref() {
-                    let next_rank = current_rank.saturating_add(link.distance().get());
-                    if next_rank >= len {
-                        break;
-                    }
-                    current_rank = next_rank;
-                    current = NonNull::from(link.node()).as_ptr();
-                }
-                update[l] = (current, current_rank);
-            }
-
-            // The new tail is the level-0 successor of update[0].
+            // The new tail is the level-0 successor of precursors[0].
             // It exists because 0 < len < self.len.
             let new_tail_ptr: *mut Node<T> = NonNull::from(
-                (*update[0].0).links()[0]
+                (*precursors[0].as_ptr()).links()[0]
                     .as_ref()
                     .expect("the node at rank `len` exists because len < self.len")
                     .node(),
@@ -146,16 +134,13 @@ impl<T, G: LevelGenerator> SkipList<T, G> {
                 *link = None;
             }
 
-            // For levels at or above the new tail's height, the new tail does
-            // not participate in those skip-link lists.  The predecessor at
+            // For levels at or above the new tail's height, the predecessor at
             // each such level may have a skip link that spans past the cut;
             // clear it.
             for l in new_tail_height..max_levels {
-                (*update[l].0).links_mut()[l] = None;
+                (*precursors[l].as_ptr()).links_mut()[l] = None;
             }
 
-            // truncate_next() sets new_tail.next = None and drops the rest
-            // of the chain in O(k) without recursion.
             (*new_tail_ptr).truncate_next();
 
             new_tail_ptr
@@ -352,15 +337,14 @@ impl<T, G: LevelGenerator> SkipList<T, G> {
     )]
     #[expect(
         clippy::indexing_slicing,
-        clippy::needless_range_loop,
-        reason = "l < max_levels = update.len() = head.links.len() = other_head.links.len(); \
-                  l indexes both update[l] and links[][l] simultaneously"
+        reason = "l < max_levels = precursors.len() = head.links.len() = other_head.links.len(); \
+                  l indexes both precursors[l] and links[][l] simultaneously"
     )]
     #[expect(
         clippy::multiple_unsafe_ops_per_block,
-        reason = "update-array traversal, chain detach, prev/next splice, and cross-seam \
-                  link wiring all touch provably disjoint heap nodes; splitting across \
-                  blocks would require unsafe-crossing raw-pointer variables"
+        reason = "chain detach, prev/next splice, and cross-seam link wiring all touch \
+                  provably disjoint heap nodes; splitting across blocks would require \
+                  unsafe-crossing raw-pointer variables"
     )]
     #[inline]
     pub fn append(&mut self, other: &mut Self) {
@@ -383,66 +367,51 @@ impl<T, G: LevelGenerator> SkipList<T, G> {
 
         // Fast path: splice chains and rewrite only the cross-seam skip links.
         //
-        // The nodes in `other` already carry correct inter-node skip links (their
-        // distances are relative to their own predecessors, which are unchanged).
-        // Only the links that span the seam — from the last level-l node in `self`
-        // to the first level-l node in `other` — need to be created.
-        //
+        // IndexMutVisitor with target = self_len + 1 advances to the end of self,
+        // recording the rightmost predecessor at each level.
+        // into_parts() releases the &mut borrow on self.head.
+        let (_, precursors, precursor_distances) = {
+            let mut visitor = IndexMutVisitor::new(&mut self.head, self_len.saturating_add(1));
+            visitor.traverse();
+            visitor.into_parts()
+        };
+
         // SAFETY: We hold `&mut self` and `&mut other`, giving exclusive access to
-        // every node in both lists.  `head_ptr` and `other_head_ptr` are derived
-        // from the two disjoint `Box<Node<T>>` allocations.  Within the block each
-        // node field is accessed at most once, so no simultaneous aliasing occurs.
+        // every node in both lists.  `other_head_ptr` is derived from `other`'s
+        // disjoint `Box<Node<T>>` allocation.  Within the block each node field is
+        // accessed at most once, so no simultaneous aliasing occurs.
         unsafe {
             let head_ptr: *mut Node<T> = &raw mut *self.head;
             let other_head_ptr: *mut Node<T> = &raw mut *other.head;
 
-            // ── Step 1: build update array ──────────────────────────────────────
-            //
-            // update[l] = (last node reachable via links[l] from head, its 0-based rank).
-            // Initialised to (head, 0); levels with no data nodes default to head.
-            // `current` and `current_rank` carry over between levels (same logic as
-            // push_back's "find-update-array" traversal).
-            let mut update: Vec<(*mut Node<T>, usize)> = vec![(head_ptr, 0_usize); max_levels];
-            let mut current: *mut Node<T> = head_ptr;
-            let mut current_rank: usize = 0;
-
-            for l in (0..max_levels).rev() {
-                while let Some(link) = (*current).links()[l].as_ref() {
-                    current_rank = current_rank.saturating_add(link.distance().get());
-                    current = NonNull::from(link.node()).as_ptr();
-                }
-                update[l] = (current, current_rank);
-            }
-
-            // ── Step 2: detach other's chain ─────────────────────────────────────
+            // Step 1: detach other's node chain from other's sentinel head.
             let first_nn = (*other_head_ptr)
                 .take_next_chain()
                 .expect("other is non-empty");
 
-            // ── Step 3: splice chains ─────────────────────────────────────────────
-            //
-            // `set_head_next` sets `node.next = first_nn` and `first_nn.prev = node`.
-            // The tail node satisfies its precondition (`next == None`), so we can
-            // use it for both branches.
+            // Step 2: splice other's chain onto the end of self's chain.
+            // If self is non-empty, attach after self.tail; otherwise attach
+            // directly after self's sentinel head.
             if let Some(tail_nn) = self.tail {
                 (*tail_nn.as_ptr()).set_head_next(first_nn);
             } else {
                 (*head_ptr).set_head_next(first_nn);
             }
 
-            // ── Step 4: wire the cross-seam skip links ───────────────────────────
+            // Step 3: wire the cross-seam skip links.
             //
-            // For each level l where `other` has at least one node, compute the
-            // distance from the last level-l predecessor in `self` to the first
-            // level-l node in `other` and create the link.
+            // For each level l, if other's head had a link at level l pointing
+            // into other's chain, compute a new distance for the corresponding
+            // predecessor in self:
             //
             //   distance = (self_len + other_link.distance) - pred_rank
             //
             // distance >= 1 because other_link.distance >= 1 (NonZeroUsize) and
-            // pred_rank <= self_len, so distance >= self_len + 1 - self_len = 1.
+            // pred_rank <= self_len.
             for l in 0..max_levels {
                 if let Some(other_link) = (*other_head_ptr).links()[l].as_ref() {
-                    let (pred_ptr, pred_rank) = update[l];
+                    let pred_ptr = precursors[l].as_ptr();
+                    let pred_rank = precursor_distances[l];
                     let distance = self_len
                         .saturating_add(other_link.distance().get())
                         .saturating_sub(pred_rank);
@@ -453,7 +422,6 @@ impl<T, G: LevelGenerator> SkipList<T, G> {
                 }
             }
 
-            // ── Step 5: update other and self ─────────────────────────────────────
             let new_tail = other.tail;
             for link in (*other_head_ptr).links_mut() {
                 *link = None;

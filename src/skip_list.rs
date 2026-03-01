@@ -24,7 +24,10 @@ use core::ptr::NonNull;
 
 use crate::{
     level_generator::{LevelGenerator, geometric::Geometric},
-    node::Node,
+    node::{
+        Node,
+        visitor::{IndexVisitor, Visitor},
+    },
 };
 
 mod access;
@@ -232,10 +235,8 @@ impl<T, G: LevelGenerator> SkipList<T, G> {
     /// `index`.  The caller must ensure `index < self.len`.
     #[expect(
         clippy::expect_used,
-        reason = "the level-0 successor of the found predecessor is guaranteed to \
-                  exist because callers (range / range_mut / split_off) validate \
-                  index < self.len before calling this helper; the expect fires \
-                  only on internal invariant violations"
+        reason = "index < self.len is validated by the debug_assert and all callers; \
+                  the expect fires only on internal invariant violations"
     )]
     #[inline]
     fn node_ptr_at(&self, index: usize) -> NonNull<Node<T>> {
@@ -244,28 +245,10 @@ impl<T, G: LevelGenerator> SkipList<T, G> {
             "index {index} out of bounds (len={})",
             self.len
         );
-        let target_rank = index.saturating_add(1);
-        let mut current: &Node<T> = &self.head;
-        let mut current_rank: usize = 0;
-        let levels = self.head.level();
-        for l in (0..levels).rev() {
-            while let Some(Some(link)) = current.links().get(l) {
-                let next_rank = current_rank.saturating_add(link.distance().get());
-                if next_rank >= target_rank {
-                    break;
-                }
-                current_rank = next_rank;
-                current = link.node();
-            }
-        }
-        NonNull::from(
-            current
-                .links()
-                .first()
-                .and_then(Option::as_ref)
-                .expect("node at index exists because index < self.len")
-                .node(),
-        )
+        IndexVisitor::new(&self.head, index.saturating_add(1))
+            .traverse()
+            .map(NonNull::from)
+            .expect("node at index exists because index < self.len")
     }
 }
 

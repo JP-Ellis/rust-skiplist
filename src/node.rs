@@ -106,7 +106,7 @@ use std::collections::HashMap;
 use crate::node::link::Link;
 
 pub(crate) mod link;
-mod visitor;
+pub(crate) mod visitor;
 
 /// The type of node in the skip list.
 #[derive(Debug)]

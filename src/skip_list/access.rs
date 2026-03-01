@@ -9,7 +9,14 @@ use core::{
     ptr::NonNull,
 };
 
-use crate::{level_generator::LevelGenerator, node::Node, skip_list::SkipList};
+use crate::{
+    level_generator::LevelGenerator,
+    node::{
+        Node,
+        visitor::{IndexVisitor, Visitor},
+    },
+    skip_list::SkipList,
+};
 
 impl<T, G: LevelGenerator> SkipList<T, G> {
     /// Returns a reference to the element at position `index`, or `None` if
@@ -37,27 +44,9 @@ impl<T, G: LevelGenerator> SkipList<T, G> {
         if index >= self.len {
             return None;
         }
-
-        let target_rank = index.saturating_add(1);
-        let mut current: &Node<T> = &self.head;
-        let mut current_rank: usize = 0;
-
-        for l in (0..self.head.level()).rev() {
-            while let Some(Some(link)) = current.links().get(l) {
-                let next_rank = current_rank.saturating_add(link.distance().get());
-                if next_rank >= target_rank {
-                    break;
-                }
-                current_rank = next_rank;
-                current = link.node();
-            }
-        }
-
-        current
-            .links()
-            .first()
-            .and_then(Option::as_ref)
-            .and_then(|link| link.node().value())
+        IndexVisitor::new(&self.head, index.saturating_add(1))
+            .traverse()
+            .and_then(|node| node.value())
     }
 
     /// Returns a mutable reference to the element at position `index`, or
@@ -79,47 +68,16 @@ impl<T, G: LevelGenerator> SkipList<T, G> {
     /// assert_eq!(list.get(0), Some(&42));
     /// assert_eq!(list.get(1), Some(&20));
     /// ```
-    #[expect(
-        clippy::multiple_unsafe_ops_per_block,
-        reason = "raw-pointer traversal and the final value_mut call are all on distinct, \
-                  provably non-aliasing nodes owned by self; splitting into separate unsafe \
-                  blocks would require unsafe-crossing raw-pointer variables"
-    )]
     #[inline]
     #[must_use]
     pub fn get_mut(&mut self, index: usize) -> Option<&mut T> {
         if index >= self.len {
             return None;
         }
-
-        let target_rank = index.saturating_add(1);
-        let max_levels = self.head.level();
-
-        // SAFETY: All raw pointers originate from heap allocations owned by this
-        // SkipList. We have &mut self, guaranteeing exclusive access to all nodes.
-        // We traverse using *const pointers (read-only) to avoid holding a live
-        // &mut while reading links. The target pointer is converted to *mut only
-        // when calling value_mut(); the returned &mut T has lifetime tied to
-        // &mut self, and no other reference to the same node can exist.
-        unsafe {
-            let mut current: *const Node<T> = &raw const *self.head;
-            let mut current_rank: usize = 0;
-
-            for l in (0..max_levels).rev() {
-                while let Some(Some(link)) = (*current).links().get(l) {
-                    let next_rank = current_rank.saturating_add(link.distance().get());
-                    if next_rank >= target_rank {
-                        break;
-                    }
-                    current_rank = next_rank;
-                    current = link.node();
-                }
-            }
-
-            let target: NonNull<Node<T>> =
-                NonNull::from((*current).links().first()?.as_ref()?.node());
-            (*target.as_ptr()).value_mut()
-        }
+        // SAFETY: index < self.len, so node_ptr_at returns a valid data node.
+        // &mut self guarantees exclusive access; no other reference to this node
+        // can exist.  The returned &mut T is bounded by &mut self's lifetime.
+        unsafe { (*self.node_ptr_at(index).as_ptr()).value_mut() }
     }
 
     /// Returns a reference to the first element, or `None` if the list is

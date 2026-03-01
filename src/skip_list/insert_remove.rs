@@ -5,7 +5,11 @@ use core::ptr::NonNull;
 
 use crate::{
     level_generator::LevelGenerator,
-    node::{Node, link::Link},
+    node::{
+        Node,
+        link::Link,
+        visitor::{IndexMutVisitor, Visitor},
+    },
     skip_list::SkipList,
 };
 
@@ -45,7 +49,7 @@ impl<T, G: LevelGenerator> SkipList<T, G> {
     )]
     #[expect(
         clippy::multiple_unsafe_ops_per_block,
-        reason = "traversal, insertion, and link wiring all touch provably disjoint heap nodes; \
+        reason = "insertion and link wiring touch provably disjoint heap nodes; \
                   splitting across blocks would require unsafe-crossing raw-pointer variables"
     )]
     #[inline]
@@ -57,39 +61,28 @@ impl<T, G: LevelGenerator> SkipList<T, G> {
         );
 
         let height = self.generator.level().saturating_add(1);
-        let max_levels = self.head.level();
         // new_rank: the rank of the new node after insertion
         // (head = rank 0; element at index i has rank i + 1).
         let new_rank = index.saturating_add(1);
 
-        // SAFETY: All raw pointers originate from heap allocations owned by this
-        // SkipList.  No safe &mut references to any node exist while this block
-        // runs.  Different update[] entries may alias (same predecessor node,
-        // different levels) but each iteration accesses a distinct links[l]
-        // index, so no simultaneous aliasing occurs.
+        // IndexMutVisitor records, for each level l, the last node whose
+        // level-l skip-link would overshoot or is absent at new_rank.
+        // into_parts() releases the &mut borrow so the subsequent unsafe block
+        // can take raw pointers to nodes.
+        let (_, precursors, precursor_distances) = {
+            let mut visitor = IndexMutVisitor::new(&mut self.head, new_rank);
+            visitor.traverse();
+            visitor.into_parts()
+        };
+
+        // SAFETY: All raw pointers come from NonNull<Node<T>> captured during
+        // traversal.  They originate from heap allocations owned by this SkipList.
+        // No safe &mut references to any node exist while this block runs.
+        // Different precursors may alias (same predecessor, different levels) but
+        // each iteration accesses a distinct links[l] index.
         let new_node_nonnull: NonNull<Node<T>> = unsafe {
-            let head_ptr: *mut Node<T> = &raw mut *self.head;
-
-            // update[l] = (predecessor at level l, its rank from head).
-            // Initialised to (head, 0): head is always a valid predecessor.
-            let mut update: Vec<(*mut Node<T>, usize)> = vec![(head_ptr, 0_usize); max_levels];
-            let mut current: *mut Node<T> = head_ptr;
-            let mut current_rank: usize = 0;
-
-            for l in (0..max_levels).rev() {
-                while let Some(link) = (*current).links()[l].as_ref() {
-                    let next_rank = current_rank.saturating_add(link.distance().get());
-                    if next_rank >= new_rank {
-                        break;
-                    }
-                    current_rank = next_rank;
-                    current = NonNull::from(link.node()).as_ptr();
-                }
-                update[l] = (current, current_rank);
-            }
-
             // Insert the new node right after the level-0 predecessor.
-            let (pred0_ptr, _) = update[0];
+            let pred0_ptr = precursors[0].as_ptr();
             (*pred0_ptr).insert_after(Node::with_value(height, value));
 
             // Obtain a raw pointer to the new node without holding a live &mut.
@@ -110,7 +103,13 @@ impl<T, G: LevelGenerator> SkipList<T, G> {
             // For l ≥ height (new node has no tower here):
             //   pred.links[l] still points to the same X (now at rank D + d + 1);
             //   increment its distance by 1.
-            for (l, &(pred_ptr, pred_rank)) in update.iter().enumerate() {
+            for (l, (pred_nn, pred_rank)) in precursors
+                .iter()
+                .copied()
+                .zip(precursor_distances.iter().copied())
+                .enumerate()
+            {
+                let pred_ptr = pred_nn.as_ptr();
                 if l < height {
                     let distance = new_rank.saturating_sub(pred_rank);
                     let old_link = (*pred_ptr).links_mut()[l].take();
@@ -168,7 +167,7 @@ impl<T, G: LevelGenerator> SkipList<T, G> {
     /// ```
     #[expect(
         clippy::expect_used,
-        reason = "update[0].links[0] exists because index < len guarantees a node at target_rank; \
+        reason = "precursors[0].links[0] exists because index < len guarantees a node at target_rank; \
                   take_value is Some for any body/tail node; \
                   Link::new distance is computed to be >= 1; \
                   all expects fire only on internal invariant violations, not user input"
@@ -176,12 +175,12 @@ impl<T, G: LevelGenerator> SkipList<T, G> {
     #[expect(
         clippy::indexing_slicing,
         reason = "l < target_height <= max_levels = target.links.len(); \
-                  update[l].0 was reached at level l so update[l].0.links.len() > l; \
+                  precursors[l] was reached at level l so precursors[l].links.len() > l; \
                   all accesses are bounded by max_levels = head.links.len()"
     )]
     #[expect(
         clippy::multiple_unsafe_ops_per_block,
-        reason = "traversal, link rewiring, and node pop all touch provably disjoint heap nodes; \
+        reason = "link rewiring and node pop touch provably disjoint heap nodes; \
                   splitting across blocks would require unsafe-crossing raw-pointer variables"
     )]
     #[inline]
@@ -192,42 +191,27 @@ impl<T, G: LevelGenerator> SkipList<T, G> {
             self.len
         );
 
-        let max_levels = self.head.level();
         // head = rank 0; the element at logical index i is at rank i + 1.
         let target_rank = index.saturating_add(1);
 
-        // SAFETY: All raw pointers originate from heap allocations owned by this
-        // SkipList.  No safe &mut references to any node exist while this block
-        // runs.  Different update[] entries may alias (same predecessor node,
-        // different levels) but each iteration accesses a distinct links[l]
-        // index, so no simultaneous aliasing occurs.
+        // IndexMutVisitor records the predecessor at each level.
+        // into_parts() releases the &mut borrow so the unsafe block can use raw ptrs.
+        let (_, precursors, precursor_distances) = {
+            let mut visitor = IndexMutVisitor::new(&mut self.head, target_rank);
+            visitor.traverse();
+            visitor.into_parts()
+        };
+
+        // SAFETY: All raw pointers come from NonNull<Node<T>> captured during
+        // traversal.  They originate from heap allocations owned by this SkipList.
+        // No safe &mut references to any node exist while this block runs.
         let (value, pred0) = unsafe {
-            let head_ptr: *mut Node<T> = &raw mut *self.head;
-
-            // update[l] = (predecessor at level l, its rank from head).
-            // Initialised to (head, 0): head is always a valid predecessor.
-            let mut update: Vec<(*mut Node<T>, usize)> = vec![(head_ptr, 0_usize); max_levels];
-            let mut current: *mut Node<T> = head_ptr;
-            let mut current_rank: usize = 0;
-
-            for l in (0..max_levels).rev() {
-                while let Some(link) = (*current).links()[l].as_ref() {
-                    let next_rank = current_rank.saturating_add(link.distance().get());
-                    if next_rank >= target_rank {
-                        break;
-                    }
-                    current_rank = next_rank;
-                    current = NonNull::from(link.node()).as_ptr();
-                }
-                update[l] = (current, current_rank);
-            }
-
-            // The target is update[0]'s level-0 successor.
+            // The target is precursors[0]'s level-0 successor.
             // index < len guarantees this link exists.
             let target_ptr: *mut Node<T> = NonNull::from(
-                (*update[0].0).links()[0]
+                (*precursors[0].as_ptr()).links()[0]
                     .as_ref()
-                    .expect("update[0].links[0] points to the target node")
+                    .expect("precursors[0].links[0] points to the target node")
                     .node(),
             )
             .as_ptr();
@@ -244,10 +228,13 @@ impl<T, G: LevelGenerator> SkipList<T, G> {
             //
             // For l >= target_height (target has no skip-link slot at this level):
             //   pred.links[l] already skips over target; decrement its distance by 1.
-            //   The distance is >= 2 because pred_rank < target_rank and
-            //   next_rank > target_rank (no level-l link can point to target at these
-            //   levels, since target was never wired into this level during insertion).
-            for (l, &(pred_ptr, pred_rank)) in update.iter().enumerate() {
+            for (l, (pred_nn, pred_rank)) in precursors
+                .iter()
+                .copied()
+                .zip(precursor_distances.iter().copied())
+                .enumerate()
+            {
+                let pred_ptr = pred_nn.as_ptr();
                 if l < target_height {
                     let pred_to_target = target_rank.saturating_sub(pred_rank);
                     let old_link = (*target_ptr).links_mut()[l].take();
@@ -266,8 +253,8 @@ impl<T, G: LevelGenerator> SkipList<T, G> {
             }
 
             // Detach the target node from the prev/next chain and take its value.
-            // Also capture the level-0 predecessor for the tail update below.
-            let pred0 = update[0].0;
+            // Capture the level-0 predecessor for the tail update below.
+            let pred0 = precursors[0];
             let mut popped = (*target_ptr).pop();
             (
                 popped.take_value().expect("target node always has a value"),
@@ -276,12 +263,7 @@ impl<T, G: LevelGenerator> SkipList<T, G> {
         };
 
         if index.saturating_add(1) == self.len {
-            self.tail = if self.len == 1 {
-                None
-            } else {
-                // SAFETY: pred0 is a live data node pointer owned by this SkipList.
-                Some(unsafe { NonNull::new_unchecked(pred0) })
-            };
+            self.tail = if self.len == 1 { None } else { Some(pred0) };
         }
         self.len = self.len.saturating_sub(1);
         value
@@ -319,8 +301,8 @@ impl<T, G: LevelGenerator> SkipList<T, G> {
     )]
     #[expect(
         clippy::multiple_unsafe_ops_per_block,
-        reason = "two independent skip-list traversals and a ptr::swap on provably distinct \
-                  heap nodes; splitting across blocks would require unsafe-crossing variables"
+        reason = "two value_mut accesses and a ptr::swap on provably distinct heap nodes; \
+                  splitting across blocks would require unsafe-crossing raw-pointer variables"
     )]
     #[inline]
     pub fn swap(&mut self, a: usize, b: usize) {
@@ -338,64 +320,17 @@ impl<T, G: LevelGenerator> SkipList<T, G> {
             return;
         }
 
-        let max_levels = self.head.level();
+        let ptr_a = self.node_ptr_at(a);
+        let ptr_b = self.node_ptr_at(b);
 
-        // SAFETY: Both indices are in bounds (asserted above) and a != b guarantees
-        // the two target nodes are distinct. We hold &mut self, so no other live
-        // references to any node exist. core::ptr::swap on two distinct value
-        // pointers does not violate Rust's aliasing rules.
+        // SAFETY: a != b guarantees the two target nodes are distinct.  We hold
+        // &mut self, so no other live references to any node exist.
+        // core::ptr::swap on two distinct value pointers does not violate
+        // Rust's aliasing rules.
         unsafe {
-            // Traversal for index `a`: same algorithm as `get_mut`.
-            let target_rank_a = a.saturating_add(1);
-            let mut current: *const Node<T> = &raw const *self.head;
-            let mut current_rank: usize = 0;
-            for l in (0..max_levels).rev() {
-                while let Some(Some(link)) = (*current).links().get(l) {
-                    let next_rank = current_rank.saturating_add(link.distance().get());
-                    if next_rank >= target_rank_a {
-                        break;
-                    }
-                    current_rank = next_rank;
-                    current = link.node();
-                }
-            }
-            let node_a = NonNull::from(
-                (*current)
-                    .links()
-                    .first()
-                    .expect("level-0 link exists because a < len")
-                    .as_ref()
-                    .expect("level-0 link is Some because a < len guarantees a node")
-                    .node(),
-            );
-            let ptr_a: *mut T = (*node_a.as_ptr()).value_mut().expect("node a has a value");
-
-            // Traversal for index `b`.
-            let target_rank_b = b.saturating_add(1);
-            current = &raw const *self.head;
-            current_rank = 0;
-            for l in (0..max_levels).rev() {
-                while let Some(Some(link)) = (*current).links().get(l) {
-                    let next_rank = current_rank.saturating_add(link.distance().get());
-                    if next_rank >= target_rank_b {
-                        break;
-                    }
-                    current_rank = next_rank;
-                    current = link.node();
-                }
-            }
-            let node_b = NonNull::from(
-                (*current)
-                    .links()
-                    .first()
-                    .expect("level-0 link exists because b < len")
-                    .as_ref()
-                    .expect("level-0 link is Some because b < len guarantees a node")
-                    .node(),
-            );
-            let ptr_b: *mut T = (*node_b.as_ptr()).value_mut().expect("node b has a value");
-
-            core::ptr::swap(ptr_a, ptr_b);
+            let val_a: *mut T = (*ptr_a.as_ptr()).value_mut().expect("node a has a value");
+            let val_b: *mut T = (*ptr_b.as_ptr()).value_mut().expect("node b has a value");
+            core::ptr::swap(val_a, val_b);
         }
     }
 }
