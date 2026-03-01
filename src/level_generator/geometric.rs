@@ -28,11 +28,26 @@ pub enum GeometricError {
 
 /// A level generator using a geometric distribution.
 ///
-/// This distribution assumes that if a node is present at some level `$n$`,
-/// then the probability that it is present at level `$n+1$` is some constant
-/// `$p \in (0, 1)$`. This produces a geometric distribution, albeit truncated
-/// at the maximum number of levels allowed.
-#[derive(Debug)]
+/// Each new element is assigned a random level drawn from a truncated geometric
+/// distribution. If an element exists at level `$n$`, the probability that it
+/// also exists at level `$n+1$` is `$p \in (0, 1)$`. The level is capped at the
+/// configured maximum.
+///
+/// Use [`Geometric::new`] to configure the number of levels and the promotion
+/// probability, or [`Geometric::default`] for the standard 16-level, `$p =
+/// 0.5$` configuration.
+///
+/// # Examples
+///
+/// ```rust
+/// use skiplist::level_generator::LevelGenerator;
+/// use skiplist::level_generator::geometric::Geometric;
+///
+/// let mut generator = Geometric::new(16, 0.5).unwrap();
+/// let level = generator.level();
+/// assert!(level < generator.total());
+/// ```
+#[derive(Debug, Clone)]
 pub struct Geometric {
     /// The total number of levels that are assumed to exist.
     total: usize,

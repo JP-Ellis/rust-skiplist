@@ -1559,7 +1559,7 @@ impl<T, G: LevelGenerator> SkipList<T, G> {
     #[must_use]
     pub fn split_off(&mut self, at: usize) -> Self
     where
-        G: Default,
+        G: Clone,
     {
         assert!(
             at <= self.len,
@@ -1576,7 +1576,7 @@ impl<T, G: LevelGenerator> SkipList<T, G> {
                 head: Box::new(Node::new(max_levels)),
                 tail: None,
                 len: 0,
-                generator: G::default(),
+                generator: self.generator.clone(),
             };
         }
 
@@ -1587,7 +1587,7 @@ impl<T, G: LevelGenerator> SkipList<T, G> {
                 head: Box::new(Node::new(max_levels)),
                 tail: None, // set by rebuild below
                 len: old_len,
-                generator: G::default(),
+                generator: self.generator.clone(),
             };
 
             // Transfer the entire node chain from self.head to result.head.
@@ -1643,7 +1643,7 @@ impl<T, G: LevelGenerator> SkipList<T, G> {
                 head: Box::new(Node::new(max_levels)),
                 tail: None, // set by rebuild below
                 len: tail_len,
-                generator: G::default(),
+                generator: self.generator.clone(),
             };
             result.head.set_head_next(first_of_tail);
 
