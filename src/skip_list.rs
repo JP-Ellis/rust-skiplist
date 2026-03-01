@@ -18,6 +18,7 @@
 use core::{
     cmp::Ordering,
     fmt,
+    hash::{Hash, Hasher},
     iter::FusedIterator,
     marker::PhantomData,
     ops::{Bound, Index, IndexMut, RangeBounds},
@@ -2722,6 +2723,22 @@ impl<T: PartialEq, G: LevelGenerator, G2: LevelGenerator> PartialEq<SkipList<T, 
 }
 
 impl<T: Eq, G: LevelGenerator> Eq for SkipList<T, G> {}
+
+// MARK: Hash
+
+impl<T: Hash, G: LevelGenerator> Hash for SkipList<T, G> {
+    /// Hashes the length followed by each element in order.
+    ///
+    /// This matches the convention used by slices: two lists with the same
+    /// elements in the same order produce the same hash value.
+    #[inline]
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.len().hash(state);
+        for item in self {
+            item.hash(state);
+        }
+    }
+}
 
 // MARK: Index
 
@@ -6816,6 +6833,62 @@ mod tests {
         let a = SkipList::<i32>::new();
         let b = SkipList::<i32>::new();
         assert_eq!(a.partial_cmp(&b), Some(core::cmp::Ordering::Equal));
+    }
+
+    // MARK: Hash
+
+    #[test]
+    fn hash_equal_lists_same_hash() {
+        use std::{
+            collections::hash_map::DefaultHasher,
+            hash::{Hash, Hasher},
+        };
+
+        let mut a = SkipList::<i32>::new();
+        let mut b = SkipList::<i32>::new();
+        for i in [1, 2, 3] {
+            a.push_back(i);
+            b.push_back(i);
+        }
+        let hash_a = {
+            let mut h = DefaultHasher::new();
+            a.hash(&mut h);
+            h.finish()
+        };
+        let hash_b = {
+            let mut h = DefaultHasher::new();
+            b.hash(&mut h);
+            h.finish()
+        };
+        assert_eq!(hash_a, hash_b);
+    }
+
+    #[test]
+    fn hash_different_orders_differ() {
+        use std::{
+            collections::hash_map::DefaultHasher,
+            hash::{Hash, Hasher},
+        };
+
+        let mut a = SkipList::<i32>::new();
+        let mut b = SkipList::<i32>::new();
+        for i in [1, 2, 3] {
+            a.push_back(i);
+        }
+        for i in [3, 2, 1] {
+            b.push_back(i);
+        }
+        let hash_a = {
+            let mut h = DefaultHasher::new();
+            a.hash(&mut h);
+            h.finish()
+        };
+        let hash_b = {
+            let mut h = DefaultHasher::new();
+            b.hash(&mut h);
+            h.finish()
+        };
+        assert_ne!(hash_a, hash_b);
     }
 
     // MARK: PartialEq / Eq
