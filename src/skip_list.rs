@@ -2740,6 +2740,26 @@ impl<T: Hash, G: LevelGenerator> Hash for SkipList<T, G> {
     }
 }
 
+// MARK: Extend
+
+impl<T, G: LevelGenerator> Extend<T> for SkipList<T, G> {
+    /// Appends all items from `iter` to the back of the list.
+    #[inline]
+    fn extend<I: IntoIterator<Item = T>>(&mut self, iter: I) {
+        for item in iter {
+            self.push_back(item);
+        }
+    }
+}
+
+impl<'a, T: Copy + 'a, G: LevelGenerator> Extend<&'a T> for SkipList<T, G> {
+    /// Copies all items from `iter` and appends them to the back of the list.
+    #[inline]
+    fn extend<I: IntoIterator<Item = &'a T>>(&mut self, iter: I) {
+        self.extend(iter.into_iter().copied());
+    }
+}
+
 // MARK: Index
 
 impl<T, G: LevelGenerator> Index<usize> for SkipList<T, G> {
@@ -6833,6 +6853,36 @@ mod tests {
         let a = SkipList::<i32>::new();
         let b = SkipList::<i32>::new();
         assert_eq!(a.partial_cmp(&b), Some(core::cmp::Ordering::Equal));
+    }
+
+    // MARK: Extend
+
+    #[test]
+    fn extend_owned_appends_elements() {
+        let mut list = SkipList::<i32>::new();
+        list.push_back(1);
+        list.extend([2, 3, 4]);
+        let got: Vec<i32> = list.into_iter().collect();
+        assert_eq!(got, [1, 2, 3, 4]);
+    }
+
+    #[test]
+    fn extend_owned_empty_iter() {
+        let mut list = SkipList::<i32>::new();
+        list.push_back(1);
+        #[expect(clippy::as_conversions, reason = "safe conversion of empty list")]
+        list.extend([] as [i32; 0]);
+        assert_eq!(list.len(), 1);
+    }
+
+    #[test]
+    fn extend_refs_copies_elements() {
+        let mut list = SkipList::<i32>::new();
+        list.push_back(10);
+        let source = [20, 30, 40];
+        list.extend(source.iter());
+        let got: Vec<i32> = list.into_iter().collect();
+        assert_eq!(got, [10, 20, 30, 40]);
     }
 
     // MARK: Hash
