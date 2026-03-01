@@ -2022,6 +2022,197 @@ impl<T, G: LevelGenerator> SkipList<T, G> {
         }
     }
 
+    /// Removes all but the first of consecutive equal elements as determined
+    /// by a comparator.
+    ///
+    /// The `same_bucket` predicate receives mutable references to two
+    /// consecutive elements — `(later, earlier)` — and returns `true` if
+    /// `later` should be removed.  The `later` element may be mutated before
+    /// the predicate returns; it is dropped when the predicate returns `true`.
+    ///
+    /// This matches the semantics of [`Vec::dedup_by`].
+    ///
+    /// This operation is O(n).
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use skiplist::skip_list::SkipList;
+    ///
+    /// let mut list = SkipList::<String>::new();
+    /// for s in ["foo", "bar", "Bar", "baz", "bar"] {
+    ///     list.push_back(s.to_string());
+    /// }
+    /// list.dedup_by(|a, b| a.eq_ignore_ascii_case(b));
+    /// let collected: Vec<String> = list.into_iter().collect();
+    /// assert_eq!(collected, ["foo", "bar", "baz", "bar"]);
+    /// ```
+    #[expect(
+        clippy::expect_used,
+        clippy::missing_panics_doc,
+        reason = "`value_mut()` returns None only for the head sentinel, which is never \
+                  visited in the data-node walk; the expect fires only on invariant violations"
+    )]
+    #[expect(
+        clippy::indexing_slicing,
+        clippy::needless_range_loop,
+        reason = "l < node_height ≤ max_levels = predecessors.len() = head.links.len(); \
+                  l is used for both predecessors[l] and links_mut()[l] so an index loop \
+                  is the clearest expression"
+    )]
+    #[expect(
+        clippy::multiple_unsafe_ops_per_block,
+        reason = "raw-pointer traversal, value comparison through distinct heap nodes, \
+                  link clearing, link wiring, and node pop all touch provably disjoint \
+                  heap allocations; splitting across blocks would require unsafe-crossing \
+                  raw-pointer variables"
+    )]
+    #[inline]
+    pub fn dedup_by<F>(&mut self, mut same_bucket: F)
+    where
+        F: FnMut(&mut T, &mut T) -> bool,
+    {
+        if self.len() <= 1 {
+            return;
+        }
+
+        let max_levels = self.head.level();
+
+        // SAFETY: All raw pointers originate from heap allocations owned by
+        // this SkipList.  We hold &mut self so no other reference to any node
+        // exists.  Calling `value_mut()` on two distinct raw node pointers
+        // yields non-aliasing exclusive references because each node is a
+        // separately heap-allocated Box.  The predicate returns before any
+        // structural mutation occurs.  We save `next_opt` before any mutation.
+        unsafe {
+            let head_ptr: *mut Node<T> = &raw mut *self.head;
+
+            // Clear head's skip links; they will be fully rebuilt below.
+            for link in (*head_ptr).links_mut() {
+                *link = None;
+            }
+
+            // predecessors[l] = (node_ptr, rank_of_that_node_in_new_list)
+            let mut predecessors: Vec<(*mut Node<T>, usize)> =
+                vec![(head_ptr, 0_usize); max_levels];
+            let mut new_rank: usize = 0;
+            let mut new_tail: Option<NonNull<Node<T>>> = None;
+
+            // Pointer to the last kept node, used for comparison.
+            let mut prev_kept: Option<*mut Node<T>> = None;
+
+            let mut current_opt: Option<NonNull<Node<T>>> = (*head_ptr).next().map(NonNull::from);
+
+            while let Some(current_nn) = current_opt {
+                let current: *mut Node<T> = current_nn.as_ptr();
+                // Save the successor before any mutation.
+                let next_opt: Option<NonNull<Node<T>>> = (*current).next().map(NonNull::from);
+
+                let keep = match prev_kept {
+                    None => true, // First element is always kept.
+                    Some(prev_ptr) => {
+                        // Compare current (later) with prev_kept (earlier).
+                        // The two raw pointers point to distinct heap nodes so
+                        // the resulting &mut T references do not alias.
+                        let a: &mut T = (*current).value_mut().expect("data node has a value");
+                        let b: &mut T = (*prev_ptr).value_mut().expect("data node has a value");
+                        !same_bucket(a, b)
+                    }
+                };
+
+                if keep {
+                    new_rank = new_rank.saturating_add(1);
+                    new_tail = Some(current_nn);
+                    prev_kept = Some(current);
+
+                    // Clear this node's forward skip links; they will be
+                    // re-wired when its successors are processed.
+                    for link in (*current).links_mut() {
+                        *link = None;
+                    }
+
+                    // Wire each predecessor level to this node.
+                    let node_height = (*current).level();
+                    for l in 0..node_height {
+                        let (pred_ptr, pred_rank) = predecessors[l];
+                        let dist = new_rank.saturating_sub(pred_rank);
+                        (*pred_ptr).links_mut()[l] = Some(
+                            Link::new(&*current, dist).expect("dist = new_rank - pred_rank ≥ 1"),
+                        );
+                        predecessors[l] = (current, new_rank);
+                    }
+                } else {
+                    // Detach from the prev/next chain and free.
+                    let boxed = (*current).pop();
+                    drop(boxed);
+                }
+
+                current_opt = next_opt;
+            }
+
+            self.tail = new_tail;
+            self.len = new_rank;
+        }
+    }
+
+    /// Removes all but the first of consecutive equal elements.
+    ///
+    /// Equivalent to [`dedup_by`](SkipList::dedup_by) with a predicate that
+    /// compares elements using [`PartialEq`].
+    ///
+    /// This operation is O(n).
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use skiplist::skip_list::SkipList;
+    ///
+    /// let mut list = SkipList::<i32>::new();
+    /// for i in [1, 1, 2, 3, 3, 2] {
+    ///     list.push_back(i);
+    /// }
+    /// list.dedup();
+    /// let collected: Vec<i32> = list.iter().copied().collect();
+    /// assert_eq!(collected, [1, 2, 3, 2]);
+    /// ```
+    #[inline]
+    pub fn dedup(&mut self)
+    where
+        T: PartialEq,
+    {
+        self.dedup_by(|a, b| a == b);
+    }
+
+    /// Removes all but the first of consecutive elements for which a key
+    /// function returns equal values.
+    ///
+    /// Equivalent to [`dedup_by`](SkipList::dedup_by) with a predicate that
+    /// compares the keys derived from each element.
+    ///
+    /// This operation is O(n).
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use skiplist::skip_list::SkipList;
+    ///
+    /// let mut list = SkipList::<i32>::new();
+    /// for i in [10, 20, 21, 30, 31, 32] {
+    ///     list.push_back(i);
+    /// }
+    /// list.dedup_by_key(|i| *i / 10);
+    /// let collected: Vec<i32> = list.iter().copied().collect();
+    /// assert_eq!(collected, [10, 20, 30]);
+    /// ```
+    #[inline]
+    pub fn dedup_by_key<F, K>(&mut self, mut key: F)
+    where
+        F: FnMut(&mut T) -> K,
+        K: PartialEq,
+    {
+        self.dedup_by(|a, b| key(a) == key(b));
+    }
+
     /// Retains only the elements specified by the predicate.
     ///
     /// In other words, removes all elements `e` for which `f(&e)` returns
@@ -2458,6 +2649,16 @@ impl<T> Default for SkipList<T> {
     #[inline]
     fn default() -> Self {
         Self::new()
+    }
+}
+
+// MARK: Debug
+
+impl<T: fmt::Debug, G: LevelGenerator> fmt::Debug for SkipList<T, G> {
+    /// Formats the list as a debug list, e.g. `[1, 2, 3]`.
+    #[inline]
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_list().entries(self.iter()).finish()
     }
 }
 
@@ -6362,5 +6563,184 @@ mod tests {
         let vals: Vec<usize> = a.iter().copied().collect();
         let expected: Vec<usize> = (0..(n + m)).collect();
         assert_eq!(vals, expected);
+    }
+
+    // MARK: dedup
+
+    #[test]
+    fn dedup_empty() {
+        let mut list = SkipList::<i32>::new();
+        list.dedup();
+        assert!(list.is_empty());
+    }
+
+    #[test]
+    fn dedup_single() {
+        let mut list = SkipList::<i32>::new();
+        list.push_back(42);
+        list.dedup();
+        assert_eq!(list.len(), 1);
+        assert_eq!(list.front(), Some(&42));
+        assert_eq!(list.back(), Some(&42));
+    }
+
+    #[test]
+    fn dedup_all_same() {
+        let mut list = SkipList::<i32>::new();
+        for _ in 0..4 {
+            list.push_back(1);
+        }
+        list.dedup();
+        assert_eq!(list.len(), 1);
+        let got: Vec<i32> = list.iter().copied().collect();
+        assert_eq!(got, [1]);
+    }
+
+    #[test]
+    fn dedup_no_duplicates() {
+        let mut list = SkipList::<i32>::new();
+        for i in [1, 2, 3, 4] {
+            list.push_back(i);
+        }
+        list.dedup();
+        assert_eq!(list.len(), 4);
+        let got: Vec<i32> = list.iter().copied().collect();
+        assert_eq!(got, [1, 2, 3, 4]);
+    }
+
+    #[test]
+    fn dedup_adjacent_pairs() {
+        let mut list = SkipList::<i32>::new();
+        for i in [1, 1, 2, 2, 3, 3] {
+            list.push_back(i);
+        }
+        list.dedup();
+        assert_eq!(list.len(), 3);
+        let got: Vec<i32> = list.iter().copied().collect();
+        assert_eq!(got, [1, 2, 3]);
+    }
+
+    #[test]
+    fn dedup_non_adjacent() {
+        let mut list = SkipList::<i32>::new();
+        for i in [1, 2, 1, 2] {
+            list.push_back(i);
+        }
+        list.dedup();
+        assert_eq!(list.len(), 4);
+        let got: Vec<i32> = list.iter().copied().collect();
+        assert_eq!(got, [1, 2, 1, 2]);
+    }
+
+    #[test]
+    fn dedup_leading_duplicates() {
+        let mut list = SkipList::<i32>::new();
+        for i in [1, 1, 2, 3] {
+            list.push_back(i);
+        }
+        list.dedup();
+        let got: Vec<i32> = list.iter().copied().collect();
+        assert_eq!(got, [1, 2, 3]);
+    }
+
+    #[test]
+    fn dedup_trailing_duplicates() {
+        let mut list = SkipList::<i32>::new();
+        for i in [1, 2, 3, 3] {
+            list.push_back(i);
+        }
+        list.dedup();
+        let got: Vec<i32> = list.iter().copied().collect();
+        assert_eq!(got, [1, 2, 3]);
+    }
+
+    #[test]
+    fn dedup_links_consistent() {
+        let mut list = SkipList::<i32>::new();
+        for i in [1, 1, 2, 2, 3, 3, 4, 4] {
+            list.push_back(i);
+        }
+        list.dedup();
+        let expected = [1, 2, 3, 4];
+        assert_eq!(list.len(), expected.len());
+        // Verify via iter() and get() to exercise both prev/next and skip links.
+        let via_iter: Vec<i32> = list.iter().copied().collect();
+        assert_eq!(via_iter, expected);
+        for (i, &v) in expected.iter().enumerate() {
+            assert_eq!(list.get(i), Some(&v));
+        }
+        assert_eq!(list.get(expected.len()), None);
+    }
+
+    #[test]
+    fn dedup_by_case_insensitive() {
+        let mut list = SkipList::<String>::new();
+        for s in ["foo", "bar", "Bar", "baz", "bar"] {
+            list.push_back(s.to_owned());
+        }
+        list.dedup_by(|a, b| a.eq_ignore_ascii_case(b));
+        let got: Vec<String> = list.into_iter().collect();
+        assert_eq!(got, ["foo", "bar", "baz", "bar"]);
+    }
+
+    #[test]
+    fn dedup_by_key_empty() {
+        let mut list = SkipList::<i32>::new();
+        #[expect(
+            clippy::integer_division,
+            clippy::integer_division_remainder_used,
+            reason = "clearer to express the intent of deduplicating by the tens digit"
+        )]
+        list.dedup_by_key(|i| *i / 10);
+        assert!(list.is_empty());
+    }
+
+    #[test]
+    fn dedup_by_key_floored_half() {
+        let mut list = SkipList::<i32>::new();
+        for i in [10, 20, 21, 30, 31, 32] {
+            list.push_back(i);
+        }
+        #[expect(
+            clippy::integer_division,
+            clippy::integer_division_remainder_used,
+            reason = "clearer to express the intent of deduplicating by the tens digit"
+        )]
+        list.dedup_by_key(|i| *i / 10);
+        let got: Vec<i32> = list.iter().copied().collect();
+        assert_eq!(got, [10, 20, 30]);
+    }
+
+    // MARK: Debug
+
+    #[test]
+    fn debug_empty() {
+        let list = SkipList::<i32>::new();
+        assert_eq!(format!("{list:?}"), "[]");
+    }
+
+    #[test]
+    fn debug_single() {
+        let mut list = SkipList::<i32>::new();
+        list.push_back(42);
+        assert_eq!(format!("{list:?}"), "[42]");
+    }
+
+    #[test]
+    fn debug_multiple() {
+        let mut list = SkipList::<i32>::new();
+        for i in [1, 2, 3] {
+            list.push_back(i);
+        }
+        assert_eq!(format!("{list:?}"), "[1, 2, 3]");
+    }
+
+    #[test]
+    fn debug_string_elements() {
+        let mut list = SkipList::<&str>::new();
+        for s in ["hello", "world"] {
+            list.push_back(s);
+        }
+        assert_eq!(format!("{list:?}"), r#"["hello", "world"]"#);
     }
 }
