@@ -1758,6 +1758,158 @@ impl<T, G: LevelGenerator> SkipList<T, G> {
         new_tail
     }
 
+    /// Moves all elements from `other` to the end of `self`, leaving `other` empty.
+    ///
+    /// Elements are appended in the order they appear in `other`.
+    ///
+    /// When both lists share the same maximum level count (which is always the
+    /// case for lists created with [`new`](SkipList::new) or
+    /// [`with_capacity`](SkipList::with_capacity)), the operation runs in
+    /// O(log n) time by directly splicing the node chains and rewriting only
+    /// the skip links that cross the seam.  When the maximum level counts
+    /// differ the operation falls back to O(k log(n+k)) via repeated
+    /// [`push_back`](SkipList::push_back) calls.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use skiplist::skip_list::SkipList;
+    ///
+    /// let mut a = SkipList::<i32>::new();
+    /// a.push_back(1);
+    /// a.push_back(2);
+    ///
+    /// let mut b = SkipList::<i32>::new();
+    /// b.push_back(3);
+    /// b.push_back(4);
+    ///
+    /// a.append(&mut b);
+    /// assert!(b.is_empty());
+    /// assert_eq!(a.iter().copied().collect::<Vec<_>>(), [1, 2, 3, 4]);
+    /// ```
+    #[expect(
+        clippy::expect_used,
+        clippy::missing_panics_doc,
+        reason = "take_next_chain returns Some because other.is_empty() was checked above; \
+                  Link::new distance = self_len + other_link.distance - pred_rank >= 1 always \
+                  because other_link.distance >= 1 (NonZeroUsize) and pred_rank <= self_len"
+    )]
+    #[expect(
+        clippy::indexing_slicing,
+        clippy::needless_range_loop,
+        reason = "l < max_levels = update.len() = head.links.len() = other_head.links.len(); \
+                  l indexes both update[l] and links[][l] simultaneously"
+    )]
+    #[expect(
+        clippy::multiple_unsafe_ops_per_block,
+        reason = "update-array traversal, chain detach, prev/next splice, and cross-seam \
+                  link wiring all touch provably disjoint heap nodes; splitting across \
+                  blocks would require unsafe-crossing raw-pointer variables"
+    )]
+    #[inline]
+    pub fn append(&mut self, other: &mut Self) {
+        if other.is_empty() {
+            return;
+        }
+
+        let self_len = self.len;
+        let other_len = other.len;
+        let max_levels = self.head.level();
+
+        // Slow path: different level-generator sizes — fall back to re-insertion
+        // to avoid out-of-bounds indexing in the fast-path link wiring below.
+        if max_levels != other.head.level() {
+            while let Some(val) = other.pop_front() {
+                self.push_back(val);
+            }
+            return;
+        }
+
+        // Fast path: splice chains and rewrite only the cross-seam skip links.
+        //
+        // The nodes in `other` already carry correct inter-node skip links (their
+        // distances are relative to their own predecessors, which are unchanged).
+        // Only the links that span the seam — from the last level-l node in `self`
+        // to the first level-l node in `other` — need to be created.
+        //
+        // SAFETY: We hold `&mut self` and `&mut other`, giving exclusive access to
+        // every node in both lists.  `head_ptr` and `other_head_ptr` are derived
+        // from the two disjoint `Box<Node<T>>` allocations.  Within the block each
+        // node field is accessed at most once, so no simultaneous aliasing occurs.
+        unsafe {
+            let head_ptr: *mut Node<T> = &raw mut *self.head;
+            let other_head_ptr: *mut Node<T> = &raw mut *other.head;
+
+            // ── Step 1: build update array ──────────────────────────────────────
+            //
+            // update[l] = (last node reachable via links[l] from head, its 0-based rank).
+            // Initialised to (head, 0); levels with no data nodes default to head.
+            // `current` and `current_rank` carry over between levels (same logic as
+            // push_back's "find-update-array" traversal).
+            let mut update: Vec<(*mut Node<T>, usize)> = vec![(head_ptr, 0_usize); max_levels];
+            let mut current: *mut Node<T> = head_ptr;
+            let mut current_rank: usize = 0;
+
+            for l in (0..max_levels).rev() {
+                while let Some(link) = (*current).links()[l].as_ref() {
+                    current_rank = current_rank.saturating_add(link.distance().get());
+                    current = NonNull::from(link.node()).as_ptr();
+                }
+                update[l] = (current, current_rank);
+            }
+
+            // ── Step 2: detach other's chain ─────────────────────────────────────
+            let first_nn = (*other_head_ptr)
+                .take_next_chain()
+                .expect("other is non-empty");
+
+            // ── Step 3: splice chains ─────────────────────────────────────────────
+            //
+            // `set_head_next` sets `node.next = first_nn` and `first_nn.prev = node`.
+            // The tail node satisfies its precondition (`next == None`), so we can
+            // use it for both branches.
+            if let Some(tail_nn) = self.tail {
+                (*tail_nn.as_ptr()).set_head_next(first_nn);
+            } else {
+                (*head_ptr).set_head_next(first_nn);
+            }
+
+            // ── Step 4: wire the cross-seam skip links ───────────────────────────
+            //
+            // For each level l where `other` has at least one node, compute the
+            // distance from the last level-l predecessor in `self` to the first
+            // level-l node in `other` and create the link.
+            //
+            //   distance = (self_len + other_link.distance) - pred_rank
+            //
+            // distance >= 1 because other_link.distance >= 1 (NonZeroUsize) and
+            // pred_rank <= self_len, so distance >= self_len + 1 - self_len = 1.
+            for l in 0..max_levels {
+                if let Some(other_link) = (*other_head_ptr).links()[l].as_ref() {
+                    let (pred_ptr, pred_rank) = update[l];
+                    let distance = self_len
+                        .saturating_add(other_link.distance().get())
+                        .saturating_sub(pred_rank);
+                    (*pred_ptr).links_mut()[l] = Some(
+                        Link::new(other_link.node(), distance)
+                            .expect("distance >= 1 by construction"),
+                    );
+                }
+            }
+
+            // ── Step 5: update other and self ─────────────────────────────────────
+            let new_tail = other.tail;
+            for link in (*other_head_ptr).links_mut() {
+                *link = None;
+            }
+            other.tail = None;
+            other.len = 0;
+
+            self.len = self_len.saturating_add(other_len);
+            self.tail = new_tail;
+        }
+    }
+
     /// Retains only the elements specified by the predicate.
     ///
     /// In other words, removes all elements `e` for which `f(&e)` returns
@@ -5830,5 +5982,151 @@ mod tests {
         for i in 0..(n - at) {
             assert_eq!(b.get(i), Some(&(i + at)));
         }
+    }
+
+    // MARK: append
+
+    #[test]
+    fn append_both_empty() {
+        let mut a = SkipList::<i32>::new();
+        let mut b = SkipList::<i32>::new();
+        a.append(&mut b);
+        assert!(a.is_empty());
+        assert!(b.is_empty());
+    }
+
+    #[test]
+    fn append_other_empty() {
+        let mut a = SkipList::<i32>::new();
+        for i in 1..=3 {
+            a.push_back(i);
+        }
+        let mut b = SkipList::<i32>::new();
+        a.append(&mut b);
+        assert_eq!(a.len(), 3);
+        assert!(b.is_empty());
+        let vals: Vec<i32> = a.iter().copied().collect();
+        assert_eq!(vals, [1, 2, 3]);
+    }
+
+    #[test]
+    fn append_self_empty() {
+        let mut a = SkipList::<i32>::new();
+        let mut b = SkipList::<i32>::new();
+        for i in 1..=3 {
+            b.push_back(i);
+        }
+        a.append(&mut b);
+        assert_eq!(a.len(), 3);
+        assert!(b.is_empty());
+        let vals: Vec<i32> = a.iter().copied().collect();
+        assert_eq!(vals, [1, 2, 3]);
+    }
+
+    #[test]
+    fn append_basic() {
+        let mut a = SkipList::<i32>::new();
+        a.push_back(1);
+        a.push_back(2);
+        let mut b = SkipList::<i32>::new();
+        b.push_back(3);
+        b.push_back(4);
+        a.append(&mut b);
+        assert!(b.is_empty());
+        let vals: Vec<i32> = a.iter().copied().collect();
+        assert_eq!(vals, [1, 2, 3, 4]);
+    }
+
+    #[test]
+    fn append_len_correct() {
+        let mut a = SkipList::<i32>::new();
+        for i in 0..5 {
+            a.push_back(i);
+        }
+        let mut b = SkipList::<i32>::new();
+        for i in 5..8 {
+            b.push_back(i);
+        }
+        a.append(&mut b);
+        assert_eq!(a.len(), 8);
+        assert_eq!(b.len(), 0);
+    }
+
+    #[test]
+    fn append_front_back_correct() {
+        let mut a = SkipList::<i32>::new();
+        for i in 1..=3 {
+            a.push_back(i);
+        }
+        let mut b = SkipList::<i32>::new();
+        for i in 4..=6 {
+            b.push_back(i);
+        }
+        a.append(&mut b);
+        assert_eq!(a.front(), Some(&1));
+        assert_eq!(a.back(), Some(&6));
+    }
+
+    #[test]
+    fn append_then_push() {
+        let mut a = SkipList::<i32>::new();
+        for i in 1..=2 {
+            a.push_back(i);
+        }
+        let mut b = SkipList::<i32>::new();
+        for i in 3..=4 {
+            b.push_back(i);
+        }
+        a.append(&mut b);
+        a.push_back(99);
+        b.push_back(100);
+        let a_vals: Vec<i32> = a.iter().copied().collect();
+        assert_eq!(a_vals, [1, 2, 3, 4, 99]);
+        let b_vals: Vec<i32> = b.iter().copied().collect();
+        assert_eq!(b_vals, [100]);
+    }
+
+    #[test]
+    fn append_get_works() {
+        let n = 5_usize;
+        let m = 5_usize;
+        let mut a = SkipList::<usize>::new();
+        for i in 0..n {
+            a.push_back(i);
+        }
+        let mut b = SkipList::<usize>::new();
+        for i in n..(n + m) {
+            b.push_back(i);
+        }
+        a.append(&mut b);
+        assert_eq!(a.len(), n + m);
+        for i in 0..(n + m) {
+            assert_eq!(a.get(i), Some(&i));
+        }
+    }
+
+    #[test]
+    fn append_large_list() {
+        let n: usize = 200;
+        let m: usize = 150;
+        let mut a = SkipList::<usize>::new();
+        for i in 0..n {
+            a.push_back(i);
+        }
+        let mut b = SkipList::<usize>::new();
+        for i in n..(n + m) {
+            b.push_back(i);
+        }
+        a.append(&mut b);
+        assert_eq!(a.len(), n + m);
+        assert!(b.is_empty());
+        // Verify every element via get() to exercise skip links.
+        for i in 0..(n + m) {
+            assert_eq!(a.get(i), Some(&i));
+        }
+        // Also verify via iter().
+        let vals: Vec<usize> = a.iter().copied().collect();
+        let expected: Vec<usize> = (0..(n + m)).collect();
+        assert_eq!(vals, expected);
     }
 }
