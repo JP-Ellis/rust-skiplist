@@ -1287,6 +1287,118 @@ impl<T, G: LevelGenerator> SkipList<T, G> {
         value
     }
 
+    /// Swaps two elements in the list.
+    ///
+    /// If `a == b`, this is a no-op.
+    ///
+    /// This operation is O(log n).
+    ///
+    /// # Panics
+    ///
+    /// Panics if `a >= self.len()` or `b >= self.len()`.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use skiplist::skip_list::SkipList;
+    ///
+    /// let mut list = SkipList::<i32>::new();
+    /// list.push_back(1);
+    /// list.push_back(2);
+    /// list.push_back(3);
+    /// list.swap(0, 2);
+    /// assert_eq!(list.get(0), Some(&3));
+    /// assert_eq!(list.get(1), Some(&2));
+    /// assert_eq!(list.get(2), Some(&1));
+    /// ```
+    #[expect(
+        clippy::expect_used,
+        reason = "the expect calls fire only on internal invariant violations; \
+                  a < len and b < len are asserted at the top of this function, \
+                  guaranteeing that the target nodes and their values exist"
+    )]
+    #[expect(
+        clippy::multiple_unsafe_ops_per_block,
+        reason = "two independent skip-list traversals and a ptr::swap on provably distinct \
+                  heap nodes; splitting across blocks would require unsafe-crossing variables"
+    )]
+    #[inline]
+    pub fn swap(&mut self, a: usize, b: usize) {
+        assert!(
+            a < self.len,
+            "swap index a (is {a}) should be < len (is {})",
+            self.len
+        );
+        assert!(
+            b < self.len,
+            "swap index b (is {b}) should be < len (is {})",
+            self.len
+        );
+        if a == b {
+            return;
+        }
+
+        let max_levels = self.head.level();
+
+        // SAFETY: Both indices are in bounds (asserted above) and a != b guarantees
+        // the two target nodes are distinct. We hold &mut self, so no other live
+        // references to any node exist. core::ptr::swap on two distinct value
+        // pointers does not violate Rust's aliasing rules.
+        unsafe {
+            // Traversal for index `a`: same algorithm as `get_mut`.
+            let target_rank_a = a.saturating_add(1);
+            let mut current: *const Node<T> = &raw const *self.head;
+            let mut current_rank: usize = 0;
+            for l in (0..max_levels).rev() {
+                while let Some(Some(link)) = (*current).links().get(l) {
+                    let next_rank = current_rank.saturating_add(link.distance().get());
+                    if next_rank >= target_rank_a {
+                        break;
+                    }
+                    current_rank = next_rank;
+                    current = link.node();
+                }
+            }
+            let node_a = NonNull::from(
+                (*current)
+                    .links()
+                    .first()
+                    .expect("level-0 link exists because a < len")
+                    .as_ref()
+                    .expect("level-0 link is Some because a < len guarantees a node")
+                    .node(),
+            );
+            let ptr_a: *mut T = (*node_a.as_ptr()).value_mut().expect("node a has a value");
+
+            // Traversal for index `b`.
+            let target_rank_b = b.saturating_add(1);
+            current = &raw const *self.head;
+            current_rank = 0;
+            for l in (0..max_levels).rev() {
+                while let Some(Some(link)) = (*current).links().get(l) {
+                    let next_rank = current_rank.saturating_add(link.distance().get());
+                    if next_rank >= target_rank_b {
+                        break;
+                    }
+                    current_rank = next_rank;
+                    current = link.node();
+                }
+            }
+            let node_b = NonNull::from(
+                (*current)
+                    .links()
+                    .first()
+                    .expect("level-0 link exists because b < len")
+                    .as_ref()
+                    .expect("level-0 link is Some because b < len guarantees a node")
+                    .node(),
+            );
+            let ptr_b: *mut T = (*node_b.as_ptr()).value_mut().expect("node b has a value");
+
+            core::ptr::swap(ptr_a, ptr_b);
+        }
+    }
+
     // MARK: Iteration
 
     /// Returns an iterator over shared references to the elements of the list,
@@ -3908,6 +4020,128 @@ mod tests {
         }
         assert_eq!(list.len(), 0);
         assert!(list.head.next().is_none());
+    }
+
+    // MARK: swap
+
+    #[test]
+    fn swap_basic() {
+        let mut list = SkipList::<i32>::new();
+        list.push_back(1);
+        list.push_back(2);
+        list.push_back(3);
+        list.swap(0, 2);
+        assert_eq!(list.get(0), Some(&3));
+        assert_eq!(list.get(1), Some(&2));
+        assert_eq!(list.get(2), Some(&1));
+    }
+
+    #[test]
+    fn swap_same_index() {
+        let mut list = SkipList::<i32>::new();
+        list.push_back(1);
+        list.push_back(2);
+        list.push_back(3);
+        list.swap(1, 1);
+        assert_eq!(list.get(0), Some(&1));
+        assert_eq!(list.get(1), Some(&2));
+        assert_eq!(list.get(2), Some(&3));
+    }
+
+    #[test]
+    fn swap_adjacent() {
+        let mut list = SkipList::<i32>::new();
+        list.push_back(1);
+        list.push_back(2);
+        list.push_back(3);
+        list.swap(1, 2);
+        assert_eq!(list.get(0), Some(&1));
+        assert_eq!(list.get(1), Some(&3));
+        assert_eq!(list.get(2), Some(&2));
+    }
+
+    #[test]
+    fn swap_two_elements() {
+        let mut list = SkipList::<i32>::new();
+        list.push_back(10);
+        list.push_back(20);
+        list.swap(0, 1);
+        assert_eq!(list.get(0), Some(&20));
+        assert_eq!(list.get(1), Some(&10));
+    }
+
+    #[test]
+    fn swap_front_back() {
+        let mut list = SkipList::<i32>::new();
+        for i in 1..=5_i32 {
+            list.push_back(i);
+        }
+        list.swap(0, 4);
+        assert_eq!(list.get(0), Some(&5));
+        assert_eq!(list.get(1), Some(&2));
+        assert_eq!(list.get(2), Some(&3));
+        assert_eq!(list.get(3), Some(&4));
+        assert_eq!(list.get(4), Some(&1));
+    }
+
+    #[test]
+    fn swap_preserves_len() {
+        let mut list = SkipList::<i32>::new();
+        list.push_back(1);
+        list.push_back(2);
+        list.push_back(3);
+        list.swap(0, 2);
+        assert_eq!(list.len(), 3);
+    }
+
+    #[test]
+    #[should_panic(expected = "swap index a (is 3) should be < len (is 3)")]
+    fn swap_out_of_bounds_a() {
+        let mut list = SkipList::<i32>::new();
+        list.push_back(1);
+        list.push_back(2);
+        list.push_back(3);
+        list.swap(3, 0);
+    }
+
+    #[test]
+    #[should_panic(expected = "swap index b (is 3) should be < len (is 3)")]
+    fn swap_out_of_bounds_b() {
+        let mut list = SkipList::<i32>::new();
+        list.push_back(1);
+        list.push_back(2);
+        list.push_back(3);
+        list.swap(0, 3);
+    }
+
+    #[test]
+    #[should_panic(expected = "swap index a (is 0) should be < len (is 0)")]
+    fn swap_empty() {
+        let mut list = SkipList::<i32>::new();
+        list.swap(0, 0);
+    }
+
+    #[test]
+    fn swap_large() {
+        let n: usize = 100;
+        let mut list = SkipList::<usize>::new();
+        for i in 0..n {
+            list.push_back(i);
+        }
+        // Swap each element with its mirror across the midpoint.
+        #[expect(
+            clippy::integer_division,
+            clippy::integer_division_remainder_used,
+            reason = "swapping across midpoint"
+        )]
+        for i in 0..(n / 2) {
+            list.swap(i, n - 1 - i);
+        }
+        // After all swaps, element at index i should be n - 1 - i.
+        for i in 0..n {
+            assert_eq!(list.get(i), Some(&(n - 1 - i)));
+        }
+        assert_eq!(list.len(), n);
     }
 
     // MARK: get / get_mut
