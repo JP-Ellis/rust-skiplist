@@ -753,6 +753,325 @@ fn bench_get_random(c: &mut Criterion) {
     group.finish();
 }
 
+/// Benchmark full forward iteration over a pre-built container of `n` elements.
+///
+/// Each benchmark iteration starts with a pre-built container and sums all
+/// elements in a single forward pass.  `black_box` on the accumulated sum
+/// prevents the loop from being optimised away.  Setup time (construction) is
+/// excluded via [`Bencher::iter_batched`] with [`BatchSize::LargeInput`].
+///
+/// `SkipList::iter` incurs O(log n) construction cost (locating front/back
+/// nodes) but O(1) per step; `Vec`, `VecDeque`, and `LinkedList` are all O(1)
+/// per step.  This benchmark shows the constant-factor overhead of pointer
+/// chasing in the skip list relative to contiguous-memory iteration.
+fn bench_iter(c: &mut Criterion) {
+    let mut group = c.benchmark_group("iter");
+    group.plot_config(PlotConfiguration::default().summary_scale(AxisScale::Logarithmic));
+
+    for &n in SIZES {
+        group.throughput(Throughput::Elements(
+            u64::try_from(n).expect("bench size fits in u64"),
+        ));
+
+        // ----------------------------------------------------------------
+        // SkipList — O(1) per step after O(1) iterator setup
+        // ----------------------------------------------------------------
+        group.bench_with_input(BenchmarkId::new("SkipList", n), &n, |b, &n| {
+            b.iter_batched(
+                || {
+                    let mut list = SkipList::new();
+                    for i in 0..n {
+                        list.push_back(black_box(i));
+                    }
+                    list
+                },
+                |list| {
+                    let mut sum: usize = 0;
+                    for &v in &list {
+                        sum = sum.wrapping_add(v);
+                    }
+                    black_box(sum);
+                },
+                BatchSize::LargeInput,
+            );
+        });
+
+        // ----------------------------------------------------------------
+        // Vec — O(1) per step; cache-friendly contiguous memory
+        // ----------------------------------------------------------------
+        group.bench_with_input(BenchmarkId::new("Vec", n), &n, |b, &n| {
+            b.iter_batched(
+                || (0..n).collect::<Vec<usize>>(),
+                |vec| {
+                    let mut sum: usize = 0;
+                    for &v in &vec {
+                        sum = sum.wrapping_add(v);
+                    }
+                    black_box(sum);
+                },
+                BatchSize::LargeInput,
+            );
+        });
+
+        // ----------------------------------------------------------------
+        // VecDeque — O(1) per step; may wrap around ring buffer
+        // ----------------------------------------------------------------
+        group.bench_with_input(BenchmarkId::new("VecDeque", n), &n, |b, &n| {
+            b.iter_batched(
+                || (0..n).collect::<VecDeque<usize>>(),
+                |deque| {
+                    let mut sum: usize = 0;
+                    for &v in &deque {
+                        sum = sum.wrapping_add(v);
+                    }
+                    black_box(sum);
+                },
+                BatchSize::LargeInput,
+            );
+        });
+
+        // ----------------------------------------------------------------
+        // LinkedList — O(1) per step; pointer-chasing cost per element
+        // ----------------------------------------------------------------
+        group.bench_with_input(BenchmarkId::new("LinkedList", n), &n, |b, &n| {
+            b.iter_batched(
+                || (0..n).collect::<LinkedList<usize>>(),
+                |list| {
+                    let mut sum: usize = 0;
+                    for &v in &list {
+                        sum = sum.wrapping_add(v);
+                    }
+                    black_box(sum);
+                },
+                BatchSize::LargeInput,
+            );
+        });
+    }
+
+    group.finish();
+}
+
+/// Benchmark `retain(|&x| x % 2 == 0)` on a pre-built container of `n`
+/// elements, keeping roughly half.
+///
+/// Each benchmark iteration starts with a pre-built container and removes
+/// all odd-indexed elements.  Setup time is excluded via
+/// [`Bencher::iter_batched`] with [`BatchSize::LargeInput`].
+///
+/// Throughput is reported as `n` elements examined (not just the half
+/// removed), matching how `Vec` reports it.
+///
+/// `LinkedList::retain` is not yet stable; the equivalent is simulated by
+/// draining the list and rebuilding it with only the matching elements.
+fn bench_retain(c: &mut Criterion) {
+    let mut group = c.benchmark_group("retain");
+    group.plot_config(PlotConfiguration::default().summary_scale(AxisScale::Logarithmic));
+
+    for &n in SIZES {
+        group.throughput(Throughput::Elements(
+            u64::try_from(n).expect("bench size fits in u64"),
+        ));
+
+        // ----------------------------------------------------------------
+        // SkipList — O(n) retain with skip-link rebuild
+        // ----------------------------------------------------------------
+        group.bench_with_input(BenchmarkId::new("SkipList", n), &n, |b, &n| {
+            b.iter_batched(
+                || {
+                    let mut list = SkipList::new();
+                    for i in 0..n {
+                        list.push_back(black_box(i));
+                    }
+                    list
+                },
+                |mut list| {
+                    list.retain(|&x| x % 2 == 0);
+                    black_box(list)
+                },
+                BatchSize::LargeInput,
+            );
+        });
+
+        // ----------------------------------------------------------------
+        // Vec — O(n) retain; in-place compaction
+        // ----------------------------------------------------------------
+        group.bench_with_input(BenchmarkId::new("Vec", n), &n, |b, &n| {
+            b.iter_batched(
+                || (0..n).collect::<Vec<usize>>(),
+                |mut vec| {
+                    vec.retain(|&x| x % 2 == 0);
+                    black_box(vec)
+                },
+                BatchSize::LargeInput,
+            );
+        });
+
+        // ----------------------------------------------------------------
+        // VecDeque — O(n) retain; in-place compaction
+        // ----------------------------------------------------------------
+        group.bench_with_input(BenchmarkId::new("VecDeque", n), &n, |b, &n| {
+            b.iter_batched(
+                || (0..n).collect::<VecDeque<usize>>(),
+                |mut deque| {
+                    deque.retain(|&x| x % 2 == 0);
+                    black_box(deque)
+                },
+                BatchSize::LargeInput,
+            );
+        });
+
+        // ----------------------------------------------------------------
+        // LinkedList — `retain` is not yet stable; simulate with a drain-
+        // and-rebuild pass: O(n) time, same asymptotic cost.
+        // ----------------------------------------------------------------
+        group.bench_with_input(BenchmarkId::new("LinkedList", n), &n, |b, &n| {
+            b.iter_batched(
+                || (0..n).collect::<LinkedList<usize>>(),
+                |list| {
+                    let mut retained = LinkedList::new();
+                    for x in list {
+                        if x % 2 == 0 {
+                            retained.push_back(x);
+                        }
+                    }
+                    black_box(retained)
+                },
+                BatchSize::LargeInput,
+            );
+        });
+    }
+
+    group.finish();
+}
+
+/// Benchmark a single `split_off(n/2)` on a pre-built container of `n` elements.
+///
+/// Each benchmark iteration starts with a pre-built container, splits it at
+/// the midpoint, and returns both halves so drop time is excluded from the
+/// measurement.  Setup time is excluded via [`Bencher::iter_batched`] with
+/// [`BatchSize::LargeInput`].
+///
+/// Throughput is reported as 1 element (one split-off operation per iteration).
+fn bench_split_off(c: &mut Criterion) {
+    let mut group = c.benchmark_group("split_off");
+    group.plot_config(PlotConfiguration::default().summary_scale(AxisScale::Logarithmic));
+
+    for &n in SIZES {
+        // Throughput of 1: each iteration performs a single split.
+        group.throughput(Throughput::Elements(1));
+
+        // ----------------------------------------------------------------
+        // SkipList — O(log n + k) expected
+        // ----------------------------------------------------------------
+        group.bench_with_input(BenchmarkId::new("SkipList", n), &n, |b, &n| {
+            b.iter_batched(
+                || {
+                    let mut list = SkipList::new();
+                    for i in 0..n {
+                        list.push_back(black_box(i));
+                    }
+                    list
+                },
+                |mut list| {
+                    let tail = list.split_off(n / 2);
+                    black_box((list, tail))
+                },
+                BatchSize::LargeInput,
+            );
+        });
+
+        // ----------------------------------------------------------------
+        // Vec — O(k) where k = n − at (copies the tail half)
+        // ----------------------------------------------------------------
+        group.bench_with_input(BenchmarkId::new("Vec", n), &n, |b, &n| {
+            b.iter_batched(
+                || (0..n).collect::<Vec<usize>>(),
+                |mut vec| {
+                    let tail = vec.split_off(n / 2);
+                    black_box((vec, tail))
+                },
+                BatchSize::LargeInput,
+            );
+        });
+
+        // ----------------------------------------------------------------
+        // VecDeque — O(k) split
+        // ----------------------------------------------------------------
+        group.bench_with_input(BenchmarkId::new("VecDeque", n), &n, |b, &n| {
+            b.iter_batched(
+                || (0..n).collect::<VecDeque<usize>>(),
+                |mut deque| {
+                    let tail = deque.split_off(n / 2);
+                    black_box((deque, tail))
+                },
+                BatchSize::LargeInput,
+            );
+        });
+
+        // ----------------------------------------------------------------
+        // LinkedList — O(at) scan to the split point; O(1) pointer relink
+        // ----------------------------------------------------------------
+        group.bench_with_input(BenchmarkId::new("LinkedList", n), &n, |b, &n| {
+            b.iter_batched(
+                || (0..n).collect::<LinkedList<usize>>(),
+                |mut list| {
+                    let tail = list.split_off(n / 2);
+                    black_box((list, tail))
+                },
+                BatchSize::LargeInput,
+            );
+        });
+    }
+
+    group.finish();
+}
+
+/// Benchmark building a container of `n` elements from an iterator
+/// (`FromIterator` / `collect`).
+///
+/// Drop time is excluded from the measurement by using
+/// [`Bencher::iter_with_large_drop`].
+fn bench_build_from_iter(c: &mut Criterion) {
+    let mut group = c.benchmark_group("build_from_iter");
+    group.plot_config(PlotConfiguration::default().summary_scale(AxisScale::Logarithmic));
+
+    for &n in SIZES {
+        group.throughput(Throughput::Elements(
+            u64::try_from(n).expect("bench size fits in u64"),
+        ));
+
+        // ----------------------------------------------------------------
+        // SkipList — O(n log n) via n × push_back
+        // ----------------------------------------------------------------
+        group.bench_with_input(BenchmarkId::new("SkipList", n), &n, |b, &n| {
+            b.iter_with_large_drop(|| (0..n).collect::<SkipList<usize>>());
+        });
+
+        // ----------------------------------------------------------------
+        // Vec — O(n) amortised
+        // ----------------------------------------------------------------
+        group.bench_with_input(BenchmarkId::new("Vec", n), &n, |b, &n| {
+            b.iter_with_large_drop(|| (0..n).collect::<Vec<usize>>());
+        });
+
+        // ----------------------------------------------------------------
+        // VecDeque — O(n) amortised
+        // ----------------------------------------------------------------
+        group.bench_with_input(BenchmarkId::new("VecDeque", n), &n, |b, &n| {
+            b.iter_with_large_drop(|| (0..n).collect::<VecDeque<usize>>());
+        });
+
+        // ----------------------------------------------------------------
+        // LinkedList — O(n); pointer allocation per element
+        // ----------------------------------------------------------------
+        group.bench_with_input(BenchmarkId::new("LinkedList", n), &n, |b, &n| {
+            b.iter_with_large_drop(|| (0..n).collect::<LinkedList<usize>>());
+        });
+    }
+
+    group.finish();
+}
+
 criterion_group!(
     benches,
     bench_push_front,
@@ -760,7 +1079,11 @@ criterion_group!(
     bench_pop_front,
     bench_pop_back,
     bench_insert_random,
-    bench_remove_middle,
-    bench_get_random
+    bench_remove_random,
+    bench_get_random,
+    bench_iter,
+    bench_retain,
+    bench_split_off,
+    bench_build_from_iter,
 );
 criterion_main!(benches);
