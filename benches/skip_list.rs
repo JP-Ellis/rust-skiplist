@@ -21,6 +21,8 @@
 use std::{
     collections::{LinkedList, VecDeque},
     hint::black_box,
+    iter,
+    time::Duration,
 };
 
 use criterion::{
@@ -1073,17 +1075,22 @@ fn bench_build_from_iter(c: &mut Criterion) {
 }
 
 criterion_group!(
-    benches,
-    bench_push_front,
-    bench_push_back,
-    bench_pop_front,
-    bench_pop_back,
-    bench_insert_random,
-    bench_remove_random,
-    bench_get_random,
-    bench_iter,
-    bench_retain,
-    bench_split_off,
-    bench_build_from_iter,
+    name = skiplist;
+    config = Criterion::default()
+        .with_plots()
+        .warm_up_time(Duration::from_secs(1))
+        .measurement_time(Duration::from_secs(2));
+    targets =
+        bench_push_front,
+        bench_push_back,
+        bench_pop_front,
+        bench_pop_back,
+        bench_insert_random,
+        bench_remove_random,
+        bench_get_random,
+        bench_iter,
+        bench_retain,
+        bench_split_off,
+        bench_build_from_iter,
 );
-criterion_main!(benches);
+criterion_main!(skiplist);
