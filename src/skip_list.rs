@@ -2684,6 +2684,23 @@ impl<T: Clone, G: LevelGenerator + Clone> Clone for SkipList<T, G> {
     }
 }
 
+// MARK: PartialEq / Eq
+
+impl<T: PartialEq, G: LevelGenerator, G2: LevelGenerator> PartialEq<SkipList<T, G2>>
+    for SkipList<T, G>
+{
+    /// Returns `true` if `self` and `other` have the same length and all
+    /// corresponding elements compare equal.
+    ///
+    /// The level generators (`G` and `G2`) do not need to match.
+    #[inline]
+    fn eq(&self, other: &SkipList<T, G2>) -> bool {
+        self.len() == other.len() && self.iter().zip(other.iter()).all(|(a, b)| a == b)
+    }
+}
+
+impl<T: Eq, G: LevelGenerator> Eq for SkipList<T, G> {}
+
 // MARK: Index
 
 impl<T, G: LevelGenerator> Index<usize> for SkipList<T, G> {
@@ -6731,6 +6748,52 @@ mod tests {
         list.dedup_by_key(|i| *i / 10);
         let got: Vec<i32> = list.iter().copied().collect();
         assert_eq!(got, [10, 20, 30]);
+    }
+
+    // MARK: PartialEq / Eq
+
+    #[test]
+    fn eq_empty_lists() {
+        let a = SkipList::<i32>::new();
+        let b = SkipList::<i32>::new();
+        assert_eq!(a, b);
+    }
+
+    #[test]
+    fn eq_same_elements() {
+        let mut a = SkipList::<i32>::new();
+        let mut b = SkipList::<i32>::new();
+        for i in [1, 2, 3] {
+            a.push_back(i);
+            b.push_back(i);
+        }
+        assert_eq!(a, b);
+    }
+
+    #[test]
+    fn ne_different_elements() {
+        let mut a = SkipList::<i32>::new();
+        let mut b = SkipList::<i32>::new();
+        for i in [1, 2, 3] {
+            a.push_back(i);
+        }
+        for i in [1, 2, 4] {
+            b.push_back(i);
+        }
+        assert_ne!(a, b);
+    }
+
+    #[test]
+    fn ne_different_lengths() {
+        let mut a = SkipList::<i32>::new();
+        let mut b = SkipList::<i32>::new();
+        for i in [1, 2, 3] {
+            a.push_back(i);
+        }
+        for i in [1, 2] {
+            b.push_back(i);
+        }
+        assert_ne!(a, b);
     }
 
     // MARK: Clone
