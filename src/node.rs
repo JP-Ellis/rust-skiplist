@@ -926,7 +926,7 @@ impl<V> Drop for Node<V> {
     reason = "test code, covered by miri, so safety guarantees can be relaxed"
 )]
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use anyhow::Result;
     use insta::assert_snapshot;
     use pretty_assertions::{assert_eq, assert_matches};
@@ -934,7 +934,7 @@ mod tests {
 
     use crate::node::{Node, NodeType, link::Link};
 
-    const MAX_LEVELS: usize = 2;
+    const MAX_LEVELS: usize = 3;
 
     #[test]
     fn node_new() {
@@ -959,15 +959,16 @@ mod tests {
         assert!(node.value_mut().is_none());
     }
 
-    /// Build a simple skiplist.
+    /// Build a simple skiplist with values [10, 20, 30, 40].
     ///
-    /// The values are 1, 2, 3, 4; and the links are as follows:
+    /// The links are as follows:
     ///
-    /// head -------------> 03
-    /// head -------> 02 -> 03 -> 04
-    /// head -> 01 -> 02 -> 03 -> 04
+    /// head
+    /// head -------------> 30
+    /// head -------> 20 -> 30 -> 40
+    /// head -> 10 -> 20 -> 30 -> 40
     #[fixture]
-    fn minimal_skiplist() -> Result<Box<Node<u8>>> {
+    pub(crate) fn skiplist() -> Result<Box<Node<u8>>> {
         let mut head = Box::new(Node::new(MAX_LEVELS));
         let mut v1 = Node::new(0);
         let mut v2 = Node::new(1);
@@ -975,10 +976,10 @@ mod tests {
         let mut v4 = Node::new(0);
 
         // Internal values
-        v1.value = Some(1);
-        v2.value = Some(2);
-        v3.value = Some(3);
-        v4.value = Some(4);
+        v1.value = Some(10);
+        v2.value = Some(20);
+        v3.value = Some(30);
+        v4.value = Some(40);
 
         unsafe {
             head.insert_after(v1);
@@ -1042,25 +1043,26 @@ mod tests {
 
     #[cfg_attr(miri, ignore)] // Insta does not work with miri
     #[rstest]
-    fn node_display(minimal_skiplist: Result<Box<Node<u8>>>) -> Result<()> {
-        let head = minimal_skiplist?;
+    fn node_display(skiplist: Result<Box<Node<u8>>>) -> Result<()> {
+        let head = skiplist?;
 
         // Insta is incompatible with Miri
         if !cfg!(miri) {
             assert_snapshot!(
                 head.display()?,
                 @"
-                [02]: 00 -------------> 03
-                [01]: 00 -------> 02 -> 03 -> 04
-                [->]: 00 -> 01 -> 02 -> 03 -> 04
-                [<-]: 00 <- 01 <- 02 <- 03 <- 04
+            [03]: 00
+            [02]: 00 -------------> 03
+            [01]: 00 -------> 02 -> 03 -> 04
+            [->]: 00 -> 01 -> 02 -> 03 -> 04
+            [<-]: 00 <- 01 <- 02 <- 03 <- 04
 
-                [00|02] None
-                [01|00] Some(1)
-                [02|01] Some(2)
-                [03|01] Some(3)
-                [04|00] Some(4)
-                "
+            [00|03] None
+            [01|00] Some(10)
+            [02|01] Some(20)
+            [03|01] Some(30)
+            [04|00] Some(40)
+            "
             );
         }
 
@@ -1068,11 +1070,11 @@ mod tests {
     }
 
     #[rstest]
-    fn node_properties(minimal_skiplist: Result<Box<Node<u8>>>) -> Result<()> {
-        let head = minimal_skiplist?;
+    fn node_properties(skiplist: Result<Box<Node<u8>>>) -> Result<()> {
+        let head = skiplist?;
 
         assert_matches!(head.node_type(), NodeType::Head);
-        assert_eq!(head.level(), 2);
+        assert_eq!(head.level(), 3);
 
         let mut node = head.next().expect("v1 not found");
         assert_matches!(node.node_type(), NodeType::Body);
@@ -1095,8 +1097,8 @@ mod tests {
 
     #[cfg_attr(miri, ignore)] // Insta does not work with miri
     #[rstest]
-    fn pop_node(minimal_skiplist: Result<Box<Node<u8>>>) -> Result<()> {
-        let mut head = minimal_skiplist?;
+    fn pop_node(skiplist: Result<Box<Node<u8>>>) -> Result<()> {
+        let mut head = skiplist?;
 
         // SAFETY: `head` is a valid node with `v1` as its next.
         let v1 = unsafe { head.next_mut() }.expect("v1 not found");
@@ -1104,7 +1106,7 @@ mod tests {
         let v2 = unsafe { v1.next_mut() }.expect("v2 not found");
         let detached_node = unsafe { v2.pop() };
 
-        assert_eq!(detached_node.value, Some(2));
+        assert_eq!(detached_node.value, Some(20));
         assert!(matches!(detached_node.node_type(), NodeType::Detached));
 
         // Insta is incompatible with Miri
@@ -1117,16 +1119,17 @@ mod tests {
             assert_snapshot!(
                 head.display()?,
                 @"
-                [02]: 00 -------------> 02
-                [01]: 00 -------> ??
-                [->]: 00 -> 01 -> 02 -> 03
-                [<-]: 00 <- 01 <- 02 <- 03
+            [03]: 00
+            [02]: 00 -------------> 02
+            [01]: 00 -------> ??
+            [->]: 00 -> 01 -> 02 -> 03
+            [<-]: 00 <- 01 <- 02 <- 03
 
-                [00|02] None
-                [01|00] Some(1)
-                [02|01] Some(3)
-                [03|00] Some(4)
-                "
+            [00|03] None
+            [01|00] Some(10)
+            [02|01] Some(30)
+            [03|00] Some(40)
+            "
             );
         }
 
@@ -1135,8 +1138,8 @@ mod tests {
 
     #[cfg_attr(miri, ignore)] // Insta does not work with miri
     #[rstest]
-    fn insert_after_head_node(minimal_skiplist: Result<Box<Node<u8>>>) -> Result<()> {
-        let mut head = minimal_skiplist?;
+    fn insert_after_head_node(skiplist: Result<Box<Node<u8>>>) -> Result<()> {
+        let mut head = skiplist?;
         let mut new_node = Node::new(99);
         new_node.value = Some(100);
 
@@ -1151,13 +1154,13 @@ mod tests {
             assert_snapshot!(
                 head.display_values()?,
                 @"
-                [00|02] None
-                [01|99] Some(100)
-                [02|00] Some(1)
-                [03|01] Some(2)
-                [04|01] Some(3)
-                [05|00] Some(4)
-                "
+            [00|03] None
+            [01|99] Some(100)
+            [02|00] Some(10)
+            [03|01] Some(20)
+            [04|01] Some(30)
+            [05|00] Some(40)
+            "
             );
         }
 
@@ -1166,8 +1169,8 @@ mod tests {
 
     #[cfg_attr(miri, ignore)] // Insta does not work with miri
     #[rstest]
-    fn insert_after_body_node(minimal_skiplist: Result<Box<Node<u8>>>) -> Result<()> {
-        let mut head = minimal_skiplist?;
+    fn insert_after_body_node(skiplist: Result<Box<Node<u8>>>) -> Result<()> {
+        let mut head = skiplist?;
         let mut new_node = Node::new(99);
         new_node.value = Some(100);
 
@@ -1183,13 +1186,13 @@ mod tests {
             assert_snapshot!(
                 head.display_values()?,
                 @"
-                [00|02] None
-                [01|00] Some(1)
-                [02|99] Some(100)
-                [03|01] Some(2)
-                [04|01] Some(3)
-                [05|00] Some(4)
-                "
+            [00|03] None
+            [01|00] Some(10)
+            [02|99] Some(100)
+            [03|01] Some(20)
+            [04|01] Some(30)
+            [05|00] Some(40)
+            "
             );
         }
 
@@ -1208,8 +1211,8 @@ mod tests {
     }
 
     #[rstest]
-    fn filter_rebuild_keep_all(minimal_skiplist: Result<Box<Node<u8>>>) -> Result<()> {
-        let mut head = minimal_skiplist?;
+    fn filter_rebuild_keep_all(skiplist: Result<Box<Node<u8>>>) -> Result<()> {
+        let mut head = skiplist?;
         let (new_len, new_tail) = unsafe { head.filter_rebuild(|_| true, |_| {}) };
 
         assert_eq!(new_len, 4);
@@ -1222,18 +1225,18 @@ mod tests {
             }
             v
         };
-        assert_eq!(vals, [1, 2, 3, 4]);
+        assert_eq!(vals, [10, 20, 30, 40]);
         let tail_val = unsafe { new_tail.expect("tail exists").as_ref() }
             .value()
             .copied();
-        assert_eq!(tail_val, Some(4));
+        assert_eq!(tail_val, Some(40));
         Ok(())
     }
 
     #[rstest]
-    fn filter_rebuild_keep_none(minimal_skiplist: Result<Box<Node<u8>>>) -> Result<()> {
+    fn filter_rebuild_keep_none(skiplist: Result<Box<Node<u8>>>) -> Result<()> {
         let mut dropped_vals: Vec<u8> = Vec::new();
-        let mut head = minimal_skiplist?;
+        let mut head = skiplist?;
         let (new_len, new_tail) = unsafe {
             head.filter_rebuild(
                 |_| false,
@@ -1245,19 +1248,19 @@ mod tests {
         assert!(new_tail.is_none());
         assert!(head.next().is_none());
         // on_drop called in traversal order.
-        assert_eq!(dropped_vals, [1, 2, 3, 4]);
+        assert_eq!(dropped_vals, [10, 20, 30, 40]);
         Ok(())
     }
 
     #[rstest]
-    fn filter_rebuild_keep_first_and_third(minimal_skiplist: Result<Box<Node<u8>>>) -> Result<()> {
-        // Keep v1 (value 1) and v3 (value 3); drop v2 and v4.
-        let mut head = minimal_skiplist?;
+    fn filter_rebuild_keep_first_and_third(skiplist: Result<Box<Node<u8>>>) -> Result<()> {
+        // Keep v1 (value 10) and v3 (value 30); drop v2 and v4.
+        let mut head = skiplist?;
         let (new_len, new_tail) = unsafe {
             head.filter_rebuild(
                 |cur| {
                     let v = (*cur).value().copied();
-                    v == Some(1) || v == Some(3)
+                    v == Some(10) || v == Some(30)
                 },
                 |_| {},
             )
@@ -1273,33 +1276,33 @@ mod tests {
             }
             v
         };
-        assert_eq!(vals, [1, 3]);
+        assert_eq!(vals, [10, 30]);
         let tail_val = unsafe { new_tail.expect("tail exists").as_ref() }
             .value()
             .copied();
-        assert_eq!(tail_val, Some(3));
+        assert_eq!(tail_val, Some(30));
         Ok(())
     }
 
     #[rstest]
     fn filter_rebuild_on_drop_receives_correct_values(
-        minimal_skiplist: Result<Box<Node<u8>>>,
+        skiplist: Result<Box<Node<u8>>>,
     ) -> Result<()> {
         let mut dropped: Vec<u8> = Vec::new();
-        let mut head = minimal_skiplist?;
+        let mut head = skiplist?;
         // Keep v2 and v4; drop v1 and v3.
         unsafe {
             head.filter_rebuild(
                 |cur| {
                     let v = (*cur).value().copied();
-                    v == Some(2) || v == Some(4)
+                    v == Some(20) || v == Some(40)
                 },
                 |mut b| dropped.push(b.take_value().expect("data node")),
             );
         }
 
         // Dropped values must arrive in traversal order: v1 then v3.
-        assert_eq!(dropped, [1, 3]);
+        assert_eq!(dropped, [10, 30]);
         Ok(())
     }
 
@@ -1307,15 +1310,15 @@ mod tests {
     /// `None` because no retained node can anchor a skip link.
     #[rstest]
     fn filter_rebuild_links_consistent_after_partial_keep(
-        minimal_skiplist: Result<Box<Node<u8>>>,
+        skiplist: Result<Box<Node<u8>>>,
     ) -> Result<()> {
-        let mut head = minimal_skiplist?;
+        let mut head = skiplist?;
         // Drop v2 and v3 (both height 1); keep v1 (height 0) and v4 (height 0).
         unsafe {
             head.filter_rebuild(
                 |cur| {
                     let v = (*cur).value().copied();
-                    v != Some(2) && v != Some(3)
+                    v != Some(20) && v != Some(30)
                 },
                 |_| {},
             );
@@ -1331,7 +1334,7 @@ mod tests {
             }
             v
         };
-        assert_eq!(vals, [1, 4]);
+        assert_eq!(vals, [10, 40]);
         // v1 and v4 both have height 0, so all head skip links must be None.
         for link in head.links() {
             assert!(link.is_none(), "head skip link should be None");
@@ -1341,17 +1344,16 @@ mod tests {
 
     /// Rebuilding skip links over a keep-all pass must produce correct distances.
     #[rstest]
-    fn filter_rebuild_keep_all_links_rebuilt(
-        minimal_skiplist: Result<Box<Node<u8>>>,
-    ) -> Result<()> {
+    fn filter_rebuild_keep_all_links_rebuilt(skiplist: Result<Box<Node<u8>>>) -> Result<()> {
         // Fixture node heights: v1=0, v2=1, v3=1, v4=0.
         //
         // After a keep-all rebuild:
-        //   head.links[0] → v2 (distance 2)  — head → v1 (height 0, no link) → v2 (height 1)
-        //   head.links[1] → None             — no height-2 node exists
+        //   head.links[0] → v2 (distance 2)  (head → v1 (height 0, no link) → v2 (height 1))
+        //   head.links[1] → None             (no height-2 node exists)
+        //   head.links[2] → None             (no height-3 node exists)
         //   v2.links[0]   → v3 (distance 1)
         //   v3.links[0]   → None             — v4 has height 0 so nothing wires into v3.links[0]
-        let mut head = minimal_skiplist?;
+        let mut head = skiplist?;
         unsafe {
             head.filter_rebuild(|_| true, |_| {});
         }
@@ -1359,14 +1361,15 @@ mod tests {
         let link0 = head.links()[0]
             .as_ref()
             .expect("head.links[0] must be Some");
-        assert_eq!(link0.node().value().copied(), Some(2));
+        assert_eq!(link0.node().value().copied(), Some(20));
         assert_eq!(link0.distance().get(), 2);
 
         assert!(head.links()[1].is_none(), "head.links[1] must be None");
+        assert!(head.links()[2].is_none(), "head.links[2] must be None");
 
         let v2 = head.next().expect("v1").next().expect("v2");
         let v2_link0 = v2.links()[0].as_ref().expect("v2.links[0] must be Some");
-        assert_eq!(v2_link0.node().value().copied(), Some(3));
+        assert_eq!(v2_link0.node().value().copied(), Some(30));
         assert_eq!(v2_link0.distance().get(), 1);
 
         let v3 = v2.next().expect("v3");
@@ -1376,8 +1379,8 @@ mod tests {
 
     #[cfg_attr(miri, ignore)] // Insta does not work with miri
     #[rstest]
-    fn insert_after_tail_node(minimal_skiplist: Result<Box<Node<u8>>>) -> Result<()> {
-        let mut head = minimal_skiplist?;
+    fn insert_after_tail_node(skiplist: Result<Box<Node<u8>>>) -> Result<()> {
+        let mut head = skiplist?;
         let mut new_node = Node::new(99);
         new_node.value = Some(100);
 
@@ -1396,13 +1399,13 @@ mod tests {
             assert_snapshot!(
                 head.display_values()?,
                 @"
-                [00|02] None
-                [01|00] Some(1)
-                [02|01] Some(2)
-                [03|01] Some(3)
-                [04|00] Some(4)
-                [05|99] Some(100)
-                "
+            [00|03] None
+            [01|00] Some(10)
+            [02|01] Some(20)
+            [03|01] Some(30)
+            [04|00] Some(40)
+            [05|99] Some(100)
+            "
             );
         }
 

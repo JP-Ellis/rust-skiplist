@@ -125,96 +125,18 @@ impl<'a, T, Q: ?Sized, F: Fn(&T, &Q) -> Ordering> Visitor for OrdVisitor<'a, T, 
 mod tests {
     use anyhow::Result;
     use pretty_assertions::assert_eq;
-    use rstest::{fixture, rstest};
+    use rstest::rstest;
 
     use super::OrdVisitor;
     use crate::node::{
         Node,
-        link::Link,
+        tests::skiplist,
         visitor::{Step, Visitor},
     };
 
-    const MAX_LEVELS: usize = 3;
-
-    /// Sorted skip list with values [10, 20, 30, 40].
-    ///
-    /// ```text
-    /// head ----------------------------> 30          (level 2, distance 3)
-    /// head -----------> 20 -----------> 30 -> 40    (level 1, distance 2 / 1 / 1)
-    /// head -> 10 -> 20 -> 30 -> 40                  (sequential)
-    /// ```
-    #[fixture]
-    fn sorted_skiplist() -> Result<Box<Node<u8>>> {
-        let mut head = Box::new(Node::new(MAX_LEVELS));
-        let mut v1 = Node::new(0);
-        let mut v2 = Node::new(1);
-        let mut v3 = Node::new(1);
-        let mut v4 = Node::new(0);
-
-        v1.value = Some(10);
-        v2.value = Some(20);
-        v3.value = Some(30);
-        v4.value = Some(40);
-
-        #[expect(
-            clippy::multiple_unsafe_ops_per_block,
-            reason = "Building the skip list"
-        )]
-        unsafe {
-            head.insert_after(v1);
-            head.next_mut().expect("v1 not found").insert_after(v2);
-            head.next_mut()
-                .expect("v1 not found")
-                .next_mut()
-                .expect("v2 not found")
-                .insert_after(v3);
-            head.next_mut()
-                .expect("v1 not found")
-                .next_mut()
-                .expect("v2 not found")
-                .next_mut()
-                .expect("v3 not found")
-                .insert_after(v4);
-        }
-
-        let head_v3: Link<_>;
-        let head_v2: Link<_>;
-        let v2_v3: Link<_>;
-        let v3_v4: Link<_>;
-        {
-            let v1_ref = head.next().expect("v1 not found");
-            let v2_ref = v1_ref.next().expect("v2 not found");
-            let v3_ref = v2_ref.next().expect("v3 not found");
-            let v4_ref = v3_ref.next().expect("v4 not found");
-            head_v3 = Link::new(v3_ref, 3)?;
-            head_v2 = Link::new(v2_ref, 2)?;
-            v2_v3 = Link::new(v3_ref, 1)?;
-            v3_v4 = Link::new(v4_ref, 1)?;
-        }
-
-        unsafe {
-            head.links[1] = Some(head_v3);
-            head.links[0] = Some(head_v2);
-            head.next_mut()
-                .expect("v1 not found")
-                .next_mut()
-                .expect("v2 not found")
-                .links[0] = Some(v2_v3);
-            head.next_mut()
-                .expect("v1 not found")
-                .next_mut()
-                .expect("v2 not found")
-                .next_mut()
-                .expect("v3 not found")
-                .links[0] = Some(v3_v4);
-        }
-
-        Ok(head)
-    }
-
     #[rstest]
-    fn find_existing_value(sorted_skiplist: Result<Box<Node<u8>>>) -> Result<()> {
-        let head = sorted_skiplist?;
+    fn find_existing_value(skiplist: Result<Box<Node<u8>>>) -> Result<()> {
+        let head = skiplist?;
         let mut visitor = OrdVisitor::new(&head, &30_u8, Ord::cmp);
 
         let found = visitor.traverse();
@@ -225,8 +147,8 @@ mod tests {
     }
 
     #[rstest]
-    fn find_first_value(sorted_skiplist: Result<Box<Node<u8>>>) -> Result<()> {
-        let head = sorted_skiplist?;
+    fn find_first_value(skiplist: Result<Box<Node<u8>>>) -> Result<()> {
+        let head = skiplist?;
         let mut visitor = OrdVisitor::new(&head, &10_u8, Ord::cmp);
 
         let found = visitor.traverse();
@@ -237,8 +159,8 @@ mod tests {
     }
 
     #[rstest]
-    fn find_last_value(sorted_skiplist: Result<Box<Node<u8>>>) -> Result<()> {
-        let head = sorted_skiplist?;
+    fn find_last_value(skiplist: Result<Box<Node<u8>>>) -> Result<()> {
+        let head = skiplist?;
         let mut visitor = OrdVisitor::new(&head, &40_u8, Ord::cmp);
 
         let found = visitor.traverse();
@@ -249,8 +171,8 @@ mod tests {
     }
 
     #[rstest]
-    fn value_not_in_list(sorted_skiplist: Result<Box<Node<u8>>>) -> Result<()> {
-        let head = sorted_skiplist?;
+    fn value_not_in_list(skiplist: Result<Box<Node<u8>>>) -> Result<()> {
+        let head = skiplist?;
         let mut visitor = OrdVisitor::new(&head, &25_u8, Ord::cmp);
 
         let found = visitor.traverse();
@@ -261,8 +183,8 @@ mod tests {
     }
 
     #[rstest]
-    fn value_before_first(sorted_skiplist: Result<Box<Node<u8>>>) -> Result<()> {
-        let head = sorted_skiplist?;
+    fn value_before_first(skiplist: Result<Box<Node<u8>>>) -> Result<()> {
+        let head = skiplist?;
         let mut visitor = OrdVisitor::new(&head, &5_u8, Ord::cmp);
 
         let found = visitor.traverse();
@@ -273,8 +195,8 @@ mod tests {
     }
 
     #[rstest]
-    fn value_beyond_list(sorted_skiplist: Result<Box<Node<u8>>>) -> Result<()> {
-        let head = sorted_skiplist?;
+    fn value_beyond_list(skiplist: Result<Box<Node<u8>>>) -> Result<()> {
+        let head = skiplist?;
         let mut visitor = OrdVisitor::new(&head, &99_u8, Ord::cmp);
 
         let found = visitor.traverse();
@@ -287,8 +209,8 @@ mod tests {
     /// Calling `step()` again after `found()` returns `true` must immediately
     /// return `FoundTarget` without advancing.
     #[rstest]
-    fn step_after_found(sorted_skiplist: Result<Box<Node<u8>>>) -> Result<()> {
-        let head = sorted_skiplist?;
+    fn step_after_found(skiplist: Result<Box<Node<u8>>>) -> Result<()> {
+        let head = skiplist?;
         let mut visitor = OrdVisitor::new(&head, &20_u8, Ord::cmp);
 
         visitor.traverse();

@@ -205,93 +205,18 @@ impl<T> VisitorMut for IndexMutVisitor<'_, T> {
 mod tests {
     use anyhow::Result;
     use pretty_assertions::assert_eq;
-    use rstest::{fixture, rstest};
+    use rstest::rstest;
 
     use super::IndexMutVisitor;
     use crate::node::{
         Node,
-        link::Link,
+        tests::skiplist,
         visitor::{Step, Visitor, VisitorMut},
     };
 
-    const MAX_LEVELS: usize = 3;
-
-    /// Minimal skip list used by the tests.
-    ///
-    /// ```text
-    /// head
-    /// head -------------> 03  (level 2, distance 3)
-    /// head -------> 02 -> 03 -> 04  (level 1)
-    /// head -> 01 -> 02 -> 03 -> 04  (sequential)
-    /// ```
-    #[fixture]
-    fn minimal_skiplist() -> Result<Box<Node<u8>>> {
-        let mut head = Box::new(Node::new(MAX_LEVELS));
-        let mut v1 = Node::new(0);
-        let mut v2 = Node::new(1);
-        let mut v3 = Node::new(1);
-        let mut v4 = Node::new(0);
-
-        v1.value = Some(1);
-        v2.value = Some(2);
-        v3.value = Some(3);
-        v4.value = Some(4);
-
-        unsafe {
-            head.insert_after(v1);
-            head.next_mut().expect("v1 not found").insert_after(v2);
-            head.next_mut()
-                .expect("v1 not found")
-                .next_mut()
-                .expect("v2 not found")
-                .insert_after(v3);
-            head.next_mut()
-                .expect("v1 not found")
-                .next_mut()
-                .expect("v2 not found")
-                .next_mut()
-                .expect("v3 not found")
-                .insert_after(v4);
-        }
-
-        let head_v3: Link<_>;
-        let head_v2: Link<_>;
-        let v2_v3: Link<_>;
-        let v3_v4: Link<_>;
-        {
-            let v1_ref = head.next().expect("v1 not found");
-            let v2_ref = v1_ref.next().expect("v2 not found");
-            let v3_ref = v2_ref.next().expect("v3 not found");
-            let v4_ref = v3_ref.next().expect("v4 not found");
-            head_v3 = Link::new(v3_ref, 3)?;
-            head_v2 = Link::new(v2_ref, 2)?;
-            v2_v3 = Link::new(v3_ref, 1)?;
-            v3_v4 = Link::new(v4_ref, 1)?;
-        }
-
-        unsafe {
-            head.links[1] = Some(head_v3);
-            head.links[0] = Some(head_v2);
-            head.next_mut()
-                .expect("v1 not found")
-                .next_mut()
-                .expect("v2 not found")
-                .links[0] = Some(v2_v3);
-            head.next_mut()
-                .expect("v1 not found")
-                .next_mut()
-                .expect("v2 not found")
-                .next_mut()
-                .expect("v3 not found")
-                .links[0] = Some(v3_v4);
-        }
-
-        Ok(head)
-    }
-
     #[rstest]
-    fn find_index_2(minimal_skiplist: Result<Box<Node<u8>>>) -> Result<()> {
-        let mut head = minimal_skiplist?;
+    fn find_index_2(skiplist: Result<Box<Node<u8>>>) -> Result<()> {
+        let mut head = skiplist?;
         let mut visitor = IndexMutVisitor::new(&mut head, 2);
 
         let found = visitor.traverse();
@@ -299,13 +224,13 @@ mod tests {
         assert!(visitor.found());
         // SAFETY: pointer is valid for the duration of `head`'s lifetime.
         let value = found.map(|ptr| unsafe { ptr.as_ref() }.value().copied());
-        assert_eq!(value, Some(Some(2)));
+        assert_eq!(value, Some(Some(20)));
         Ok(())
     }
 
     #[rstest]
-    fn find_index_not_found(minimal_skiplist: Result<Box<Node<u8>>>) -> Result<()> {
-        let mut head = minimal_skiplist?;
+    fn find_index_not_found(skiplist: Result<Box<Node<u8>>>) -> Result<()> {
+        let mut head = skiplist?;
         let mut visitor = IndexMutVisitor::new(&mut head, 5);
 
         let found = visitor.traverse();
@@ -318,8 +243,8 @@ mod tests {
     /// After traversal, every precursor must point to a node whose index is
     /// strictly less than the target.
     #[rstest]
-    fn precursors_are_before_target(minimal_skiplist: Result<Box<Node<u8>>>) -> Result<()> {
-        let mut head = minimal_skiplist?;
+    fn precursors_are_before_target(skiplist: Result<Box<Node<u8>>>) -> Result<()> {
+        let mut head = skiplist?;
 
         // Target = 3 (node v3, value 3).
         let mut visitor = IndexMutVisitor::new(&mut head, 3);
@@ -333,8 +258,8 @@ mod tests {
 
     /// Stepping past the end of the list produces `Exhausted`.
     #[rstest]
-    fn exhausted_when_target_out_of_range(minimal_skiplist: Result<Box<Node<u8>>>) -> Result<()> {
-        let mut head = minimal_skiplist?;
+    fn exhausted_when_target_out_of_range(skiplist: Result<Box<Node<u8>>>) -> Result<()> {
+        let mut head = skiplist?;
         let mut visitor = IndexMutVisitor::new(&mut head, 99);
 
         loop {
@@ -353,8 +278,8 @@ mod tests {
 
     /// `current_mut()` returns the same pointer as `current()`.
     #[rstest]
-    fn current_mut_matches_current(minimal_skiplist: Result<Box<Node<u8>>>) -> Result<()> {
-        let mut head = minimal_skiplist?;
+    fn current_mut_matches_current(skiplist: Result<Box<Node<u8>>>) -> Result<()> {
+        let mut head = skiplist?;
         let mut visitor = IndexMutVisitor::new(&mut head, 2);
         visitor.traverse();
 
@@ -364,8 +289,8 @@ mod tests {
 
     /// `precursors()` has one entry per level.
     #[rstest]
-    fn precursors_length(minimal_skiplist: Result<Box<Node<u8>>>) -> Result<()> {
-        let mut head = minimal_skiplist?;
+    fn precursors_length(skiplist: Result<Box<Node<u8>>>) -> Result<()> {
+        let mut head = skiplist?;
         let max_levels = head.level();
         let mut visitor = IndexMutVisitor::new(&mut head, 2);
         visitor.traverse();

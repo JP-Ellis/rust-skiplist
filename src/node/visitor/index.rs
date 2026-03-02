@@ -97,99 +97,19 @@ impl<'a, T> Visitor for IndexVisitor<'a, T> {
 mod tests {
     use anyhow::Result;
     use pretty_assertions::assert_eq;
-    use rstest::{fixture, rstest};
+    use rstest::rstest;
 
     use super::IndexVisitor;
     use crate::node::{
         Node,
-        link::Link,
+        tests::skiplist,
         visitor::{Step, Visitor},
     };
 
-    const MAX_LEVELS: usize = 3;
-
-    /// Build a simple skiplist.
-    ///
-    /// The values are 1, 2, 3, 4; and the links are as follows:
-    ///
-    /// head
-    /// head -------------> 03
-    /// head -------> 02 -> 03 -> 04
-    /// head -> 01 -> 02 -> 03 -> 04
-    #[fixture]
-    fn minimal_skiplist() -> Result<Box<Node<u8>>> {
-        let mut head = Box::new(Node::new(MAX_LEVELS));
-        let mut v1 = Node::new(0);
-        let mut v2 = Node::new(1);
-        let mut v3 = Node::new(1);
-        let mut v4 = Node::new(0);
-
-        // Internal values
-        v1.value = Some(1);
-        v2.value = Some(2);
-        v3.value = Some(3);
-        v4.value = Some(4);
-
-        unsafe {
-            head.insert_after(v1);
-            head.next_mut().expect("v1 not found").insert_after(v2);
-            head.next_mut()
-                .expect("v1 not found")
-                .next_mut()
-                .expect("v2 not found")
-                .insert_after(v3);
-            head.next_mut()
-                .expect("v1 not found")
-                .next_mut()
-                .expect("v2 not found")
-                .next_mut()
-                .expect("v3 not found")
-                .insert_after(v4);
-        }
-
-        // Build higher level links:
-
-        let head_v3: Link<_>;
-        let head_v2: Link<_>;
-        let v2_v3: Link<_>;
-        let v3_v4: Link<_>;
-        {
-            let v1_ref = head.next().expect("v1 not found");
-            let v2_ref = v1_ref.next().expect("v2 not found");
-            let v3_ref = v2_ref.next().expect("v3 not found");
-            let v4_ref = v3_ref.next().expect("tail not found");
-            head_v3 = Link::new(v3_ref, 3)?;
-            head_v2 = Link::new(v2_ref, 2)?;
-            v2_v3 = Link::new(v3_ref, 1)?;
-            v3_v4 = Link::new(v4_ref, 1)?;
-        }
-
-        unsafe {
-            head.links[1] = Some(head_v3);
-            head.links[0] = Some(head_v2);
-
-            head.next_mut()
-                .expect("v1 not found")
-                .next_mut()
-                .expect("v2 not found")
-                .links[0] = Some(v2_v3);
-
-            head.next_mut()
-                .expect("v1 not found")
-                .next_mut()
-                .expect("v2 not found")
-                .next_mut()
-                .expect("v3 not found")
-                .links[0] = Some(v3_v4);
-        }
-
-        Ok(head)
-    }
-
     /// Test the `IndexVisitor` for finding a node by index.
     #[rstest]
-    fn index_traverser_step(minimal_skiplist: Result<Box<Node<u8>>>) -> Result<()> {
-        let head = minimal_skiplist?;
+    fn index_traverser_step(skiplist: Result<Box<Node<u8>>>) -> Result<()> {
+        let head = skiplist?;
         let mut traverser = IndexVisitor::new(&head, 2);
 
         let mut last_node = None;
@@ -198,14 +118,14 @@ mod tests {
         }
 
         assert!(traverser.found());
-        assert_eq!(last_node.and_then(|n| n.value()), Some(&2));
+        assert_eq!(last_node.and_then(|n| n.value()), Some(&20));
 
         Ok(())
     }
 
     #[rstest]
-    fn index_traverser_step_none(minimal_skiplist: Result<Box<Node<u8>>>) -> Result<()> {
-        let head = minimal_skiplist?;
+    fn index_traverser_step_none(skiplist: Result<Box<Node<u8>>>) -> Result<()> {
+        let head = skiplist?;
         let mut traverser = IndexVisitor::new(&head, 5);
 
         let mut last_node = None;
@@ -214,26 +134,26 @@ mod tests {
         }
 
         assert!(!traverser.found());
-        assert_eq!(last_node.and_then(|n| n.value()), Some(&4));
+        assert_eq!(last_node.and_then(|n| n.value()), Some(&40));
 
         Ok(())
     }
 
     #[rstest]
-    fn index_traverser_traverse(minimal_skiplist: Result<Box<Node<u8>>>) -> Result<()> {
-        let head = minimal_skiplist?;
+    fn index_traverser_traverse(skiplist: Result<Box<Node<u8>>>) -> Result<()> {
+        let head = skiplist?;
         let mut traverser = IndexVisitor::new(&head, 2);
 
         let node = traverser.traverse();
         assert!(traverser.found());
-        assert_eq!(node.and_then(|n| n.value()), Some(&2));
+        assert_eq!(node.and_then(|n| n.value()), Some(&20));
 
         Ok(())
     }
 
     #[rstest]
-    fn index_traverser_traverse_not_found(minimal_skiplist: Result<Box<Node<u8>>>) -> Result<()> {
-        let head = minimal_skiplist?;
+    fn index_traverser_traverse_not_found(skiplist: Result<Box<Node<u8>>>) -> Result<()> {
+        let head = skiplist?;
         let mut traverser = IndexVisitor::new(&head, 5);
 
         let node = traverser.traverse();
