@@ -335,9 +335,7 @@ impl<V, const N: usize> Node<V, N> {
     ///
     /// 1. **Heap allocation**: `self` must have been originally allocated via
     ///    [`Box::new`] and then leaked (e.g. via [`Box::leak`] into a
-    ///    [`NonNull`] pointer). Calling this method on a stack-allocated node
-    ///    is instant undefined behaviour because it calls
-    ///    [`Box::from_raw(self)`][Box::from_raw] internally.
+    ///    [`NonNull`] pointer).
     /// 2. **Node type**: `self` must not be a [`NodeType::Head`] or
     ///    [`NodeType::Detached`] node.  Popping the head would make the rest
     ///    of the list unreachable; popping a detached node has no well-defined
@@ -391,7 +389,7 @@ impl<V, const N: usize> Node<V, N> {
     /// skip-link pointers that will be dereferenced) to the nodes being freed
     /// remain after this call.
     #[inline]
-    pub(crate) fn truncate_next(&mut self) {
+    pub(crate) unsafe fn truncate_next(&mut self) {
         // Same iterative pattern as `Drop for Node<V>`, applied to the tail
         // of the chain rather than the node itself.
         let mut current = self.next.take();
@@ -409,8 +407,6 @@ impl<V, const N: usize> Node<V, N> {
         }
     }
 
-    /// Join two sequences of nodes.
-    ///
     /// Joins a head node to a tail node, creating a single sequence of nodes.
     ///
     /// This method takes ownership of `head` (consuming it) and splices the
@@ -947,6 +943,8 @@ pub(crate) mod tests {
 
     pub(crate) const MAX_LEVELS: usize = 3;
 
+    // MARK: new
+
     #[test]
     fn node_new() {
         let node = Node::<(), MAX_LEVELS>::new(MAX_LEVELS);
@@ -1052,7 +1050,8 @@ pub(crate) mod tests {
         Ok(head)
     }
 
-    #[cfg_attr(miri, ignore)] // Insta does not work with miri
+    // MARK: display
+
     #[rstest]
     fn node_display(skiplist: Result<Box<Node<u8, MAX_LEVELS>>>) -> Result<()> {
         let head = skiplist?;
@@ -1062,18 +1061,18 @@ pub(crate) mod tests {
             assert_snapshot!(
                 head.display()?,
                 @"
-            [03]: 00
-            [02]: 00 -------------> 03
-            [01]: 00 -------> 02 -> 03 -> 04
-            [->]: 00 -> 01 -> 02 -> 03 -> 04
-            [<-]: 00 <- 01 <- 02 <- 03 <- 04
+                [03]: 00
+                [02]: 00 -------------> 03
+                [01]: 00 -------> 02 -> 03 -> 04
+                [->]: 00 -> 01 -> 02 -> 03 -> 04
+                [<-]: 00 <- 01 <- 02 <- 03 <- 04
 
-            [00|03] None
-            [01|00] Some(10)
-            [02|01] Some(20)
-            [03|01] Some(30)
-            [04|00] Some(40)
-            "
+                [00|03] None
+                [01|00] Some(10)
+                [02|01] Some(20)
+                [03|01] Some(30)
+                [04|00] Some(40)
+                "
             );
         }
 
@@ -1106,7 +1105,8 @@ pub(crate) mod tests {
         Ok(())
     }
 
-    #[cfg_attr(miri, ignore)] // Insta does not work with miri
+    // MARK: pop
+
     #[rstest]
     fn pop_node(skiplist: Result<Box<Node<u8, MAX_LEVELS>>>) -> Result<()> {
         let mut head = skiplist?;
@@ -1121,33 +1121,32 @@ pub(crate) mod tests {
         assert!(matches!(detached_node.node_type(), NodeType::Detached));
 
         // Insta is incompatible with Miri
-        if cfg!(miri) {
-            head.display()?;
-        } else {
+        if !cfg!(miri) {
             // Note: The sequence of values should be valid. It is fine for the
             // links to be invalid as the node has been popped without updating the
             // links.
             assert_snapshot!(
                 head.display()?,
                 @"
-            [03]: 00
-            [02]: 00 -------------> 02
-            [01]: 00 -------> ??
-            [->]: 00 -> 01 -> 02 -> 03
-            [<-]: 00 <- 01 <- 02 <- 03
+                [03]: 00
+                [02]: 00 -------------> 02
+                [01]: 00 -------> ??
+                [->]: 00 -> 01 -> 02 -> 03
+                [<-]: 00 <- 01 <- 02 <- 03
 
-            [00|03] None
-            [01|00] Some(10)
-            [02|01] Some(30)
-            [03|00] Some(40)
-            "
+                [00|03] None
+                [01|00] Some(10)
+                [02|01] Some(30)
+                [03|00] Some(40)
+                "
             );
         }
 
         Ok(())
     }
 
-    #[cfg_attr(miri, ignore)] // Insta does not work with miri
+    // MARK: insert_after
+
     #[rstest]
     fn insert_after_head_node(skiplist: Result<Box<Node<u8, MAX_LEVELS>>>) -> Result<()> {
         let mut head = skiplist?;
@@ -1163,22 +1162,27 @@ pub(crate) mod tests {
             // Note: The sequence of values should be valid. The links are not
             // updated and therefore may result in UB when displayed.
             assert_snapshot!(
-                head.display_values()?,
+                head.display()?,
                 @"
-            [00|03] None
-            [01|03] Some(100)
-            [02|00] Some(10)
-            [03|01] Some(20)
-            [04|01] Some(30)
-            [05|00] Some(40)
-            "
+                [03]: 00
+                [02]: 00 -------------> 04
+                [01]: 00 -------> 03 -> 04 -> 05
+                [->]: 00 -> 01 -> 02 -> 03 -> 04 -> 05
+                [<-]: 00 <- 01 <- 02 <- 03 <- 04 <- 05
+
+                [00|03] None
+                [01|03] Some(100)
+                [02|00] Some(10)
+                [03|01] Some(20)
+                [04|01] Some(30)
+                [05|00] Some(40)
+                "
             );
         }
 
         Ok(())
     }
 
-    #[cfg_attr(miri, ignore)] // Insta does not work with miri
     #[rstest]
     fn insert_after_body_node(skiplist: Result<Box<Node<u8, MAX_LEVELS>>>) -> Result<()> {
         let mut head = skiplist?;
@@ -1195,15 +1199,61 @@ pub(crate) mod tests {
             // Note: The sequence of values should be valid. The links are not
             // updated and therefore may result in UB when displayed.
             assert_snapshot!(
-                head.display_values()?,
+                head.display()?,
                 @"
-            [00|03] None
-            [01|00] Some(10)
-            [02|03] Some(100)
-            [03|01] Some(20)
-            [04|01] Some(30)
-            [05|00] Some(40)
-            "
+                [03]: 00
+                [02]: 00 -------------> 04
+                [01]: 00 -------> 03 -> 04 -> 05
+                [->]: 00 -> 01 -> 02 -> 03 -> 04 -> 05
+                [<-]: 00 <- 01 <- 02 <- 03 <- 04 <- 05
+
+                [00|03] None
+                [01|00] Some(10)
+                [02|03] Some(100)
+                [03|01] Some(20)
+                [04|01] Some(30)
+                [05|00] Some(40)
+                "
+            );
+        }
+
+        Ok(())
+    }
+
+    #[rstest]
+    fn insert_after_tail_node(skiplist: Result<Box<Node<u8, MAX_LEVELS>>>) -> Result<()> {
+        let mut head = skiplist?;
+        let mut new_node = Node::<u8, MAX_LEVELS>::new(MAX_LEVELS);
+        new_node.value = Some(100);
+
+        // SAFETY: Each node is valid with the next node as its successor.
+        let v1 = unsafe { head.next_mut() }.expect("v1 not found");
+        let v2 = unsafe { v1.next_mut() }.expect("v2 not found");
+        let v3 = unsafe { v2.next_mut() }.expect("v3 not found");
+        let v4 = unsafe { v3.next_mut() }.expect("v4 not found");
+        // SAFETY: `v4` has exclusive access and no other references to its successor exist.
+        unsafe { v4.insert_after(new_node) };
+
+        // Insta is incompatible with Miri
+        if !cfg!(miri) {
+            // Note: The sequence of values should be valid. The links are not
+            // updated and therefore may result in UB when displayed.
+            assert_snapshot!(
+                head.display()?,
+                @"
+                [03]: 00
+                [02]: 00 -------------> 03
+                [01]: 00 -------> 02 -> 03 -> 04
+                [->]: 00 -> 01 -> 02 -> 03 -> 04 -> 05
+                [<-]: 00 <- 01 <- 02 <- 03 <- 04 <- 05
+
+                [00|03] None
+                [01|00] Some(10)
+                [02|01] Some(20)
+                [03|01] Some(30)
+                [04|00] Some(40)
+                [05|03] Some(100)
+                "
             );
         }
 
@@ -1241,6 +1291,29 @@ pub(crate) mod tests {
             .value()
             .copied();
         assert_eq!(tail_val, Some(40));
+
+        // Insta is incompatible with Miri
+        if !cfg!(miri) {
+            // Links are rebuilt from node heights: v1=h0, v2=h1, v3=h1, v4=h0.
+            // head.links[0] → v2 (distance 2), head.links[1..] → None.
+            // v2.links[0] → v3 (distance 1), v3.links[0] → None.
+            assert_snapshot!(
+                head.display()?,
+                @"
+                [03]: 00
+                [02]: 00
+                [01]: 00 -------> 02 -> 03
+                [->]: 00 -> 01 -> 02 -> 03 -> 04
+                [<-]: 00 <- 01 <- 02 <- 03 <- 04
+
+                [00|03] None
+                [01|00] Some(10)
+                [02|01] Some(20)
+                [03|01] Some(30)
+                [04|00] Some(40)
+                "
+            );
+        }
         Ok(())
     }
 
@@ -1260,6 +1333,23 @@ pub(crate) mod tests {
         assert!(head.next().is_none());
         // on_drop called in traversal order.
         assert_eq!(dropped_vals, [10, 20, 30, 40]);
+
+        // Insta is incompatible with Miri
+        if !cfg!(miri) {
+            // All nodes dropped; head has no links and no successors.
+            assert_snapshot!(
+                head.display()?,
+                @"
+                [03]: 00
+                [02]: 00
+                [01]: 00
+                [->]: 00
+                [<-]: 00
+
+                [00|03] None
+                "
+            );
+        }
         Ok(())
     }
 
@@ -1294,6 +1384,25 @@ pub(crate) mod tests {
             .value()
             .copied();
         assert_eq!(tail_val, Some(30));
+
+        // Insta is incompatible with Miri
+        if !cfg!(miri) {
+            // v1 (h0) and v3 (h1) retained.  head.links[0] → v3 (distance 2).
+            assert_snapshot!(
+                head.display()?,
+                @"
+                [03]: 00
+                [02]: 00
+                [01]: 00 -------> 02
+                [->]: 00 -> 01 -> 02
+                [<-]: 00 <- 01 <- 02
+
+                [00|03] None
+                [01|00] Some(10)
+                [02|01] Some(30)
+                "
+            );
+        }
         Ok(())
     }
 
@@ -1352,6 +1461,25 @@ pub(crate) mod tests {
         for link in head.links() {
             assert!(link.is_none(), "head skip link should be None");
         }
+
+        // Insta is incompatible with Miri
+        if !cfg!(miri) {
+            // Neither kept node has skip-link slots, so all levels show only the head.
+            assert_snapshot!(
+                head.display()?,
+                @"
+                [03]: 00
+                [02]: 00
+                [01]: 00
+                [->]: 00 -> 01 -> 02
+                [<-]: 00 <- 01 <- 02
+
+                [00|03] None
+                [01|00] Some(10)
+                [02|00] Some(40)
+                "
+            );
+        }
         Ok(())
     }
 
@@ -1389,41 +1517,354 @@ pub(crate) mod tests {
 
         let v3 = v2.next().expect("v3");
         assert!(v3.links()[0].is_none(), "v3.links[0] must be None");
-        Ok(())
-    }
-
-    #[cfg_attr(miri, ignore)] // Insta does not work with miri
-    #[rstest]
-    fn insert_after_tail_node(skiplist: Result<Box<Node<u8, MAX_LEVELS>>>) -> Result<()> {
-        let mut head = skiplist?;
-        let mut new_node = Node::<u8, MAX_LEVELS>::new(MAX_LEVELS);
-        new_node.value = Some(100);
-
-        // SAFETY: Each node is valid with the next node as its successor.
-        let v1 = unsafe { head.next_mut() }.expect("v1 not found");
-        let v2 = unsafe { v1.next_mut() }.expect("v2 not found");
-        let v3 = unsafe { v2.next_mut() }.expect("v3 not found");
-        let v4 = unsafe { v3.next_mut() }.expect("v4 not found");
-        // SAFETY: `v4` has exclusive access and no other references to its successor exist.
-        unsafe { v4.insert_after(new_node) };
 
         // Insta is incompatible with Miri
         if !cfg!(miri) {
-            // Note: The sequence of values should be valid. The links are not
-            // updated and therefore may result in UB when displayed.
+            // Same structural outcome as filter_rebuild_keep_all.
             assert_snapshot!(
-                head.display_values()?,
+                head.display()?,
                 @"
-            [00|03] None
-            [01|00] Some(10)
-            [02|01] Some(20)
-            [03|01] Some(30)
-            [04|00] Some(40)
-            [05|03] Some(100)
-            "
+                [03]: 00
+                [02]: 00
+                [01]: 00 -------> 02 -> 03
+                [->]: 00 -> 01 -> 02 -> 03 -> 04
+                [<-]: 00 <- 01 <- 02 <- 03 <- 04
+
+                [00|03] None
+                [01|00] Some(10)
+                [02|01] Some(20)
+                [03|01] Some(30)
+                [04|00] Some(40)
+                "
             );
         }
+        Ok(())
+    }
 
+    // MARK: join
+
+    #[test]
+    fn join_two_nonempty_lists() -> Result<()> {
+        // Build list1: head1 → v1(10) → v2(20), all height 0 (no skip links).
+        let mut head1 = Box::new(Node::<u8, MAX_LEVELS>::new(MAX_LEVELS));
+        unsafe {
+            head1.insert_after(Node::with_value(0, 10_u8));
+            head1
+                .next_mut()
+                .expect("v1")
+                .insert_after(Node::with_value(0, 20_u8));
+        }
+
+        // Build list2: head2 → v3(30) → v4(40), all height 0 (no skip links).
+        let mut head2 = Box::new(Node::<u8, MAX_LEVELS>::new(MAX_LEVELS));
+        unsafe {
+            head2.insert_after(Node::with_value(0, 30_u8));
+            head2
+                .next_mut()
+                .expect("v3")
+                .insert_after(Node::with_value(0, 40_u8));
+        }
+
+        unsafe {
+            // Find v2 (tail of list1) and join. Moving *head2 out of the Box
+            // frees the allocation; join immediately updates v3.prev to point
+            // to v2, so the stale back-pointer is never dereferenced.
+            let v2 = head1.next_mut().expect("v1").next_mut().expect("v2");
+            debug_assert!(matches!(v2.node_type(), NodeType::Tail));
+            v2.join(*head2);
+        }
+
+        let vals: Vec<u8> = {
+            let mut v = Vec::new();
+            let mut cur = head1.next();
+            while let Some(n) = cur {
+                v.push(*n.value().expect("data node"));
+                cur = n.next();
+            }
+            v
+        };
+        assert_eq!(vals, [10, 20, 30, 40]);
+
+        // Insta is incompatible with Miri
+        if !cfg!(miri) {
+            // All nodes height 0; head1 has no skip links.
+            assert_snapshot!(
+                head1.display()?,
+                @"
+                [03]: 00
+                [02]: 00
+                [01]: 00
+                [->]: 00 -> 01 -> 02 -> 03 -> 04
+                [<-]: 00 <- 01 <- 02 <- 03 <- 04
+
+                [00|03] None
+                [01|00] Some(10)
+                [02|00] Some(20)
+                [03|00] Some(30)
+                [04|00] Some(40)
+                "
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn join_empty_second_list() -> Result<()> {
+        // Build list1: head1 → v1(10) → v2(20), all height 0.
+        let mut head1 = Box::new(Node::<u8, MAX_LEVELS>::new(MAX_LEVELS));
+        unsafe {
+            head1.insert_after(Node::with_value(0, 10_u8));
+            head1
+                .next_mut()
+                .expect("v1")
+                .insert_after(Node::with_value(0, 20_u8));
+        }
+
+        // Joining an empty head2 (no nodes) must leave list1 unchanged.
+        let head2 = Box::new(Node::<u8, MAX_LEVELS>::new(MAX_LEVELS));
+        // SAFETY: Moving *head2 frees the allocation; join sees head.next = None
+        // and leaves self.next unchanged.
+        unsafe {
+            let v2 = head1.next_mut().expect("v1").next_mut().expect("v2");
+            debug_assert!(matches!(v2.node_type(), NodeType::Tail));
+            v2.join(*head2);
+        }
+
+        let vals: Vec<u8> = {
+            let mut v = Vec::new();
+            let mut cur = head1.next();
+            while let Some(n) = cur {
+                v.push(*n.value().expect("data node"));
+                cur = n.next();
+            }
+            v
+        };
+        assert_eq!(vals, [10, 20]);
+
+        // Insta is incompatible with Miri
+        if !cfg!(miri) {
+            assert_snapshot!(
+                head1.display()?,
+                @"
+                [03]: 00
+                [02]: 00
+                [01]: 00
+                [->]: 00 -> 01 -> 02
+                [<-]: 00 <- 01 <- 02
+
+                [00|03] None
+                [01|00] Some(10)
+                [02|00] Some(20)
+                "
+            );
+        }
+        Ok(())
+    }
+
+    // MARK: truncate_next
+
+    #[test]
+    fn truncate_next_on_middle_node() -> Result<()> {
+        // Build head → v1(10) → v2(20) → v3(30), all height 0 (no skip links).
+        let mut head = Box::new(Node::<u8, MAX_LEVELS>::new(MAX_LEVELS));
+        unsafe {
+            head.insert_after(Node::with_value(0, 10_u8));
+            head.next_mut()
+                .expect("v1")
+                .insert_after(Node::with_value(0, 20_u8));
+            head.next_mut()
+                .expect("v1")
+                .next_mut()
+                .expect("v2")
+                .insert_after(Node::with_value(0, 30_u8));
+        }
+
+        // Truncate after v1; v2 and v3 are freed.
+        // SAFETY: v1 is exclusively owned and no other references to v2/v3 exist.
+        unsafe { head.next_mut().expect("v1").truncate_next() };
+
+        let vals: Vec<u8> = {
+            let mut v = Vec::new();
+            let mut cur = head.next();
+            while let Some(n) = cur {
+                v.push(*n.value().expect("data node"));
+                cur = n.next();
+            }
+            v
+        };
+        assert_eq!(vals, [10]);
+
+        // Insta is incompatible with Miri
+        if !cfg!(miri) {
+            assert_snapshot!(
+                head.display()?,
+                @"
+                [03]: 00
+                [02]: 00
+                [01]: 00
+                [->]: 00 -> 01
+                [<-]: 00 <- 01
+
+                [00|03] None
+                [01|00] Some(10)
+                "
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn truncate_next_empties_list() -> Result<()> {
+        // Build head → v1(10), height 0.
+        let mut head = Box::new(Node::<u8, MAX_LEVELS>::new(MAX_LEVELS));
+        unsafe { head.insert_after(Node::with_value(0, 10_u8)) };
+
+        // Truncate directly on head; v1 is freed.
+        // SAFETY: head is exclusively owned and no other references to v1 exist.
+        unsafe {
+            head.truncate_next();
+        }
+
+        assert!(head.next().is_none());
+
+        // Insta is incompatible with Miri
+        if !cfg!(miri) {
+            assert_snapshot!(
+                head.display()?,
+                @"
+                [03]: 00
+                [02]: 00
+                [01]: 00
+                [->]: 00
+                [<-]: 00
+
+                [00|03] None
+                "
+            );
+        }
+        Ok(())
+    }
+
+    // MARK: take_next_chain / set_head_next
+
+    #[test]
+    fn take_next_chain_returns_none_on_empty_head() {
+        let mut head = Box::new(Node::<u8, MAX_LEVELS>::new(MAX_LEVELS));
+        // SAFETY: head is exclusively owned; there is no chain to detach.
+        let result = unsafe { head.take_next_chain() };
+        assert!(result.is_none());
+        assert!(head.next().is_none());
+    }
+
+    #[rstest]
+    fn take_next_chain_and_set_head_next_round_trip(
+        skiplist: Result<Box<Node<u8, MAX_LEVELS>>>,
+    ) -> Result<()> {
+        let mut head = skiplist?;
+
+        // Detach the chain from head.
+        // SAFETY: `head` is exclusively owned; no other references exist.
+        let first_nn = unsafe { head.take_next_chain() }.expect("fixture is non-empty");
+
+        assert!(head.next().is_none(), "head must be empty after take");
+        // SAFETY: `first_nn` is a live heap-allocated node whose ownership was
+        // transferred to us by take_next_chain.
+        assert!(
+            unsafe { first_nn.as_ref() }.prev().is_none(),
+            "first detached node must have no prev"
+        );
+
+        // Wire the chain onto a fresh head.
+        let mut head2 = Box::new(Node::<u8, MAX_LEVELS>::new(MAX_LEVELS));
+        // SAFETY: head2 has no current successor; first_nn is the exclusive
+        // owner of the detached chain.
+        unsafe { head2.set_head_next(first_nn) };
+
+        let vals: Vec<u8> = {
+            let mut v = Vec::new();
+            let mut cur = head2.next();
+            while let Some(n) = cur {
+                v.push(*n.value().expect("data node"));
+                cur = n.next();
+            }
+            v
+        };
+        assert_eq!(vals, [10, 20, 30, 40]);
+
+        // Insta is incompatible with Miri
+        if !cfg!(miri) {
+            // head2 is a fresh sentinel with no skip links.  The data-node
+            // inter-node links are stale relative to the old head but they do
+            // not affect the prev/next chain display.
+            assert_snapshot!(
+                head2.display()?,
+                @"
+                [03]: 00
+                [02]: 00
+                [01]: 00
+                [->]: 00 -> 01 -> 02 -> 03 -> 04
+                [<-]: 00 <- 01 <- 02 <- 03 <- 04
+
+                [00|03] None
+                [01|00] Some(10)
+                [02|01] Some(20)
+                [03|01] Some(30)
+                [04|00] Some(40)
+                "
+            );
+        }
+        Ok(())
+    }
+
+    // MARK: rebuild
+
+    #[rstest]
+    fn rebuild_produces_correct_links(skiplist: Result<Box<Node<u8, MAX_LEVELS>>>) -> Result<()> {
+        let mut head = skiplist?;
+
+        // Clear all skip links so that rebuild starts from a blank slate.
+        for link in head.links_mut() {
+            *link = None;
+        }
+        let mut cur = unsafe { head.next_mut() };
+        while let Some(n) = cur {
+            for link in n.links_mut() {
+                *link = None;
+            }
+            cur = unsafe { n.next_mut() };
+        }
+
+        // SAFETY: head is exclusively owned; all data nodes are live heap
+        // allocations reachable through the next chain.
+        let tail = unsafe { head.rebuild() };
+
+        assert_eq!(
+            unsafe { tail.expect("non-empty").as_ref() }
+                .value()
+                .copied(),
+            Some(40)
+        );
+
+        // Insta is incompatible with Miri
+        if !cfg!(miri) {
+            // Links rebuilt from node heights: same outcome as filter_rebuild_keep_all.
+            assert_snapshot!(
+                head.display()?,
+                @"
+                [03]: 00
+                [02]: 00
+                [01]: 00 -------> 02 -> 03
+                [->]: 00 -> 01 -> 02 -> 03 -> 04
+                [<-]: 00 <- 01 <- 02 <- 03 <- 04
+
+                [00|03] None
+                [01|00] Some(10)
+                [02|01] Some(20)
+                [03|01] Some(30)
+                [04|00] Some(40)
+                "
+            );
+        }
         Ok(())
     }
 }
