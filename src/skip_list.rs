@@ -1,6 +1,6 @@
 //! Index-based skip list.
 //!
-//! This module provides [`SkipList<T, G>`], a general-purpose sequence with
+//! This module provides [`SkipList`], a general-purpose sequence with
 //! O(log n) insert, remove, and random access by index.  It is a useful
 //! alternative to [`Vec`] when elements are frequently inserted or removed in
 //! the middle of the list while indexed access is still needed.
@@ -46,13 +46,15 @@ const DEFAULT_P: f64 = 0.5;
 
 /// An index-based skip list.
 ///
-/// `SkipList<T, G>` stores elements in insertion order and provides O(log n)
-/// insert, remove, and indexed access.  Unlike [`Vec`], inserting or removing
-/// in the middle does not shift elements; unlike a plain linked list,
-/// arbitrary-index access is O(log n) rather than O(n).
+/// `SkipList<T, N, G>` stores elements in insertion order and provides `$O(\log
+/// n)$` insert, remove, and indexed access.  Unlike [`Vec`], inserting or
+/// removing in the middle does not shift elements; unlike a plain linked list,
+/// arbitrary-index access is `$O(\log n)$` rather than `$O(n)$`.
 ///
-/// The generic parameter `G` controls how node tower heights are chosen.  The
-/// default ([`Geometric`]) works well in practice; supply a custom
+/// The const generic `$N$` (default `16`) sets the maximum number of skip-link
+/// levels per node; increase it when you expect more than `$\sim 2^N$`
+/// elements. The type parameter `G` controls how node tower heights are chosen.
+/// The default ([`Geometric`]) works well in practice; supply a custom
 /// [`LevelGenerator`] via [`SkipList::with_level_generator`] if you need
 /// different behaviour.
 ///
@@ -64,14 +66,15 @@ const DEFAULT_P: f64 = 0.5;
 /// let list = SkipList::<u32>::new();
 /// assert!(list.is_empty());
 /// ```
-pub struct SkipList<T, G: LevelGenerator = Geometric> {
+pub struct SkipList<T, const N: usize = 16, G: LevelGenerator = Geometric> {
     /// Sentinel head node. Never holds a value; its `links` array has length
     /// equal to the maximum number of levels.
-    head: Box<Node<T>>,
+    head: Box<Node<T, N>>,
     /// Non-owning pointer to the last data node, or `None` when the list is
-    /// empty.  Maintained by every insert and remove operation to provide O(1)
-    /// [`back`](SkipList::back) / [`back_mut`](SkipList::back_mut) access.
-    tail: Option<NonNull<Node<T>>>,
+    /// empty.  Maintained by every insert and remove operation to provide
+    /// `$O(1)$` [`back`](SkipList::back) / [`back_mut`](SkipList::back_mut)
+    /// access.
+    tail: Option<NonNull<Node<T, N>>>,
     /// Cached element count. Updated by every insert / remove operation.
     len: usize,
     /// Level generator used to determine the tower height of each new node.
@@ -80,9 +83,8 @@ pub struct SkipList<T, G: LevelGenerator = Geometric> {
 
 // MARK: Constructors (default level generator)
 
-impl<T> SkipList<T> {
-    /// Creates an empty skip list with the default level generator
-    /// (`Geometric { levels: 16, p: 0.5 }`).
+impl<T, const N: usize> SkipList<T, N, Geometric> {
+    /// Creates an empty skip list with default settings.
     ///
     /// # Examples
     ///
@@ -112,7 +114,12 @@ impl<T> SkipList<T> {
     /// wasting memory on unnecessary levels for small lists or degrading for
     /// large ones.
     ///
-    /// The default `p = 0.5` promotion probability is used.
+    /// By default, there is an upper limit of `N = 16` levels, which is
+    /// optimal for up to about ~2^16 = 65,536 elements. If you need
+    /// significantly more levels, increase the const generic parameter `N`
+    /// when declaring the list type, e.g. `SkipList<T, 32>`.  The
+    /// `with_capacity` method will automatically clamp the level count to `N`
+    /// to avoid overrunning the node links array.
     ///
     /// # Examples
     ///
@@ -124,7 +131,7 @@ impl<T> SkipList<T> {
     /// assert!(list.is_empty());
     ///
     /// // Expect a large number of elements.
-    /// let big = SkipList::<i32>::with_capacity(240_000_000);
+    /// let big = SkipList::<i32, 32>::with_capacity(240_000_000);
     /// assert!(big.is_empty());
     /// ```
     ///
@@ -153,11 +160,14 @@ impl<T> SkipList<T> {
                 usize::BITS.saturating_sub(capacity.saturating_sub(1).leading_zeros()) as usize;
             ceil_log2.saturating_add(1)
         };
+        // Clamp to the compile-time capacity N so that the node links array is
+        // never overrun.  For capacities larger than ~2^N, this means fewer
+        // levels than ideal, but the list remains correct.
         #[expect(
             clippy::expect_used,
             reason = "`levels` is always >= 1 and DEFAULT_P is a valid probability"
         )]
-        let generator = Geometric::new(levels, DEFAULT_P)
+        let generator = Geometric::new(levels.min(N), DEFAULT_P)
             .expect("`levels >= 1` and `DEFAULT_P` are valid Geometric parameters");
         Self::with_level_generator(generator)
     }
@@ -165,7 +175,7 @@ impl<T> SkipList<T> {
 
 // MARK: Generic methods available for any LevelGenerator
 
-impl<T, G: LevelGenerator> SkipList<T, G> {
+impl<T, G: LevelGenerator, const N: usize> SkipList<T, N, G> {
     /// Creates an empty skip list driven by the supplied level generator.
     ///
     /// The generator controls the distribution of tower heights assigned to
@@ -187,8 +197,12 @@ impl<T, G: LevelGenerator> SkipList<T, G> {
     #[must_use]
     pub fn with_level_generator(generator: G) -> Self {
         let max_levels = generator.total();
+        debug_assert!(
+            max_levels <= N,
+            "generator.total() ({max_levels}) exceeds node capacity ({N})"
+        );
         Self {
-            head: Box::new(Node::new(max_levels)),
+            head: Box::new(Node::new(max_levels.min(N))),
             tail: None,
             len: 0,
             generator,
@@ -239,7 +253,7 @@ impl<T, G: LevelGenerator> SkipList<T, G> {
                   the expect fires only on internal invariant violations"
     )]
     #[inline]
-    fn node_ptr_at(&self, index: usize) -> NonNull<Node<T>> {
+    fn node_ptr_at(&self, index: usize) -> NonNull<Node<T, N>> {
         debug_assert!(
             index < self.len,
             "index {index} out of bounds (len={})",
@@ -254,7 +268,7 @@ impl<T, G: LevelGenerator> SkipList<T, G> {
 
 // MARK: Default
 
-impl<T> Default for SkipList<T> {
+impl<T, const N: usize> Default for SkipList<T, N, Geometric> {
     #[inline]
     fn default() -> Self {
         Self::new()

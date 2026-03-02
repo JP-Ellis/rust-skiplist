@@ -13,7 +13,7 @@ use crate::{
     skip_list::SkipList,
 };
 
-impl<T, G: LevelGenerator> SkipList<T, G> {
+impl<T, G: LevelGenerator, const N: usize> SkipList<T, N, G> {
     /// Inserts `value` at the front of the list.
     ///
     /// The new element becomes the element at index 0, shifting all existing
@@ -58,7 +58,7 @@ impl<T, G: LevelGenerator> SkipList<T, G> {
         // SAFETY: insert_after placed new_node immediately after head on the heap.
         // Converting the &mut to NonNull releases the borrow on this line, so
         // no live &mut exists when we later obtain raw pointers to both nodes.
-        let new_node_ptr: NonNull<Node<T>> = unsafe {
+        let new_node_ptr: NonNull<Node<T, N>> = unsafe {
             NonNull::from(
                 self.head
                     .next_mut()
@@ -86,8 +86,8 @@ impl<T, G: LevelGenerator> SkipList<T, G> {
         // SAFETY: head_ptr and new_raw point to distinct, heap-allocated Node<T>
         // values.  No safe references to either node exist during this block.
         unsafe {
-            let head_ptr: *mut Node<T> = &raw mut *self.head;
-            let new_raw: *mut Node<T> = new_node_ptr.as_ptr();
+            let head_ptr: *mut Node<T, N> = &raw mut *self.head;
+            let new_raw: *mut Node<T, N> = new_node_ptr.as_ptr();
 
             for l in 0..height {
                 let old = (*head_ptr).links_mut()[l].take();
@@ -157,17 +157,17 @@ impl<T, G: LevelGenerator> SkipList<T, G> {
             visitor.into_parts()
         };
 
-        // SAFETY: All raw pointers come from NonNull<Node<T>> captured during
+        // SAFETY: All raw pointers come from NonNull<Node<T, N>> captured during
         // traversal.  They originate from heap allocations owned by this SkipList.
         // No safe &mut references to any node exist while this block runs.
-        let new_node_nonnull: NonNull<Node<T>> = unsafe {
+        let new_node_nonnull: NonNull<Node<T, N>> = unsafe {
             // `tail_ptr` is the rightmost node (or head if the list is empty).
             (*tail_ptr.as_ptr()).insert_after(Node::with_value(height, value));
 
             // Obtain a stable raw pointer to new_node.  Converting the &mut
             // returned by next_mut() to NonNull releases the borrow on this line,
             // so no live &mut exists when we later use new_raw.
-            let new_raw: *mut Node<T> = NonNull::from(
+            let new_raw: *mut Node<T, N> = NonNull::from(
                 (*tail_ptr.as_ptr())
                     .next_mut()
                     .expect("node was just inserted after tail"),
@@ -253,12 +253,12 @@ impl<T, G: LevelGenerator> SkipList<T, G> {
         // runs.  head_ptr and front_ptr are distinct heap allocations; all slice
         // accesses are bounded by front_height ≤ max_levels = links.len().
         let value = unsafe {
-            let head_ptr: *mut Node<T> = &raw mut *self.head;
+            let head_ptr: *mut Node<T, N> = &raw mut *self.head;
 
             // front_ptr is the node at rank 1.  The list is non-empty, so
             // head.next is Some.  Converting the &mut to NonNull releases the
             // borrow immediately, leaving no live &mut when we later use head_ptr.
-            let front_ptr: *mut Node<T> =
+            let front_ptr: *mut Node<T, N> =
                 NonNull::from((*head_ptr).next_mut().expect("list is non-empty")).as_ptr();
 
             let front_height = (*front_ptr).level();
@@ -348,13 +348,13 @@ impl<T, G: LevelGenerator> SkipList<T, G> {
             visitor.into_parts()
         };
 
-        // SAFETY: All raw pointers come from NonNull<Node<T>> captured during
+        // SAFETY: All raw pointers come from NonNull<Node<T, N>> captured during
         // traversal.  They originate from heap allocations owned by this SkipList.
         // No safe &mut references to any node exist while this block runs.
         let (value, pred0) = unsafe {
             // The tail is the node at level 0 immediately after precursors[0].
             // The list is non-empty, so this link must exist.
-            let back_ptr: *mut Node<T> = NonNull::from(
+            let back_ptr: *mut Node<T, N> = NonNull::from(
                 (*precursors[0].as_ptr()).links()[0]
                     .as_ref()
                     .expect("precursors[0].links[0] points to tail in a non-empty list")
@@ -453,7 +453,7 @@ mod tests {
         list.push_front(10);
         // After first push: head.links[0] → node(10) at distance 1
         {
-            let link: &Link<_> = list.head.links()[0].as_ref().expect("head link");
+            let link: &Link<_, _> = list.head.links()[0].as_ref().expect("head link");
             assert_eq!(link.distance().get(), 1);
             assert_eq!(link.node().value(), Some(&10));
         }
@@ -461,7 +461,7 @@ mod tests {
         list.push_front(20);
         // After second push: head.links[0] → node(20) at distance 1
         {
-            let link: &Link<_> = list.head.links()[0].as_ref().expect("head link");
+            let link: &Link<_, _> = list.head.links()[0].as_ref().expect("head link");
             assert_eq!(link.distance().get(), 1);
             assert_eq!(link.node().value(), Some(&20));
         }
@@ -469,7 +469,7 @@ mod tests {
         {
             let front = list.head.next().expect("front node");
             assert_eq!(front.value(), Some(&20));
-            let link: &Link<_> = front.links()[0].as_ref().expect("front link");
+            let link: &Link<_, _> = front.links()[0].as_ref().expect("front link");
             assert_eq!(link.distance().get(), 1);
             assert_eq!(link.node().value(), Some(&10));
         }
@@ -533,7 +533,7 @@ mod tests {
         list.push_back(10);
         // After first push: head.links[0] → node(10) at distance 1
         {
-            let link: &Link<_> = list.head.links()[0].as_ref().expect("head link");
+            let link: &Link<_, _> = list.head.links()[0].as_ref().expect("head link");
             assert_eq!(link.distance().get(), 1);
             assert_eq!(link.node().value(), Some(&10));
         }
@@ -541,7 +541,7 @@ mod tests {
         list.push_back(20);
         // head.links[0] still → node(10) at distance 1 (unchanged)
         {
-            let link: &Link<_> = list.head.links()[0].as_ref().expect("head link");
+            let link: &Link<_, _> = list.head.links()[0].as_ref().expect("head link");
             assert_eq!(link.distance().get(), 1);
             assert_eq!(link.node().value(), Some(&10));
         }
@@ -549,7 +549,7 @@ mod tests {
         {
             let front = list.head.next().expect("front node");
             assert_eq!(front.value(), Some(&10));
-            let link: &Link<_> = front.links()[0].as_ref().expect("front link");
+            let link: &Link<_, _> = front.links()[0].as_ref().expect("front link");
             assert_eq!(link.distance().get(), 1);
             assert_eq!(link.node().value(), Some(&20));
         }
@@ -654,7 +654,7 @@ mod tests {
         assert_eq!(list.pop_front(), Some(10));
         assert_eq!(list.len(), 2);
         {
-            let link: &Link<_> = list.head.links()[0]
+            let link: &Link<_, _> = list.head.links()[0]
                 .as_ref()
                 .expect("head link after 1st pop");
             assert_eq!(link.distance().get(), 1);
@@ -665,7 +665,7 @@ mod tests {
         assert_eq!(list.pop_front(), Some(20));
         assert_eq!(list.len(), 1);
         {
-            let link: &Link<_> = list.head.links()[0]
+            let link: &Link<_, _> = list.head.links()[0]
                 .as_ref()
                 .expect("head link after 2nd pop");
             assert_eq!(link.distance().get(), 1);
@@ -765,7 +765,7 @@ mod tests {
         assert_eq!(list.len(), 2);
         {
             // head.links[0] still → node(10) at distance 1
-            let link: &Link<_> = list.head.links()[0]
+            let link: &Link<_, _> = list.head.links()[0]
                 .as_ref()
                 .expect("head link after 1st pop_back");
             assert_eq!(link.distance().get(), 1);
@@ -774,7 +774,7 @@ mod tests {
         {
             // node(10).links[0] → node(20) at distance 1
             let n1 = list.head.next().expect("n1");
-            let link: &Link<_> = n1.links()[0].as_ref().expect("n1 link");
+            let link: &Link<_, _> = n1.links()[0].as_ref().expect("n1 link");
             assert_eq!(link.distance().get(), 1);
             assert_eq!(link.node().value(), Some(&20));
         }
@@ -789,7 +789,7 @@ mod tests {
         assert_eq!(list.len(), 1);
         {
             // head.links[0] → node(10) at distance 1
-            let link: &Link<_> = list.head.links()[0]
+            let link: &Link<_, _> = list.head.links()[0]
                 .as_ref()
                 .expect("head link after 2nd pop_back");
             assert_eq!(link.distance().get(), 1);

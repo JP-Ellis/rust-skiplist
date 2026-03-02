@@ -13,7 +13,7 @@ use crate::{
     skip_list::SkipList,
 };
 
-impl<T, G: LevelGenerator> SkipList<T, G> {
+impl<T, G: LevelGenerator, const N: usize> SkipList<T, N, G> {
     /// Removes all elements from the list.
     ///
     /// The level generator is preserved; elements can be inserted again
@@ -79,7 +79,6 @@ impl<T, G: LevelGenerator> SkipList<T, G> {
     )]
     #[expect(
         clippy::indexing_slicing,
-        clippy::needless_range_loop,
         reason = "l < max_levels = head.links.len(); every node in precursors[] was reached \
                   via a level-l link so its links.len() > l; all accesses are in bounds; \
                   l is used for both precursors[l] and links_mut()[l] so a plain index loop is \
@@ -112,13 +111,13 @@ impl<T, G: LevelGenerator> SkipList<T, G> {
             visitor.into_parts()
         };
 
-        // SAFETY: All raw pointers come from NonNull<Node<T>> captured during
+        // SAFETY: All raw pointers come from NonNull<Node<T, N>> captured during
         // traversal.  They originate from heap allocations owned by this SkipList.
         // No safe references to any node exist while this block runs.
-        let new_tail_ptr: *mut Node<T> = unsafe {
+        let new_tail_ptr: *mut Node<T, N> = unsafe {
             // The new tail is the level-0 successor of precursors[0].
             // It exists because 0 < len < self.len.
-            let new_tail_ptr: *mut Node<T> = NonNull::from(
+            let new_tail_ptr: *mut Node<T, N> = NonNull::from(
                 (*precursors[0].as_ptr()).links()[0]
                     .as_ref()
                     .expect("the node at rank `len` exists because len < self.len")
@@ -235,7 +234,7 @@ impl<T, G: LevelGenerator> SkipList<T, G> {
             // exist.  take_next_chain detaches cleanly.  set_head_next
             // wires the first node to result.head.
             unsafe {
-                let head_ptr: *mut Node<T> = &raw mut *self.head;
+                let head_ptr: *mut Node<T, N> = &raw mut *self.head;
                 if let Some(first_nn) = (*head_ptr).take_next_chain() {
                     result.head.set_head_next(first_nn);
                 }
@@ -269,7 +268,7 @@ impl<T, G: LevelGenerator> SkipList<T, G> {
         // a valid data node.  We hold &mut self, so exclusive access is
         // guaranteed throughout.
         unsafe {
-            let pivot: *mut Node<T> = self.node_ptr_at(at.saturating_sub(1)).as_ptr();
+            let pivot: *mut Node<T, N> = self.node_ptr_at(at.saturating_sub(1)).as_ptr();
 
             // Detach nodes [at ..] from the pivot.  Guaranteed to succeed
             // because at < self.len means the pivot has at least one
@@ -381,8 +380,8 @@ impl<T, G: LevelGenerator> SkipList<T, G> {
         // disjoint `Box<Node<T>>` allocation.  Within the block each node field is
         // accessed at most once, so no simultaneous aliasing occurs.
         unsafe {
-            let head_ptr: *mut Node<T> = &raw mut *self.head;
-            let other_head_ptr: *mut Node<T> = &raw mut *other.head;
+            let head_ptr: *mut Node<T, N> = &raw mut *self.head;
+            let other_head_ptr: *mut Node<T, N> = &raw mut *other.head;
 
             // Step 1: detach other's node chain from other's sentinel head.
             let first_nn = (*other_head_ptr)

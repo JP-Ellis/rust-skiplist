@@ -19,18 +19,19 @@ use crate::node::Node;
 /// This is a non-owning reference: dropping a `Link` does not drop or
 /// deallocate the target node.
 #[derive(Debug)]
-pub(crate) struct Link<V> {
-    /// The next node in the list.
-    ///
-    /// This is _not_ an owning reference and therefore when the link is
-    /// dropped, the node should not be dropped.
-    node: NonNull<Node<V>>,
-    /// Distance to the next node.
+pub(crate) struct Link<V, const N: usize> {
+    /// Raw, non-owning pointer to the target node.
+    // Not an owning reference; the link owner must not free this node.
+    node: NonNull<Node<V, N>>,
+    /// Number of list positions between the link owner and the target.
+    // Invariant: distance >= 1, enforced by NonZeroUsize.
     distance: NonZeroUsize,
 }
 
-impl<V> Link<V> {
-    /// Create a new link.
+impl<V, const N: usize> Link<V, N> {
+    /// Create a new link pointing to `node` at the given `distance`.
+    ///
+    /// # Arguments
     ///
     /// * `node` - Raw pointer to the target node. The caller must ensure the
     ///   pointer is valid for the lifetime of this link. The pointer is stored
@@ -41,7 +42,7 @@ impl<V> Link<V> {
     ///
     /// - `next`: The node that this link points to.
     /// - `distance`: The distance to the next node.
-    pub(crate) fn new(node: &Node<V>, distance: usize) -> Result<Self, LinkError> {
+    pub(crate) fn new(node: &Node<V, N>, distance: usize) -> Result<Self, LinkError> {
         Ok(Link {
             node: NonNull::from(node),
             distance: NonZeroUsize::new(distance).ok_or(LinkError::InvalidDistance)?,
@@ -49,7 +50,7 @@ impl<V> Link<V> {
     }
 
     /// Get a reference to the next node.
-    pub(crate) fn node(&self) -> &Node<V> {
+    pub(crate) fn node(&self) -> &Node<V, N> {
         // SAFETY: The pointer can never be null, and the value is
         // [convertible](https://doc.rust-lang.org/stable/std/ptr/index.html#pointer-to-reference-conversion).
         unsafe { self.node.as_ref() }
@@ -62,7 +63,7 @@ impl<V> Link<V> {
     /// The caller must ensure that the reference is not used elsewhere while
     /// this mutable reference is held. In most cases, this is not a problem as
     /// the caller will have a mutable reference to the source node.
-    pub(crate) unsafe fn node_mut(&mut self) -> &mut Node<V> {
+    pub(crate) unsafe fn node_mut(&mut self) -> &mut Node<V, N> {
         // SAFETY: The pointer can never be null, and the value is
         // [convertible](https://doc.rust-lang.org/stable/std/ptr/index.html#pointer-to-reference-conversion).
         unsafe { self.node.as_mut() }
@@ -136,7 +137,7 @@ mod tests {
 
     #[test]
     fn link_new() -> Result<()> {
-        let node: Node<i32> = Node::new(3);
+        let node: Node<i32, 3> = Node::new(3);
         let link = Link::new(&node, 1)?;
         assert_eq!(ptr::from_ref(link.node()), ptr::from_ref(&node));
         assert_eq!(
@@ -148,7 +149,7 @@ mod tests {
 
     #[test]
     fn link_increment_distance() -> Result<()> {
-        let node: Node<i32> = Node::new(3);
+        let node: Node<i32, 3> = Node::new(3);
         let mut link = Link::new(&node, 1)?;
         assert_eq!(
             link.increment_distance()?,
@@ -159,7 +160,7 @@ mod tests {
 
     #[test]
     fn link_decrement_distance() -> Result<()> {
-        let node: Node<i32> = Node::new(3);
+        let node: Node<i32, 3> = Node::new(3);
         let mut link = Link::new(&node, 2)?;
         assert_eq!(
             link.decrement_distance()?,
@@ -170,7 +171,7 @@ mod tests {
 
     #[test]
     fn link_decrement_distance_underflow() -> Result<()> {
-        let node: Node<i32> = Node::new(3);
+        let node: Node<i32, 3> = Node::new(3);
         let mut link = Link::new(&node, 1)?;
         assert!(matches!(
             link.decrement_distance(),
@@ -181,7 +182,7 @@ mod tests {
 
     #[test]
     fn link_increment_distance_overflow() -> Result<()> {
-        let node: Node<i32> = Node::new(3);
+        let node: Node<i32, 3> = Node::new(3);
         let mut link = Link::new(&node, usize::MAX)?;
         assert!(matches!(
             link.increment_distance(),

@@ -16,7 +16,7 @@ use crate::{
     skip_list::SkipList,
 };
 
-impl<T, G: LevelGenerator> SkipList<T, G> {
+impl<T, G: LevelGenerator, const N: usize> SkipList<T, N, G> {
     // MARK: Iteration
 
     /// Returns an iterator over shared references to the elements of the list,
@@ -46,7 +46,7 @@ impl<T, G: LevelGenerator> SkipList<T, G> {
     /// assert_eq!(reversed, [3, 2, 1]);
     /// ```
     #[inline]
-    pub fn iter(&self) -> Iter<'_, T> {
+    pub fn iter(&self) -> Iter<'_, T, N> {
         Iter {
             front: self.head.next().map(NonNull::from),
             back: self.tail,
@@ -83,7 +83,7 @@ impl<T, G: LevelGenerator> SkipList<T, G> {
     /// assert_eq!(collected, [2, 4, 6]);
     /// ```
     #[inline]
-    pub fn iter_mut(&mut self) -> IterMut<'_, T> {
+    pub fn iter_mut(&mut self) -> IterMut<'_, T, N> {
         IterMut {
             front: self.head.next().map(NonNull::from),
             back: self.tail,
@@ -120,7 +120,7 @@ impl<T, G: LevelGenerator> SkipList<T, G> {
     /// assert_eq!(reversed, [4, 3, 2]);
     /// ```
     #[inline]
-    pub fn range<R: RangeBounds<usize>>(&self, range: R) -> Iter<'_, T> {
+    pub fn range<R: RangeBounds<usize>>(&self, range: R) -> Iter<'_, T, N> {
         let start = match range.start_bound() {
             Bound::Included(&s) => s,
             Bound::Excluded(&s) => s.saturating_add(1),
@@ -185,7 +185,7 @@ impl<T, G: LevelGenerator> SkipList<T, G> {
     /// assert_eq!(collected, [1, 20, 30, 40, 5]);
     /// ```
     #[inline]
-    pub fn range_mut<R: RangeBounds<usize>>(&mut self, range: R) -> IterMut<'_, T> {
+    pub fn range_mut<R: RangeBounds<usize>>(&mut self, range: R) -> IterMut<'_, T, N> {
         let start = match range.start_bound() {
             Bound::Included(&s) => s,
             Bound::Excluded(&s) => s.saturating_add(1),
@@ -353,7 +353,7 @@ impl<T, G: LevelGenerator> SkipList<T, G> {
     /// assert_eq!(remaining, [1, 3, 5]);
     /// ```
     #[inline]
-    pub fn extract_if<F>(&mut self, pred: F) -> ExtractIf<'_, T, G, F>
+    pub fn extract_if<F>(&mut self, pred: F) -> ExtractIf<'_, T, G, F, N>
     where
         F: FnMut(&mut T) -> bool,
     {
@@ -369,9 +369,9 @@ impl<T, G: LevelGenerator> SkipList<T, G> {
 
 // MARK: IntoIterator
 
-impl<'a, T, G: LevelGenerator> IntoIterator for &'a SkipList<T, G> {
+impl<'a, T, G: LevelGenerator, const N: usize> IntoIterator for &'a SkipList<T, N, G> {
     type Item = &'a T;
-    type IntoIter = Iter<'a, T>;
+    type IntoIter = Iter<'a, T, N>;
 
     #[inline]
     fn into_iter(self) -> Self::IntoIter {
@@ -379,9 +379,9 @@ impl<'a, T, G: LevelGenerator> IntoIterator for &'a SkipList<T, G> {
     }
 }
 
-impl<'a, T, G: LevelGenerator> IntoIterator for &'a mut SkipList<T, G> {
+impl<'a, T, G: LevelGenerator, const N: usize> IntoIterator for &'a mut SkipList<T, N, G> {
     type Item = &'a mut T;
-    type IntoIter = IterMut<'a, T>;
+    type IntoIter = IterMut<'a, T, N>;
 
     #[inline]
     fn into_iter(self) -> Self::IntoIter {
@@ -389,9 +389,9 @@ impl<'a, T, G: LevelGenerator> IntoIterator for &'a mut SkipList<T, G> {
     }
 }
 
-impl<T, G: LevelGenerator> IntoIterator for SkipList<T, G> {
+impl<T, G: LevelGenerator, const N: usize> IntoIterator for SkipList<T, N, G> {
     type Item = T;
-    type IntoIter = IntoIter<T, G>;
+    type IntoIter = IntoIter<T, N, G>;
 
     #[inline]
     fn into_iter(self) -> Self::IntoIter {
@@ -423,13 +423,13 @@ impl<T, G: LevelGenerator> IntoIterator for SkipList<T, G> {
 /// assert_eq!(iter.next(), None);
 /// ```
 #[must_use = "iterators are lazy and do nothing unless consumed"]
-pub struct Iter<'a, T> {
+pub struct Iter<'a, T, const N: usize = 16> {
     /// Pointer to the next element to yield from the front, or `None` when
     /// the iterator is exhausted or the list was empty.
-    front: Option<NonNull<Node<T>>>,
+    front: Option<NonNull<Node<T, N>>>,
     /// Pointer to the next element to yield from the back, or `None` when
     /// the iterator is exhausted or the list was empty.
-    back: Option<NonNull<Node<T>>>,
+    back: Option<NonNull<Node<T, N>>>,
     /// Number of elements remaining.  Guards against yielding more than
     /// `len` items even when `front` and `back` pointers become stale after
     /// crossing mid-list during interleaved `next`/`next_back` calls.
@@ -443,15 +443,15 @@ pub struct Iter<'a, T> {
 // Sending it to another thread requires T: Sync because the receiving
 // thread will read T values through a shared reference derived from the
 // raw pointer carried by this type.
-unsafe impl<T: Sync> Send for Iter<'_, T> {}
+unsafe impl<T: Sync, const N: usize> Send for Iter<'_, T, N> {}
 
 // SAFETY: Sharing &Iter<'a, T> across threads is safe when T: Sync.
 // Concurrent callers need &mut Iter to advance it, so data races on the
 // iterator's own fields are prevented by the requirement for exclusive
 // access through &mut.
-unsafe impl<T: Sync> Sync for Iter<'_, T> {}
+unsafe impl<T: Sync, const N: usize> Sync for Iter<'_, T, N> {}
 
-impl<T> Clone for Iter<'_, T> {
+impl<T, const N: usize> Clone for Iter<'_, T, N> {
     #[inline]
     fn clone(&self) -> Self {
         Iter {
@@ -463,14 +463,14 @@ impl<T> Clone for Iter<'_, T> {
     }
 }
 
-impl<T: fmt::Debug> fmt::Debug for Iter<'_, T> {
+impl<T: fmt::Debug, const N: usize> fmt::Debug for Iter<'_, T, N> {
     #[inline]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_list().entries(self.clone()).finish()
     }
 }
 
-impl<'a, T> Iterator for Iter<'a, T> {
+impl<'a, T, const N: usize> Iterator for Iter<'a, T, N> {
     type Item = &'a T;
 
     #[inline]
@@ -479,13 +479,13 @@ impl<'a, T> Iterator for Iter<'a, T> {
             return None;
         }
         let front_ptr = self.front?;
-        // SAFETY: front_ptr was derived from a heap-allocated Node<T> owned
+        // SAFETY: front_ptr was derived from a heap-allocated Node<T, N> owned
         // by the SkipList that created this Iter.  The iterator holds a
         // shared borrow of that list for lifetime 'a, ensuring every node
         // remains allocated and reachable for the iterator's entire lifetime.
         // No &mut references to any node exist while this shared Iter is
         // alive.
-        let node: &'a Node<T> = unsafe { front_ptr.as_ref() };
+        let node: &'a Node<T, N> = unsafe { front_ptr.as_ref() };
         self.front = node.next().map(NonNull::from);
         self.len = self.len.saturating_sub(1);
         node.value()
@@ -497,7 +497,7 @@ impl<'a, T> Iterator for Iter<'a, T> {
     }
 }
 
-impl<'a, T> DoubleEndedIterator for Iter<'a, T> {
+impl<'a, T, const N: usize> DoubleEndedIterator for Iter<'a, T, N> {
     #[inline]
     fn next_back(&mut self) -> Option<Self::Item> {
         if self.len == 0 {
@@ -506,7 +506,7 @@ impl<'a, T> DoubleEndedIterator for Iter<'a, T> {
         let back_ptr = self.back?;
         // SAFETY: Same provenance argument as front_ptr in next().
         // back_ptr points to a live data node for the 'a lifetime.
-        let node: &'a Node<T> = unsafe { back_ptr.as_ref() };
+        let node: &'a Node<T, N> = unsafe { back_ptr.as_ref() };
         // Walk backward.  The head sentinel has no value; the filter ensures
         // `back` becomes None when we step past the first data node.
         // `len` independently prevents accessing a stale `back` pointer.
@@ -519,9 +519,9 @@ impl<'a, T> DoubleEndedIterator for Iter<'a, T> {
     }
 }
 
-impl<T> ExactSizeIterator for Iter<'_, T> {}
+impl<T, const N: usize> ExactSizeIterator for Iter<'_, T, N> {}
 
-impl<T> FusedIterator for Iter<'_, T> {}
+impl<T, const N: usize> FusedIterator for Iter<'_, T, N> {}
 
 // MARK: IterMut
 
@@ -551,13 +551,13 @@ impl<T> FusedIterator for Iter<'_, T> {}
 /// assert_eq!(iter.next(), None);
 /// ```
 #[must_use = "iterators are lazy and do nothing unless consumed"]
-pub struct IterMut<'a, T> {
+pub struct IterMut<'a, T, const N: usize = 16> {
     /// Pointer to the next element to yield from the front, or `None` when
     /// the iterator is exhausted or the list was empty.
-    front: Option<NonNull<Node<T>>>,
+    front: Option<NonNull<Node<T, N>>>,
     /// Pointer to the next element to yield from the back, or `None` when
     /// the iterator is exhausted or the list was empty.
-    back: Option<NonNull<Node<T>>>,
+    back: Option<NonNull<Node<T, N>>>,
     /// Number of elements remaining.  Guards against yielding more than
     /// `len` items even when `front` and `back` pointers become stale after
     /// crossing mid-list during interleaved `next`/`next_back` calls.
@@ -570,14 +570,14 @@ pub struct IterMut<'a, T> {
 // SAFETY: IterMut<'a, T> yields `&'a mut T` (exclusive references).
 // Sending it to another thread requires T: Send because the receiving
 // thread will get exclusive access to T values through those references.
-unsafe impl<T: Send> Send for IterMut<'_, T> {}
+unsafe impl<T: Send, const N: usize> Send for IterMut<'_, T, N> {}
 
 // SAFETY: Sharing &IterMut<'a, T> across threads is safe when T: Sync.
 // Advancing the iterator requires &mut IterMut, so concurrent advancement
 // is prevented by the requirement for exclusive access.
-unsafe impl<T: Sync> Sync for IterMut<'_, T> {}
+unsafe impl<T: Sync, const N: usize> Sync for IterMut<'_, T, N> {}
 
-impl<T: fmt::Debug> fmt::Debug for IterMut<'_, T> {
+impl<T: fmt::Debug, const N: usize> fmt::Debug for IterMut<'_, T, N> {
     #[inline]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // Traverse via shared references for the purposes of display.
@@ -601,7 +601,7 @@ impl<T: fmt::Debug> fmt::Debug for IterMut<'_, T> {
     }
 }
 
-impl<'a, T> Iterator for IterMut<'a, T> {
+impl<'a, T, const N: usize> Iterator for IterMut<'a, T, N> {
     type Item = &'a mut T;
 
     #[inline]
@@ -610,13 +610,13 @@ impl<'a, T> Iterator for IterMut<'a, T> {
             return None;
         }
         let mut front_ptr = self.front?;
-        // SAFETY: front_ptr was derived from a heap-allocated Node<T> owned
+        // SAFETY: front_ptr was derived from a heap-allocated Node<T, N> owned
         // by the SkipList that created this IterMut.  The iterator holds an
         // exclusive borrow of that list for lifetime 'a, ensuring every node
         // remains allocated and non-aliased for the iterator's entire
         // lifetime.  We advance self.front before returning, so no two calls
         // to next() can yield a reference to the same node.
-        let node: &'a mut Node<T> = unsafe { front_ptr.as_mut() };
+        let node: &'a mut Node<T, N> = unsafe { front_ptr.as_mut() };
         // node.next() is an immutable reborrow; it ends before value_mut().
         self.front = node.next().map(NonNull::from);
         self.len = self.len.saturating_sub(1);
@@ -629,7 +629,7 @@ impl<'a, T> Iterator for IterMut<'a, T> {
     }
 }
 
-impl<'a, T> DoubleEndedIterator for IterMut<'a, T> {
+impl<'a, T, const N: usize> DoubleEndedIterator for IterMut<'a, T, N> {
     #[inline]
     fn next_back(&mut self) -> Option<Self::Item> {
         if self.len == 0 {
@@ -639,7 +639,7 @@ impl<'a, T> DoubleEndedIterator for IterMut<'a, T> {
         // SAFETY: Same provenance argument as front_ptr in next().
         // back_ptr points to a live data node for the 'a lifetime, and no
         // other mutable reference to it exists while this IterMut is alive.
-        let node: &'a mut Node<T> = unsafe { back_ptr.as_mut() };
+        let node: &'a mut Node<T, N> = unsafe { back_ptr.as_mut() };
         // Walk backward.  The head sentinel has no value; the filter ensures
         // `back` becomes None when we step past the first data node.
         // `len` independently prevents accessing a stale `back` pointer.
@@ -652,9 +652,9 @@ impl<'a, T> DoubleEndedIterator for IterMut<'a, T> {
     }
 }
 
-impl<T> ExactSizeIterator for IterMut<'_, T> {}
+impl<T, const N: usize> ExactSizeIterator for IterMut<'_, T, N> {}
 
-impl<T> FusedIterator for IterMut<'_, T> {}
+impl<T, const N: usize> FusedIterator for IterMut<'_, T, N> {}
 
 // MARK: IntoIter
 
@@ -680,31 +680,31 @@ impl<T> FusedIterator for IterMut<'_, T> {}
 /// assert_eq!(iter.next(), None);
 /// ```
 #[must_use = "iterators are lazy and do nothing unless consumed"]
-pub struct IntoIter<T, G: LevelGenerator = Geometric> {
+pub struct IntoIter<T, const N: usize = 16, G: LevelGenerator = Geometric> {
     /// The remaining elements.  `pop_front` / `pop_back` drive iteration;
-    /// dropping `IntoIter` drops the remaining elements via the `SkipList`
-    /// `Drop` impl.
-    list: SkipList<T, G>,
+    /// dropping `IntoIter` drops the remaining elements via the
+    /// [`SkipList::Drop`] impl.
+    list: SkipList<T, N, G>,
 }
 
-// SAFETY: IntoIter<T, G> owns its elements.  Sending it to another thread
+// SAFETY: IntoIter<T, N, G> owns its elements.  Sending it to another thread
 // is safe when T is Send (the elements will be accessed on the new thread).
 // G: LevelGenerator is Send-safe by the same argument.
-unsafe impl<T: Send, G: LevelGenerator + Send> Send for IntoIter<T, G> {}
+unsafe impl<T: Send, G: LevelGenerator + Send, const N: usize> Send for IntoIter<T, N, G> {}
 
-// SAFETY: Sharing &IntoIter<T, G> is safe when T: Sync and G: Sync.
+// SAFETY: Sharing &IntoIter<T, N, G> is safe when T: Sync and G: Sync.
 // Advancing the iterator requires &mut IntoIter, which prevents concurrent
 // mutation through shared references.
-unsafe impl<T: Sync, G: LevelGenerator + Sync> Sync for IntoIter<T, G> {}
+unsafe impl<T: Sync, G: LevelGenerator + Sync, const N: usize> Sync for IntoIter<T, N, G> {}
 
-impl<T: fmt::Debug, G: LevelGenerator> fmt::Debug for IntoIter<T, G> {
+impl<T: fmt::Debug, G: LevelGenerator, const N: usize> fmt::Debug for IntoIter<T, N, G> {
     #[inline]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_list().entries(self.list.iter()).finish()
     }
 }
 
-impl<T, G: LevelGenerator> Iterator for IntoIter<T, G> {
+impl<T, G: LevelGenerator, const N: usize> Iterator for IntoIter<T, N, G> {
     type Item = T;
 
     #[inline]
@@ -718,16 +718,16 @@ impl<T, G: LevelGenerator> Iterator for IntoIter<T, G> {
     }
 }
 
-impl<T, G: LevelGenerator> DoubleEndedIterator for IntoIter<T, G> {
+impl<T, G: LevelGenerator, const N: usize> DoubleEndedIterator for IntoIter<T, N, G> {
     #[inline]
     fn next_back(&mut self) -> Option<Self::Item> {
         self.list.pop_back()
     }
 }
 
-impl<T, G: LevelGenerator> ExactSizeIterator for IntoIter<T, G> {}
+impl<T, G: LevelGenerator, const N: usize> ExactSizeIterator for IntoIter<T, N, G> {}
 
-impl<T, G: LevelGenerator> FusedIterator for IntoIter<T, G> {}
+impl<T, G: LevelGenerator, const N: usize> FusedIterator for IntoIter<T, N, G> {}
 
 // MARK: Drain
 
@@ -836,16 +836,21 @@ impl<T> FusedIterator for Drain<'_, T> {}
 /// assert_eq!(remaining, [1, 3, 5]);
 /// ```
 #[must_use = "iterators are lazy and do nothing unless consumed"]
-pub struct ExtractIf<'a, T, G: LevelGenerator = Geometric, F = fn(&mut T) -> bool>
-where
+pub struct ExtractIf<
+    'a,
+    T,
+    G: LevelGenerator = Geometric,
+    F = fn(&mut T) -> bool,
+    const N: usize = 16,
+> where
     F: FnMut(&mut T) -> bool,
 {
     /// Mutable borrow of the owning list (needed to rebuild skip links on
     /// drop and to update `len` and `tail` on each removal).
-    list: &'a mut SkipList<T, G>,
+    list: &'a mut SkipList<T, N, G>,
     /// Raw pointer to the next node to visit, or `None` when the iterator
     /// has been exhausted.
-    current: Option<NonNull<Node<T>>>,
+    current: Option<NonNull<Node<T, N>>>,
     /// Set to `true` the first time an element is removed.  Used to skip
     /// the `$O(n)$` skip-link rebuild in `Drop::drop` when nothing was removed.
     any_removed: bool,
@@ -856,19 +861,23 @@ where
 // SAFETY: ExtractIf<'a, T, G, F> yields owned T values and holds
 // &'a mut SkipList<T, G>.  Sending it to another thread requires
 // T: Send, G: Send, and F: Send.
-unsafe impl<T: Send, G: LevelGenerator + Send, F: Send> Send for ExtractIf<'_, T, G, F> where
-    F: FnMut(&mut T) -> bool
+unsafe impl<T: Send, G: LevelGenerator + Send, F: Send, const N: usize> Send
+    for ExtractIf<'_, T, G, F, N>
+where
+    F: FnMut(&mut T) -> bool,
 {
 }
 
-// SAFETY: Sharing &ExtractIf<'a, T, G, F> requires T: Sync, G: Sync, F: Sync.
+// SAFETY: Sharing &ExtractIf<'a, T, G, F, N> requires T: Sync, G: Sync, F: Sync.
 // Advancing the iterator requires &mut ExtractIf, preventing concurrent mutation.
-unsafe impl<T: Sync, G: LevelGenerator + Sync, F: Sync> Sync for ExtractIf<'_, T, G, F> where
-    F: FnMut(&mut T) -> bool
+unsafe impl<T: Sync, G: LevelGenerator + Sync, F: Sync, const N: usize> Sync
+    for ExtractIf<'_, T, G, F, N>
+where
+    F: FnMut(&mut T) -> bool,
 {
 }
 
-impl<T: fmt::Debug, G: LevelGenerator, F> fmt::Debug for ExtractIf<'_, T, G, F>
+impl<T: fmt::Debug, G: LevelGenerator, F, const N: usize> fmt::Debug for ExtractIf<'_, T, G, F, N>
 where
     F: FnMut(&mut T) -> bool,
 {
@@ -892,7 +901,7 @@ where
     }
 }
 
-impl<T, G: LevelGenerator, F> Iterator for ExtractIf<'_, T, G, F>
+impl<T, G: LevelGenerator, F, const N: usize> Iterator for ExtractIf<'_, T, G, F, N>
 where
     F: FnMut(&mut T) -> bool,
 {
@@ -922,7 +931,7 @@ where
             // ensuring every node remains allocated and non-aliased.
             // We capture next_opt before any mutation of the current node.
             unsafe {
-                let current: *mut Node<T> = current_nn.as_ptr();
+                let current: *mut Node<T, N> = current_nn.as_ptr();
                 let next_opt = (*current).next().map(NonNull::from);
 
                 let value_ref = (*current).value_mut().expect("data node has value");
@@ -955,10 +964,12 @@ where
     }
 }
 
-impl<T, G: LevelGenerator, F> FusedIterator for ExtractIf<'_, T, G, F> where F: FnMut(&mut T) -> bool
-{}
+impl<T, G: LevelGenerator, F, const N: usize> FusedIterator for ExtractIf<'_, T, G, F, N> where
+    F: FnMut(&mut T) -> bool
+{
+}
 
-impl<T, G: LevelGenerator, F> Drop for ExtractIf<'_, T, G, F>
+impl<T, G: LevelGenerator, F, const N: usize> Drop for ExtractIf<'_, T, G, F, N>
 where
     F: FnMut(&mut T) -> bool,
 {

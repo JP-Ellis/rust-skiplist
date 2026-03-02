@@ -3,7 +3,7 @@
 
 use crate::{level_generator::LevelGenerator, node::Node, skip_list::SkipList};
 
-impl<T, G: LevelGenerator> SkipList<T, G> {
+impl<T, G: LevelGenerator, const N: usize> SkipList<T, N, G> {
     /// Removes all but the first of consecutive equal elements as determined
     /// by a comparator.
     ///
@@ -50,7 +50,7 @@ impl<T, G: LevelGenerator> SkipList<T, G> {
         }
 
         // Pointer to the last kept node, used for comparison inside the closure.
-        let mut prev_kept: Option<*mut Node<T>> = None;
+        let mut prev_kept: Option<*mut Node<T, N>> = None;
 
         // SAFETY: All raw pointers originate from heap allocations owned by
         // this SkipList.  We hold &mut self so no other reference to any node

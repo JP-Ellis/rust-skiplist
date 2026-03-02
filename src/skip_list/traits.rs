@@ -12,7 +12,7 @@ use crate::{level_generator::LevelGenerator, skip_list::SkipList};
 
 // MARK: Debug
 
-impl<T: fmt::Debug, G: LevelGenerator> fmt::Debug for SkipList<T, G> {
+impl<T: fmt::Debug, G: LevelGenerator, const N: usize> fmt::Debug for SkipList<T, N, G> {
     /// Formats the list as a debug list, e.g. `[1, 2, 3]`.
     ///
     /// # Examples
@@ -31,7 +31,7 @@ impl<T: fmt::Debug, G: LevelGenerator> fmt::Debug for SkipList<T, G> {
 
 // MARK: Clone
 
-impl<T: Clone, G: LevelGenerator + Clone> Clone for SkipList<T, G> {
+impl<T: Clone, G: LevelGenerator + Clone, const N: usize> Clone for SkipList<T, N, G> {
     /// Returns a deep clone of the list.
     ///
     /// The cloned list has the same elements in the same order. The level
@@ -61,7 +61,7 @@ impl<T: Clone, G: LevelGenerator + Clone> Clone for SkipList<T, G> {
 
 // MARK: PartialOrd / Ord
 
-impl<T: PartialOrd, G: LevelGenerator> PartialOrd for SkipList<T, G> {
+impl<T: PartialOrd, G: LevelGenerator, const N: usize> PartialOrd for SkipList<T, N, G> {
     /// Compares two lists lexicographically.
     ///
     /// Returns `None` if any pair of corresponding elements returns `None`
@@ -82,7 +82,7 @@ impl<T: PartialOrd, G: LevelGenerator> PartialOrd for SkipList<T, G> {
     }
 }
 
-impl<T: Ord, G: LevelGenerator> Ord for SkipList<T, G> {
+impl<T: Ord, G: LevelGenerator, const N: usize> Ord for SkipList<T, N, G> {
     /// Compares two lists lexicographically.
     ///
     /// # Examples
@@ -102,8 +102,8 @@ impl<T: Ord, G: LevelGenerator> Ord for SkipList<T, G> {
 
 // MARK: PartialEq / Eq
 
-impl<T: PartialEq, G: LevelGenerator, G2: LevelGenerator> PartialEq<SkipList<T, G2>>
-    for SkipList<T, G>
+impl<T: PartialEq, G: LevelGenerator, G2: LevelGenerator, const N: usize>
+    PartialEq<SkipList<T, N, G2>> for SkipList<T, N, G>
 {
     /// Returns `true` if `self` and `other` have the same length and all
     /// corresponding elements compare equal.
@@ -123,16 +123,16 @@ impl<T: PartialEq, G: LevelGenerator, G2: LevelGenerator> PartialEq<SkipList<T, 
     /// assert_ne!(a, c);
     /// ```
     #[inline]
-    fn eq(&self, other: &SkipList<T, G2>) -> bool {
+    fn eq(&self, other: &SkipList<T, N, G2>) -> bool {
         self.len() == other.len() && self.iter().zip(other.iter()).all(|(a, b)| a == b)
     }
 }
 
-impl<T: Eq, G: LevelGenerator> Eq for SkipList<T, G> {}
+impl<T: Eq, G: LevelGenerator, const N: usize> Eq for SkipList<T, N, G> {}
 
 // MARK: Hash
 
-impl<T: Hash, G: LevelGenerator> Hash for SkipList<T, G> {
+impl<T: Hash, G: LevelGenerator, const N: usize> Hash for SkipList<T, N, G> {
     /// Hashes the length followed by each element in order.
     ///
     /// Two lists with the same elements in the same order produce the same
@@ -167,7 +167,7 @@ impl<T: Hash, G: LevelGenerator> Hash for SkipList<T, G> {
 
 // MARK: Extend
 
-impl<T, G: LevelGenerator> Extend<T> for SkipList<T, G> {
+impl<T, G: LevelGenerator, const N: usize> Extend<T> for SkipList<T, N, G> {
     /// Appends all items from `iter` to the back of the list.
     ///
     /// # Examples
@@ -187,7 +187,7 @@ impl<T, G: LevelGenerator> Extend<T> for SkipList<T, G> {
     }
 }
 
-impl<'a, T: Copy + 'a, G: LevelGenerator> Extend<&'a T> for SkipList<T, G> {
+impl<'a, T: Copy + 'a, G: LevelGenerator, const N: usize> Extend<&'a T> for SkipList<T, N, G> {
     /// Copies all items from `iter` and appends them to the back of the list.
     ///
     /// # Examples
@@ -227,7 +227,7 @@ impl<T> FromIterator<T> for SkipList<T> {
     }
 }
 
-impl<T, const N: usize> From<[T; N]> for SkipList<T> {
+impl<T, const M: usize> From<[T; M]> for SkipList<T> {
     /// Creates a list from a fixed-size array.
     ///
     /// # Examples
@@ -239,7 +239,7 @@ impl<T, const N: usize> From<[T; N]> for SkipList<T> {
     /// assert_eq!(list.len(), 3);
     /// ```
     #[inline]
-    fn from(arr: [T; N]) -> Self {
+    fn from(arr: [T; M]) -> Self {
         arr.into_iter().collect()
     }
 }

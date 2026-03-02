@@ -32,6 +32,7 @@ harness = false
 name = "skip_list"
 
 [dependencies]
+arrayvec = { version = "0.7", default-features = false }
 rand = "0.10"
 thiserror = "2.0"
 

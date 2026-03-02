@@ -1,6 +1,8 @@
 //! Mutable ordered visitor.
 
-use core::{cmp::Ordering, marker::PhantomData, ptr::NonNull};
+use core::{cmp::Ordering, iter, marker::PhantomData, ptr::NonNull};
+
+use arrayvec::ArrayVec;
 
 use crate::node::{
     Node,
@@ -33,13 +35,13 @@ use crate::node::{
 ///
 /// The visitor borrows `head` mutably for its lifetime `'a`.  All `NonNull`
 /// pointers inside it point into the same list and are valid for `'a`.
-struct OrdMutVisitor<'a, T, Q: ?Sized, F: Fn(&T, &Q) -> Ordering> {
+struct OrdMutVisitor<'a, T, Q: ?Sized, F: Fn(&T, &Q) -> Ordering, const N: usize> {
     /// Raw pointer to the current node.
     ///
     /// Stored as `NonNull` rather than `&'a mut` to avoid holding an exclusive
     /// reference while `precursors` may alias the same allocation at a
     /// different level.
-    current: NonNull<Node<T>>,
+    current: NonNull<Node<T, N>>,
     /// Highest level still under consideration.
     level: usize,
     /// Whether the target has been found.
@@ -52,12 +54,12 @@ struct OrdMutVisitor<'a, T, Q: ?Sized, F: Fn(&T, &Q) -> Ordering> {
     /// level `l` points to `>= target` (or has no link at that level).
     /// Pre-filled with `head` so that every level has a valid precursor even
     /// when the target is before the first real node.
-    precursors: Vec<NonNull<Node<T>>>,
+    precursors: ArrayVec<NonNull<Node<T, N>>, N>,
     /// Ties the raw pointer lifetime to `'a`.
-    _marker: PhantomData<&'a mut Node<T>>,
+    _marker: PhantomData<&'a mut Node<T, N>>,
 }
 
-impl<'a, T, Q: ?Sized, F: Fn(&T, &Q) -> Ordering> OrdMutVisitor<'a, T, Q, F> {
+impl<'a, T, Q: ?Sized, F: Fn(&T, &Q) -> Ordering, const N: usize> OrdMutVisitor<'a, T, Q, F, N> {
     /// Create a new mutable ordered visitor starting at `head`.
     ///
     /// # Arguments
@@ -65,7 +67,7 @@ impl<'a, T, Q: ?Sized, F: Fn(&T, &Q) -> Ordering> OrdMutVisitor<'a, T, Q, F> {
     /// - `head`: The head node of the skip list.
     /// - `target`: The value to search for.
     /// - `cmp`: Comparator returning `Ordering` for a node value vs. the target.
-    fn new(head: &'a mut Node<T>, target: &'a Q, cmp: F) -> Self {
+    fn new(head: &'a mut Node<T, N>, target: &'a Q, cmp: F) -> Self {
         let max_levels = head.level();
         let current = NonNull::from(&*head);
         Self {
@@ -77,17 +79,19 @@ impl<'a, T, Q: ?Sized, F: Fn(&T, &Q) -> Ordering> OrdMutVisitor<'a, T, Q, F> {
             // Every level starts with `head` as its precursor: the head is
             // always before every real node, so it is a valid precursor for
             // any target value.
-            precursors: vec![current; max_levels],
+            precursors: iter::repeat_n(current, max_levels).collect(),
             _marker: PhantomData,
         }
     }
 }
 
-impl<T, Q: ?Sized, F: Fn(&T, &Q) -> Ordering> Visitor for OrdMutVisitor<'_, T, Q, F> {
+impl<T, Q: ?Sized, F: Fn(&T, &Q) -> Ordering, const N: usize> Visitor
+    for OrdMutVisitor<'_, T, Q, F, N>
+{
     /// Node references are raw const pointers to avoid lifetime conflicts with
     /// the `&mut` borrow. Callers that need a shared reference can convert
     /// via [`NonNull::as_ref`] inside an `unsafe` block.
-    type NodeRef = NonNull<Node<T>>;
+    type NodeRef = NonNull<Node<T, N>>;
 
     fn current(&self) -> Self::NodeRef {
         self.current
@@ -115,10 +119,10 @@ impl<T, Q: ?Sized, F: Fn(&T, &Q) -> Ordering> Visitor for OrdMutVisitor<'_, T, Q
         // Borrow only the links slice for the duration of the for loop, then
         // drop the reference so `self.current` can be re-borrowed for `next`.
         {
-            // SAFETY: `self.current` was obtained from a valid `&mut Node<T>`
+            // SAFETY: `self.current` was obtained from a valid `&mut Node<T, N>`
             // during construction or from a link/next pointer during traversal.
             // No other `&mut` to the same node exists while we hold `self`.
-            let current_ref: &Node<T> = unsafe { self.current.as_ref() };
+            let current_ref: &Node<T, N> = unsafe { self.current.as_ref() };
             let links = current_ref.links();
 
             for level in (0..self.level).rev() {
@@ -180,9 +184,11 @@ impl<T, Q: ?Sized, F: Fn(&T, &Q) -> Ordering> Visitor for OrdMutVisitor<'_, T, Q
     }
 }
 
-impl<T, Q: ?Sized, F: Fn(&T, &Q) -> Ordering> VisitorMut for OrdMutVisitor<'_, T, Q, F> {
-    type NodeMut = NonNull<Node<T>>;
-    type Precursor = NonNull<Node<T>>;
+impl<T, Q: ?Sized, F: Fn(&T, &Q) -> Ordering, const N: usize> VisitorMut
+    for OrdMutVisitor<'_, T, Q, F, N>
+{
+    type NodeMut = NonNull<Node<T, N>>;
+    type Precursor = NonNull<Node<T, N>>;
 
     fn current_mut(&mut self) -> Self::NodeMut {
         self.current
@@ -206,12 +212,12 @@ mod tests {
     use super::OrdMutVisitor;
     use crate::node::{
         Node,
-        tests::skiplist,
+        tests::{MAX_LEVELS, skiplist},
         visitor::{Step, Visitor, VisitorMut},
     };
 
     #[rstest]
-    fn find_existing_value(skiplist: Result<Box<Node<u8>>>) -> Result<()> {
+    fn find_existing_value(skiplist: Result<Box<Node<u8, MAX_LEVELS>>>) -> Result<()> {
         let mut head = skiplist?;
         let mut visitor = OrdMutVisitor::new(&mut head, &30_u8, Ord::cmp);
 
@@ -225,7 +231,7 @@ mod tests {
     }
 
     #[rstest]
-    fn find_first_value(skiplist: Result<Box<Node<u8>>>) -> Result<()> {
+    fn find_first_value(skiplist: Result<Box<Node<u8, MAX_LEVELS>>>) -> Result<()> {
         let mut head = skiplist?;
         let mut visitor = OrdMutVisitor::new(&mut head, &10_u8, Ord::cmp);
 
@@ -238,7 +244,7 @@ mod tests {
     }
 
     #[rstest]
-    fn find_last_value(skiplist: Result<Box<Node<u8>>>) -> Result<()> {
+    fn find_last_value(skiplist: Result<Box<Node<u8, MAX_LEVELS>>>) -> Result<()> {
         let mut head = skiplist?;
         let mut visitor = OrdMutVisitor::new(&mut head, &40_u8, Ord::cmp);
 
@@ -251,7 +257,7 @@ mod tests {
     }
 
     #[rstest]
-    fn value_not_found(skiplist: Result<Box<Node<u8>>>) -> Result<()> {
+    fn value_not_found(skiplist: Result<Box<Node<u8, MAX_LEVELS>>>) -> Result<()> {
         let mut head = skiplist?;
         let mut visitor = OrdMutVisitor::new(&mut head, &25_u8, Ord::cmp);
 
@@ -263,7 +269,7 @@ mod tests {
     }
 
     #[rstest]
-    fn value_beyond_list(skiplist: Result<Box<Node<u8>>>) -> Result<()> {
+    fn value_beyond_list(skiplist: Result<Box<Node<u8, MAX_LEVELS>>>) -> Result<()> {
         let mut head = skiplist?;
         let mut visitor = OrdMutVisitor::new(&mut head, &99_u8, Ord::cmp);
 
@@ -277,7 +283,7 @@ mod tests {
     /// After traversal, every precursor must point to a node whose value is
     /// strictly less than the target (or the head sentinel with no value).
     #[rstest]
-    fn precursors_are_before_target(skiplist: Result<Box<Node<u8>>>) -> Result<()> {
+    fn precursors_are_before_target(skiplist: Result<Box<Node<u8, MAX_LEVELS>>>) -> Result<()> {
         let mut head = skiplist?;
         // Target = 30 (node v3).
         let mut visitor = OrdMutVisitor::new(&mut head, &30_u8, Ord::cmp);
@@ -295,7 +301,9 @@ mod tests {
 
     /// Stepping past the end of the list produces `Exhausted`.
     #[rstest]
-    fn exhausted_when_target_out_of_range(skiplist: Result<Box<Node<u8>>>) -> Result<()> {
+    fn exhausted_when_target_out_of_range(
+        skiplist: Result<Box<Node<u8, MAX_LEVELS>>>,
+    ) -> Result<()> {
         let mut head = skiplist?;
         let mut visitor = OrdMutVisitor::new(&mut head, &99_u8, Ord::cmp);
 
@@ -315,7 +323,7 @@ mod tests {
 
     /// `current_mut()` returns the same pointer as `current()`.
     #[rstest]
-    fn current_mut_matches_current(skiplist: Result<Box<Node<u8>>>) -> Result<()> {
+    fn current_mut_matches_current(skiplist: Result<Box<Node<u8, MAX_LEVELS>>>) -> Result<()> {
         let mut head = skiplist?;
         let mut visitor = OrdMutVisitor::new(&mut head, &20_u8, Ord::cmp);
         visitor.traverse();
@@ -326,7 +334,7 @@ mod tests {
 
     /// `precursors()` has one entry per level.
     #[rstest]
-    fn precursors_length(skiplist: Result<Box<Node<u8>>>) -> Result<()> {
+    fn precursors_length(skiplist: Result<Box<Node<u8, MAX_LEVELS>>>) -> Result<()> {
         let mut head = skiplist?;
         let max_levels = head.level();
         let mut visitor = OrdMutVisitor::new(&mut head, &20_u8, Ord::cmp);

@@ -103,6 +103,8 @@ use core::{
 #[cfg(any(debug_assertions, test))]
 use std::collections::HashMap;
 
+use arrayvec::ArrayVec;
+
 use crate::node::link::Link;
 
 pub(crate) mod link;
@@ -139,27 +141,36 @@ pub(crate) enum NodeType {
 }
 
 /// A node in the skip list.
-pub(crate) struct Node<V> {
+pub(crate) struct Node<V, const N: usize> {
     /// Owning reference to the next node.
     next: Option<NonNull<Self>>,
     /// Non-owning reference to the previous node.
     prev: Option<NonNull<Self>>,
     /// Links to subsequent nodes.
-    links: Vec<Option<Link<V>>>,
+    ///
+    /// Uses a fixed-capacity inline array (no separate heap allocation) for
+    /// better cache locality and fewer allocations per node.
+    links: ArrayVec<Option<Link<V, N>>, N>,
     /// The value of the node.
     value: Option<V>,
 }
 
-/// Node interface.
-impl<V> Node<V> {
-    /// Create a new node.
+// Node interface methods.
+impl<V, const N: usize> Node<V, N> {
+    /// Create a new head-sentinel node with the given number of skip-link slots.
     ///
     /// # Parameters
     ///
-    /// - `max_levels`: The maximum number of levels in the skip list.
+    /// * `max_levels` - The number of skip-link slots to initialise. Must be
+    ///   `<= N`. Passing a value greater than `N` panics in debug builds
+    ///   and truncates silently in release builds.
     #[inline]
     #[must_use]
     pub(crate) fn new(max_levels: usize) -> Self {
+        debug_assert!(
+            max_levels <= N,
+            "max_levels ({max_levels}) exceeds node capacity ({N})"
+        );
         Self {
             next: None,
             prev: None,
@@ -172,18 +183,18 @@ impl<V> Node<V> {
     ///
     /// # Arguments
     ///
-    /// # Parameters
-    ///
-    /// - `max_levels`: The number of skip-link levels (same meaning as in
-    ///   [`Node::new`]).
-    /// - `value`: The value the node will hold.
+    /// * `height` - The number of skip-link slots to initialise. Must be
+    ///   `<= N`. Same semantics as the `max_levels` parameter of
+    ///   [`Node::new`].
+    /// * `value` - The value the node will hold.
     #[inline]
     #[must_use]
-    pub(crate) fn with_value(max_levels: usize, value: V) -> Self {
+    pub(crate) fn with_value(height: usize, value: V) -> Self {
+        debug_assert!(height <= N, "height ({height}) exceeds node capacity ({N})");
         Self {
             next: None,
             prev: None,
-            links: iter::repeat_with(|| None).take(max_levels).collect(),
+            links: iter::repeat_with(|| None).take(height).collect(),
             value: Some(value),
         }
     }
@@ -270,7 +281,7 @@ impl<V> Node<V> {
     /// Each slot at index `l` holds the link to the next node reachable at
     /// skip level `l`, or `None` if no such forward node exists at that level.
     #[inline]
-    pub(crate) fn links(&self) -> &[Option<Link<V>>] {
+    pub(crate) fn links(&self) -> &[Option<Link<V, N>>] {
         &self.links
     }
 
@@ -279,7 +290,7 @@ impl<V> Node<V> {
     /// Used when wiring or clearing skip links during insertion, removal,
     /// or a full link rebuild.
     #[inline]
-    pub(crate) fn links_mut(&mut self) -> &mut [Option<Link<V>>] {
+    pub(crate) fn links_mut(&mut self) -> &mut [Option<Link<V, N>>] {
         &mut self.links
     }
 
@@ -556,7 +567,6 @@ impl<V> Node<V> {
     )]
     #[expect(
         clippy::indexing_slicing,
-        clippy::needless_range_loop,
         reason = "l < node_height <= max_levels = predecessors.len() = self.level(); \
                   l indexes both predecessors[l] and links_mut()[l] so a plain index \
                   loop is the clearest expression"
@@ -578,7 +588,8 @@ impl<V> Node<V> {
     {
         let head_ptr: *mut Self = core::ptr::from_mut(self);
         let max_levels = self.level();
-        let mut predecessors: Vec<(*mut Self, usize)> = vec![(head_ptr, 0_usize); max_levels];
+        let mut predecessors: ArrayVec<(*mut Self, usize), N> =
+            iter::repeat_n((head_ptr, 0_usize), max_levels).collect();
         let mut new_rank: usize = 0;
         let mut new_tail: Option<NonNull<Self>> = None;
 
@@ -650,7 +661,7 @@ impl<V> Node<V> {
     dead_code,
     reason = "Used for debugging"
 )]
-impl<V: Debug> Node<V> {
+impl<V: Debug, const N: usize> Node<V, N> {
     /// Generate a map of pointers to node indices.
     #[inline]
     fn ptr_index_map(&self) -> HashMap<NonNull<Self>, usize> {
@@ -872,7 +883,7 @@ impl<V: Debug> Node<V> {
     }
 }
 
-impl<V: Debug> Debug for Node<V> {
+impl<V: Debug, const N: usize> Debug for Node<V, N> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Node")
             .field("next", &self.next)
@@ -883,7 +894,7 @@ impl<V: Debug> Debug for Node<V> {
     }
 }
 
-impl<V> Drop for Node<V> {
+impl<V, const N: usize> Drop for Node<V, N> {
     /// Drop a node and all subsequent nodes in the chain.
     ///
     /// `NonNull<T>` does not own its pointee, so without this implementation
@@ -910,7 +921,7 @@ impl<V> Drop for Node<V> {
             // was created via `Box::new` + `Box::leak` in `insert_after`.
             // We have taken ownership by removing it from `self.next`, so no
             // other `Box` wraps this pointer.
-            let mut next_box: Box<Node<V>> = unsafe { Box::from_raw(next_ptr.as_ptr()) };
+            let mut next_box: Box<Node<V, N>> = unsafe { Box::from_raw(next_ptr.as_ptr()) };
             // Take `next_box.next` so that *its* drop does not recurse further
             // (the loop will handle it in the next iteration instead).
             self.next = next_box.next.take();
@@ -934,11 +945,11 @@ pub(crate) mod tests {
 
     use crate::node::{Node, NodeType, link::Link};
 
-    const MAX_LEVELS: usize = 3;
+    pub(crate) const MAX_LEVELS: usize = 3;
 
     #[test]
     fn node_new() {
-        let node = Node::<()>::new(MAX_LEVELS);
+        let node = Node::<(), MAX_LEVELS>::new(MAX_LEVELS);
         assert!(node.next.is_none());
         assert!(node.prev.is_none());
         assert_eq!(node.links.len(), MAX_LEVELS);
@@ -947,7 +958,7 @@ pub(crate) mod tests {
 
     #[test]
     fn new_node_properties() {
-        let mut node = Node::<()>::new(MAX_LEVELS);
+        let mut node = Node::<(), MAX_LEVELS>::new(MAX_LEVELS);
 
         assert!(node.next().is_none());
         assert!(unsafe { node.next_mut() }.is_none());
@@ -968,12 +979,12 @@ pub(crate) mod tests {
     /// head -------> 20 -> 30 -> 40
     /// head -> 10 -> 20 -> 30 -> 40
     #[fixture]
-    pub(crate) fn skiplist() -> Result<Box<Node<u8>>> {
+    pub(crate) fn skiplist() -> Result<Box<Node<u8, MAX_LEVELS>>> {
         let mut head = Box::new(Node::new(MAX_LEVELS));
-        let mut v1 = Node::new(0);
-        let mut v2 = Node::new(1);
-        let mut v3 = Node::new(1);
-        let mut v4 = Node::new(0);
+        let mut v1 = Node::<u8, MAX_LEVELS>::new(0);
+        let mut v2 = Node::<u8, MAX_LEVELS>::new(1);
+        let mut v3 = Node::<u8, MAX_LEVELS>::new(1);
+        let mut v4 = Node::<u8, MAX_LEVELS>::new(0);
 
         // Internal values
         v1.value = Some(10);
@@ -1004,10 +1015,10 @@ pub(crate) mod tests {
         // head -------> v2 -> v3 -> v4
         // head -> v1 -> v2 -> v3 -> v4
 
-        let head_v3: Link<_>;
-        let head_v2: Link<_>;
-        let v2_v3: Link<_>;
-        let v3_v4: Link<_>;
+        let head_v3: Link<_, _>;
+        let head_v2: Link<_, _>;
+        let v2_v3: Link<_, _>;
+        let v3_v4: Link<_, _>;
         {
             let v1_ref = head.next().expect("v1 not found");
             let v2_ref = v1_ref.next().expect("v2 not found");
@@ -1043,7 +1054,7 @@ pub(crate) mod tests {
 
     #[cfg_attr(miri, ignore)] // Insta does not work with miri
     #[rstest]
-    fn node_display(skiplist: Result<Box<Node<u8>>>) -> Result<()> {
+    fn node_display(skiplist: Result<Box<Node<u8, MAX_LEVELS>>>) -> Result<()> {
         let head = skiplist?;
 
         // Insta is incompatible with Miri
@@ -1070,7 +1081,7 @@ pub(crate) mod tests {
     }
 
     #[rstest]
-    fn node_properties(skiplist: Result<Box<Node<u8>>>) -> Result<()> {
+    fn node_properties(skiplist: Result<Box<Node<u8, MAX_LEVELS>>>) -> Result<()> {
         let head = skiplist?;
 
         assert_matches!(head.node_type(), NodeType::Head);
@@ -1097,7 +1108,7 @@ pub(crate) mod tests {
 
     #[cfg_attr(miri, ignore)] // Insta does not work with miri
     #[rstest]
-    fn pop_node(skiplist: Result<Box<Node<u8>>>) -> Result<()> {
+    fn pop_node(skiplist: Result<Box<Node<u8, MAX_LEVELS>>>) -> Result<()> {
         let mut head = skiplist?;
 
         // SAFETY: `head` is a valid node with `v1` as its next.
@@ -1138,9 +1149,9 @@ pub(crate) mod tests {
 
     #[cfg_attr(miri, ignore)] // Insta does not work with miri
     #[rstest]
-    fn insert_after_head_node(skiplist: Result<Box<Node<u8>>>) -> Result<()> {
+    fn insert_after_head_node(skiplist: Result<Box<Node<u8, MAX_LEVELS>>>) -> Result<()> {
         let mut head = skiplist?;
-        let mut new_node = Node::new(99);
+        let mut new_node = Node::<u8, MAX_LEVELS>::new(MAX_LEVELS);
         new_node.value = Some(100);
 
         unsafe {
@@ -1155,7 +1166,7 @@ pub(crate) mod tests {
                 head.display_values()?,
                 @"
             [00|03] None
-            [01|99] Some(100)
+            [01|03] Some(100)
             [02|00] Some(10)
             [03|01] Some(20)
             [04|01] Some(30)
@@ -1169,9 +1180,9 @@ pub(crate) mod tests {
 
     #[cfg_attr(miri, ignore)] // Insta does not work with miri
     #[rstest]
-    fn insert_after_body_node(skiplist: Result<Box<Node<u8>>>) -> Result<()> {
+    fn insert_after_body_node(skiplist: Result<Box<Node<u8, MAX_LEVELS>>>) -> Result<()> {
         let mut head = skiplist?;
-        let mut new_node = Node::new(99);
+        let mut new_node = Node::<u8, MAX_LEVELS>::new(MAX_LEVELS);
         new_node.value = Some(100);
 
         // SAFETY: `head` is a valid node with `v1` as its next.
@@ -1188,7 +1199,7 @@ pub(crate) mod tests {
                 @"
             [00|03] None
             [01|00] Some(10)
-            [02|99] Some(100)
+            [02|03] Some(100)
             [03|01] Some(20)
             [04|01] Some(30)
             [05|00] Some(40)
@@ -1203,7 +1214,7 @@ pub(crate) mod tests {
 
     #[rstest]
     fn filter_rebuild_empty_list() {
-        let mut head = Box::new(Node::<u8>::new(MAX_LEVELS));
+        let mut head = Box::new(Node::<u8, MAX_LEVELS>::new(MAX_LEVELS));
         let (new_len, new_tail) = unsafe { head.filter_rebuild(|_| true, |_| {}) };
         assert_eq!(new_len, 0);
         assert!(new_tail.is_none());
@@ -1211,7 +1222,7 @@ pub(crate) mod tests {
     }
 
     #[rstest]
-    fn filter_rebuild_keep_all(skiplist: Result<Box<Node<u8>>>) -> Result<()> {
+    fn filter_rebuild_keep_all(skiplist: Result<Box<Node<u8, MAX_LEVELS>>>) -> Result<()> {
         let mut head = skiplist?;
         let (new_len, new_tail) = unsafe { head.filter_rebuild(|_| true, |_| {}) };
 
@@ -1234,7 +1245,7 @@ pub(crate) mod tests {
     }
 
     #[rstest]
-    fn filter_rebuild_keep_none(skiplist: Result<Box<Node<u8>>>) -> Result<()> {
+    fn filter_rebuild_keep_none(skiplist: Result<Box<Node<u8, MAX_LEVELS>>>) -> Result<()> {
         let mut dropped_vals: Vec<u8> = Vec::new();
         let mut head = skiplist?;
         let (new_len, new_tail) = unsafe {
@@ -1253,7 +1264,9 @@ pub(crate) mod tests {
     }
 
     #[rstest]
-    fn filter_rebuild_keep_first_and_third(skiplist: Result<Box<Node<u8>>>) -> Result<()> {
+    fn filter_rebuild_keep_first_and_third(
+        skiplist: Result<Box<Node<u8, MAX_LEVELS>>>,
+    ) -> Result<()> {
         // Keep v1 (value 10) and v3 (value 30); drop v2 and v4.
         let mut head = skiplist?;
         let (new_len, new_tail) = unsafe {
@@ -1286,7 +1299,7 @@ pub(crate) mod tests {
 
     #[rstest]
     fn filter_rebuild_on_drop_receives_correct_values(
-        skiplist: Result<Box<Node<u8>>>,
+        skiplist: Result<Box<Node<u8, MAX_LEVELS>>>,
     ) -> Result<()> {
         let mut dropped: Vec<u8> = Vec::new();
         let mut head = skiplist?;
@@ -1310,7 +1323,7 @@ pub(crate) mod tests {
     /// `None` because no retained node can anchor a skip link.
     #[rstest]
     fn filter_rebuild_links_consistent_after_partial_keep(
-        skiplist: Result<Box<Node<u8>>>,
+        skiplist: Result<Box<Node<u8, MAX_LEVELS>>>,
     ) -> Result<()> {
         let mut head = skiplist?;
         // Drop v2 and v3 (both height 1); keep v1 (height 0) and v4 (height 0).
@@ -1344,7 +1357,9 @@ pub(crate) mod tests {
 
     /// Rebuilding skip links over a keep-all pass must produce correct distances.
     #[rstest]
-    fn filter_rebuild_keep_all_links_rebuilt(skiplist: Result<Box<Node<u8>>>) -> Result<()> {
+    fn filter_rebuild_keep_all_links_rebuilt(
+        skiplist: Result<Box<Node<u8, MAX_LEVELS>>>,
+    ) -> Result<()> {
         // Fixture node heights: v1=0, v2=1, v3=1, v4=0.
         //
         // After a keep-all rebuild:
@@ -1379,9 +1394,9 @@ pub(crate) mod tests {
 
     #[cfg_attr(miri, ignore)] // Insta does not work with miri
     #[rstest]
-    fn insert_after_tail_node(skiplist: Result<Box<Node<u8>>>) -> Result<()> {
+    fn insert_after_tail_node(skiplist: Result<Box<Node<u8, MAX_LEVELS>>>) -> Result<()> {
         let mut head = skiplist?;
-        let mut new_node = Node::new(99);
+        let mut new_node = Node::<u8, MAX_LEVELS>::new(MAX_LEVELS);
         new_node.value = Some(100);
 
         // SAFETY: Each node is valid with the next node as its successor.
@@ -1404,7 +1419,7 @@ pub(crate) mod tests {
             [02|01] Some(20)
             [03|01] Some(30)
             [04|00] Some(40)
-            [05|99] Some(100)
+            [05|03] Some(100)
             "
             );
         }

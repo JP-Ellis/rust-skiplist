@@ -1,6 +1,8 @@
 //! Mutable index-based visitor.
 
-use core::{marker::PhantomData, ptr::NonNull};
+use core::{iter, marker::PhantomData, ptr::NonNull};
+
+use arrayvec::ArrayVec;
 
 use crate::node::{
     Node,
@@ -24,13 +26,13 @@ use crate::node::{
 ///
 /// The visitor borrows `head` mutably for its lifetime `'a`.  All `NonNull`
 /// pointers inside it point into the same list and are valid for `'a`.
-pub(crate) struct IndexMutVisitor<'a, T> {
+pub(crate) struct IndexMutVisitor<'a, T, const N: usize> {
     /// Raw pointer to the current node.
     ///
     /// Stored as `NonNull` rather than `&'a mut` to avoid holding an exclusive
     /// reference while `precursors` may alias the same allocation at a
     /// different level.
-    current: NonNull<Node<T>>,
+    current: NonNull<Node<T, N>>,
     /// 0-based index of the current node within the list.
     index: usize,
     /// Highest level still under consideration.
@@ -41,24 +43,24 @@ pub(crate) struct IndexMutVisitor<'a, T> {
     /// level `l` points to `>= target` (or has no link at that level).
     /// Pre-filled with `head` so that every level has a valid precursor even
     /// when the target is before the first real node.
-    precursors: Vec<NonNull<Node<T>>>,
+    precursors: ArrayVec<NonNull<Node<T, N>>, N>,
     /// For each level `l`: the cumulative distance already traversed at level
     /// `l` when the precursor at that level was recorded.  Together with the
     /// precursor's link distance this is sufficient to compute the new link
     /// distances after insertion or removal.
-    precursor_distances: Vec<usize>,
+    precursor_distances: ArrayVec<usize, N>,
     /// Ties the raw pointer lifetime to `'a`.
-    _marker: PhantomData<&'a mut Node<T>>,
+    _marker: PhantomData<&'a mut Node<T, N>>,
 }
 
-impl<'a, T> IndexMutVisitor<'a, T> {
+impl<'a, T, const N: usize> IndexMutVisitor<'a, T, N> {
     /// Create a new mutable index visitor starting at `head`.
     ///
     /// # Arguments
     ///
     /// - `head`: The head node of the skip list.
     /// - `target`: The 0-based index to locate.
-    pub(crate) fn new(head: &'a mut Node<T>, target: usize) -> Self {
+    pub(crate) fn new(head: &'a mut Node<T, N>, target: usize) -> Self {
         let max_levels = head.level();
         let current = NonNull::from(&*head);
         Self {
@@ -69,8 +71,8 @@ impl<'a, T> IndexMutVisitor<'a, T> {
             // Every level starts with `head` as its precursor: the head is
             // always before every real node, so it is a valid precursor for
             // any target index.
-            precursors: vec![current; max_levels],
-            precursor_distances: vec![0; max_levels],
+            precursors: iter::repeat_n(current, max_levels).collect(),
+            precursor_distances: iter::repeat_n(0, max_levels).collect(),
             _marker: PhantomData,
         }
     }
@@ -93,16 +95,22 @@ impl<'a, T> IndexMutVisitor<'a, T> {
     /// - `precursors[l]` is the last node at level `l` before the target.
     /// - `precursor_distances[l]` is the cumulative rank of that precursor.
     #[expect(clippy::type_complexity, reason = "internal code")]
-    pub(crate) fn into_parts(self) -> (NonNull<Node<T>>, Vec<NonNull<Node<T>>>, Vec<usize>) {
+    pub(crate) fn into_parts(
+        self,
+    ) -> (
+        NonNull<Node<T, N>>,
+        ArrayVec<NonNull<Node<T, N>>, N>,
+        ArrayVec<usize, N>,
+    ) {
         (self.current, self.precursors, self.precursor_distances)
     }
 }
 
-impl<T> Visitor for IndexMutVisitor<'_, T> {
+impl<T, const N: usize> Visitor for IndexMutVisitor<'_, T, N> {
     /// Node references are raw const pointers to avoid lifetime conflicts with
     /// the `&mut` borrow.  Callers that need a shared reference can convert
     /// via [`NonNull::as_ref`] inside an `unsafe` block.
-    type NodeRef = NonNull<Node<T>>;
+    type NodeRef = NonNull<Node<T, N>>;
 
     fn current(&self) -> Self::NodeRef {
         self.current
@@ -130,10 +138,10 @@ impl<T> Visitor for IndexMutVisitor<'_, T> {
         // Borrow only the links slice for the duration of the for loop, then
         // drop the reference so `self.current` can be re-borrowed for `next`.
         {
-            // SAFETY: `self.current` was obtained from a valid `&mut Node<T>`
+            // SAFETY: `self.current` was obtained from a valid `&mut Node<T, N>`
             // during construction or from a link/next pointer during traversal.
             // No other `&mut` to the same node exists while we hold `self`.
-            let current_ref: &Node<T> = unsafe { self.current.as_ref() };
+            let current_ref: &Node<T, N> = unsafe { self.current.as_ref() };
             let links = current_ref.links();
 
             for level in (0..self.level).rev() {
@@ -184,9 +192,9 @@ impl<T> Visitor for IndexMutVisitor<'_, T> {
     }
 }
 
-impl<T> VisitorMut for IndexMutVisitor<'_, T> {
-    type NodeMut = NonNull<Node<T>>;
-    type Precursor = NonNull<Node<T>>;
+impl<T, const N: usize> VisitorMut for IndexMutVisitor<'_, T, N> {
+    type NodeMut = NonNull<Node<T, N>>;
+    type Precursor = NonNull<Node<T, N>>;
 
     fn current_mut(&mut self) -> Self::NodeMut {
         self.current
@@ -210,12 +218,12 @@ mod tests {
     use super::IndexMutVisitor;
     use crate::node::{
         Node,
-        tests::skiplist,
+        tests::{MAX_LEVELS, skiplist},
         visitor::{Step, Visitor, VisitorMut},
     };
 
     #[rstest]
-    fn find_index_2(skiplist: Result<Box<Node<u8>>>) -> Result<()> {
+    fn find_index_2(skiplist: Result<Box<Node<u8, MAX_LEVELS>>>) -> Result<()> {
         let mut head = skiplist?;
         let mut visitor = IndexMutVisitor::new(&mut head, 2);
 
@@ -229,7 +237,7 @@ mod tests {
     }
 
     #[rstest]
-    fn find_index_not_found(skiplist: Result<Box<Node<u8>>>) -> Result<()> {
+    fn find_index_not_found(skiplist: Result<Box<Node<u8, MAX_LEVELS>>>) -> Result<()> {
         let mut head = skiplist?;
         let mut visitor = IndexMutVisitor::new(&mut head, 5);
 
@@ -243,7 +251,7 @@ mod tests {
     /// After traversal, every precursor must point to a node whose index is
     /// strictly less than the target.
     #[rstest]
-    fn precursors_are_before_target(skiplist: Result<Box<Node<u8>>>) -> Result<()> {
+    fn precursors_are_before_target(skiplist: Result<Box<Node<u8, MAX_LEVELS>>>) -> Result<()> {
         let mut head = skiplist?;
 
         // Target = 3 (node v3, value 3).
@@ -258,7 +266,9 @@ mod tests {
 
     /// Stepping past the end of the list produces `Exhausted`.
     #[rstest]
-    fn exhausted_when_target_out_of_range(skiplist: Result<Box<Node<u8>>>) -> Result<()> {
+    fn exhausted_when_target_out_of_range(
+        skiplist: Result<Box<Node<u8, MAX_LEVELS>>>,
+    ) -> Result<()> {
         let mut head = skiplist?;
         let mut visitor = IndexMutVisitor::new(&mut head, 99);
 
@@ -278,7 +288,7 @@ mod tests {
 
     /// `current_mut()` returns the same pointer as `current()`.
     #[rstest]
-    fn current_mut_matches_current(skiplist: Result<Box<Node<u8>>>) -> Result<()> {
+    fn current_mut_matches_current(skiplist: Result<Box<Node<u8, MAX_LEVELS>>>) -> Result<()> {
         let mut head = skiplist?;
         let mut visitor = IndexMutVisitor::new(&mut head, 2);
         visitor.traverse();
@@ -289,7 +299,7 @@ mod tests {
 
     /// `precursors()` has one entry per level.
     #[rstest]
-    fn precursors_length(skiplist: Result<Box<Node<u8>>>) -> Result<()> {
+    fn precursors_length(skiplist: Result<Box<Node<u8, MAX_LEVELS>>>) -> Result<()> {
         let mut head = skiplist?;
         let max_levels = head.level();
         let mut visitor = IndexMutVisitor::new(&mut head, 2);

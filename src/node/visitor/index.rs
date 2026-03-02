@@ -7,13 +7,14 @@ use crate::node::{
 
 /// Traverses a skip list to locate a node at a given 0-based rank.
 ///
-/// This visitor is used to find a node by its index. It starts at the head
-/// of the skiplist and traverses down the list until it reaches the target
-/// index.
-pub(crate) struct IndexVisitor<'a, T> {
+/// Starts at the head sentinel (which does not hold a value) and advances
+/// level-by-level using skip links, then falls back to the level-0 next
+/// pointer. After traversal, `found()` returns `true` if the target index
+/// was reached exactly.
+pub(crate) struct IndexVisitor<'a, T, const N: usize> {
     /// The current node being visited.
-    current: &'a Node<T>,
-    /// The current index of the visitor.
+    current: &'a Node<T, N>,
+    /// The cumulative rank of `current` relative to the head (head = 0).
     index: usize,
     /// The highest skip-link level still under consideration.
     // Starts at node.level() and decreases as we descend the tower.
@@ -22,16 +23,14 @@ pub(crate) struct IndexVisitor<'a, T> {
     target: usize,
 }
 
-impl<'a, T> IndexVisitor<'a, T> {
-    /// Create a new index visitor.
-    ///
-    /// This creates a new index traverser starting at the head of the skiplist.
+impl<'a, T, const N: usize> IndexVisitor<'a, T, N> {
+    /// Create a new index visitor starting at `node` (the head sentinel).
     ///
     /// # Arguments
     ///
-    /// - `node`: The head of the skiplist.
-    /// - `target`: The target index to find.
-    pub(crate) fn new(node: &'a Node<T>, target: usize) -> Self {
+    /// * `node` - The head sentinel of the skip list (rank 0, no value).
+    /// * `target` - The 0-based rank of the node to locate.
+    pub(crate) fn new(node: &'a Node<T, N>, target: usize) -> Self {
         Self {
             current: node,
             index: 0,
@@ -41,8 +40,8 @@ impl<'a, T> IndexVisitor<'a, T> {
     }
 }
 
-impl<'a, T> Visitor for IndexVisitor<'a, T> {
-    type NodeRef = &'a Node<T>;
+impl<'a, T, const N: usize> Visitor for IndexVisitor<'a, T, N> {
+    type NodeRef = &'a Node<T, N>;
 
     fn current(&self) -> Self::NodeRef {
         self.current
@@ -102,13 +101,13 @@ mod tests {
     use super::IndexVisitor;
     use crate::node::{
         Node,
-        tests::skiplist,
+        tests::{MAX_LEVELS, skiplist},
         visitor::{Step, Visitor},
     };
 
     /// Test the `IndexVisitor` for finding a node by index.
     #[rstest]
-    fn index_traverser_step(skiplist: Result<Box<Node<u8>>>) -> Result<()> {
+    fn index_traverser_step(skiplist: Result<Box<Node<u8, MAX_LEVELS>>>) -> Result<()> {
         let head = skiplist?;
         let mut traverser = IndexVisitor::new(&head, 2);
 
@@ -124,7 +123,7 @@ mod tests {
     }
 
     #[rstest]
-    fn index_traverser_step_none(skiplist: Result<Box<Node<u8>>>) -> Result<()> {
+    fn index_traverser_step_none(skiplist: Result<Box<Node<u8, MAX_LEVELS>>>) -> Result<()> {
         let head = skiplist?;
         let mut traverser = IndexVisitor::new(&head, 5);
 
@@ -140,7 +139,7 @@ mod tests {
     }
 
     #[rstest]
-    fn index_traverser_traverse(skiplist: Result<Box<Node<u8>>>) -> Result<()> {
+    fn index_traverser_traverse(skiplist: Result<Box<Node<u8, MAX_LEVELS>>>) -> Result<()> {
         let head = skiplist?;
         let mut traverser = IndexVisitor::new(&head, 2);
 
@@ -152,7 +151,9 @@ mod tests {
     }
 
     #[rstest]
-    fn index_traverser_traverse_not_found(skiplist: Result<Box<Node<u8>>>) -> Result<()> {
+    fn index_traverser_traverse_not_found(
+        skiplist: Result<Box<Node<u8, MAX_LEVELS>>>,
+    ) -> Result<()> {
         let head = skiplist?;
         let mut traverser = IndexVisitor::new(&head, 5);
 

@@ -18,7 +18,7 @@ use crate::{
     skip_list::SkipList,
 };
 
-impl<T, G: LevelGenerator> SkipList<T, G> {
+impl<T, G: LevelGenerator, const N: usize> SkipList<T, N, G> {
     /// Returns a reference to the element at position `index`, or `None` if
     /// `index` is out of bounds.
     ///
@@ -130,7 +130,7 @@ impl<T, G: LevelGenerator> SkipList<T, G> {
         // the front node can exist concurrently.  The `?` propagates None when
         // the list is empty.  The returned &mut T is bounded by &mut self.
         unsafe {
-            let front_ptr: *mut Node<T> = NonNull::from(self.head.next()?).as_ptr();
+            let front_ptr: *mut Node<T, N> = NonNull::from(self.head.next()?).as_ptr();
             (*front_ptr).value_mut()
         }
     }
@@ -191,7 +191,7 @@ impl<T, G: LevelGenerator> SkipList<T, G> {
 
 // MARK: Index
 
-impl<T, G: LevelGenerator> Index<usize> for SkipList<T, G> {
+impl<T, G: LevelGenerator, const N: usize> Index<usize> for SkipList<T, N, G> {
     type Output = T;
 
     /// Returns a reference to the element at `index`.
@@ -227,7 +227,7 @@ impl<T, G: LevelGenerator> Index<usize> for SkipList<T, G> {
     }
 }
 
-impl<T, G: LevelGenerator> IndexMut<usize> for SkipList<T, G> {
+impl<T, G: LevelGenerator, const N: usize> IndexMut<usize> for SkipList<T, N, G> {
     /// Returns a mutable reference to the element at `index`.
     ///
     /// # Panics
