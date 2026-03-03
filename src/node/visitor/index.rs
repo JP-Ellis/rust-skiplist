@@ -80,7 +80,7 @@ impl<'a, T, const N: usize> Visitor for IndexVisitor<'a, T, N> {
         // pointer. By construction, `self.index < self.target` here, so if a
         // next node exists we can always advance by 1.
         self.level = 0;
-        if let Some(next) = self.current.next() {
+        if let Some(next) = self.current.next_as_ref() {
             self.current = next;
             self.index = self.index.saturating_add(1);
             return Step::Advanced(self.current);

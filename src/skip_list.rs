@@ -26,7 +26,7 @@ use crate::{
     level_generator::{LevelGenerator, geometric::Geometric},
     node::{
         Node,
-        visitor::{IndexVisitor, Visitor},
+        visitor::{IndexMutVisitor, Visitor},
     },
 };
 
@@ -69,7 +69,21 @@ const DEFAULT_P: f64 = 0.5;
 pub struct SkipList<T, const N: usize = 16, G: LevelGenerator = Geometric> {
     /// Sentinel head node. Never holds a value; its `links` array has length
     /// equal to the maximum number of levels.
-    head: Box<Node<T, N>>,
+    ///
+    /// Stored as a raw NonNull pointer (not Box) so that all accesses,
+    /// whether shared (`head_ref`) or exclusive (`head_mut`, `insert_after`,
+    /// etc.), share the same provenance tag.  Under Tree Borrows, `Box<T>`
+    /// receives special "Unique" retagging that creates a new Reserved child
+    /// tag; write accesses through any sibling tag then disable the Box's tag,
+    /// causing false UB reports.  Using `NonNull` with a single provenance tag
+    /// avoids this problem entirely.
+    ///
+    /// # Invariant
+    ///
+    /// `head` was allocated via `Box::into_raw(Box::new(...))` in
+    /// [`with_level_generator`] and is exclusively owned by this `SkipList`.
+    /// It is freed in `Drop`.
+    head: NonNull<Node<T, N>>,
     /// Non-owning pointer to the last data node, or `None` when the list is
     /// empty.  Maintained by every insert and remove operation to provide
     /// `$O(1)$` [`back`](SkipList::back) / [`back_mut`](SkipList::back_mut)
@@ -80,6 +94,20 @@ pub struct SkipList<T, const N: usize = 16, G: LevelGenerator = Geometric> {
     /// Level generator used to determine the tower height of each new node.
     generator: G,
 }
+
+// MARK: Send / Sync
+//
+// `NonNull<T>` is neither `Send` nor `Sync`, so `SkipList` would not be
+// auto-Send/Sync.  We provide the impls manually: `SkipList<T,N,G>` is the
+// sole owner of every heap-allocated node; no raw pointer is shared across
+// threads without `&mut`.  The bounds mirror those of `Vec<T>`.
+//
+// SAFETY: `SkipList<T,N,G>` exclusively owns all nodes.  No raw pointer is
+// shared across threads without exclusive access.
+unsafe impl<T: Send, G: LevelGenerator + Send, const N: usize> Send for SkipList<T, N, G> {}
+// SAFETY: `SkipList<T,N,G>` exclusively owns all nodes.  No raw pointer is
+// shared across threads without exclusive access.
+unsafe impl<T: Sync, G: LevelGenerator + Sync, const N: usize> Sync for SkipList<T, N, G> {}
 
 // MARK: Constructors (default level generator)
 
@@ -201,12 +229,49 @@ impl<T, G: LevelGenerator, const N: usize> SkipList<T, N, G> {
             max_levels <= N,
             "generator.total() ({max_levels}) exceeds node capacity ({N})"
         );
+        // Allocate the sentinel head node as a raw pointer so that all
+        // subsequent accesses share the same provenance tag.  Storing it as
+        // `Box<Node>` would cause Miri (Tree Borrows) to assign a new Reserved
+        // child tag on every Box-retag, making sibling writes through other
+        // child tags appear as foreign writes that disable the Box's tag.
+        //
+        // SAFETY: `Box::into_raw` transfers ownership of the allocation to this
+        // struct.  It is freed in `Drop::drop` via `Box::from_raw`.
+        let head = unsafe {
+            NonNull::new_unchecked(Box::into_raw(Box::new(Node::new(max_levels.min(N)))))
+        };
         Self {
-            head: Box::new(Node::new(max_levels.min(N))),
+            head,
             tail: None,
             len: 0,
             generator,
         }
+    }
+
+    /// Returns a shared reference to the sentinel head node.
+    ///
+    /// # Safety invariant
+    ///
+    /// `self.head` is always a live, valid allocation for the lifetime of
+    /// `&self`.
+    #[inline]
+    fn head_ref(&self) -> &Node<T, N> {
+        // SAFETY: `self.head` was allocated in `with_level_generator` and
+        // remains valid for `&self`'s lifetime.
+        unsafe { self.head.as_ref() }
+    }
+
+    /// Returns an exclusive reference to the sentinel head node.
+    ///
+    /// # Safety invariant
+    ///
+    /// `self.head` is always a live, valid allocation for the lifetime of
+    /// `&mut self`.  `&mut self` guarantees exclusive access to all nodes.
+    #[inline]
+    fn head_mut(&mut self) -> &mut Node<T, N> {
+        // SAFETY: `self.head` was allocated in `with_level_generator` and
+        // remains valid.  `&mut self` guarantees no other live references.
+        unsafe { self.head.as_mut() }
     }
 
     /// Returns the number of elements in the list.
@@ -259,9 +324,10 @@ impl<T, G: LevelGenerator, const N: usize> SkipList<T, N, G> {
             "index {index} out of bounds (len={})",
             self.len
         );
-        IndexVisitor::new(&self.head, index.saturating_add(1))
+        // Rank is 1-based: rank 1 is the first data node (immediately after
+        // the sentinel head).  Add 1 to convert the 0-based index.
+        IndexMutVisitor::new(self.head, index.saturating_add(1))
             .traverse()
-            .map(NonNull::from)
             .expect("node at index exists because index < self.len")
     }
 }
@@ -272,6 +338,22 @@ impl<T, const N: usize> Default for SkipList<T, N, Geometric> {
     #[inline]
     fn default() -> Self {
         Self::new()
+    }
+}
+
+// MARK: Drop
+
+impl<T, G: LevelGenerator, const N: usize> Drop for SkipList<T, N, G> {
+    #[inline]
+    fn drop(&mut self) {
+        // Reconstruct the `Box` that owns the head allocation and drop it.
+        // `Node::drop` walks the entire `next` chain and frees every data node
+        // one at a time (O(n), non-recursive).
+        //
+        // SAFETY: `self.head` was allocated via `Box::into_raw(Box::new(...))`
+        // in `with_level_generator` and is exclusively owned by this
+        // `SkipList` for its entire lifetime.
+        unsafe { drop(Box::from_raw(self.head.as_ptr())) };
     }
 }
 

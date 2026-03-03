@@ -59,7 +59,8 @@ impl<T, G: LevelGenerator, const N: usize> SkipList<T, N, G> {
         // node is a separately heap-allocated Box.  The closure returns before
         // any structural mutation occurs.
         let (new_rank, new_tail) = unsafe {
-            self.head.filter_rebuild(
+            Node::filter_rebuild(
+                self.head,
                 |cur| {
                     let keep = match prev_kept {
                         None => true,
@@ -187,7 +188,8 @@ impl<T, G: LevelGenerator, const N: usize> SkipList<T, N, G> {
         // exists.  The closure reads the value and returns before any
         // structural mutation occurs.
         let (new_rank, new_tail) = unsafe {
-            self.head.filter_rebuild(
+            Node::filter_rebuild(
+                self.head,
                 |cur| {
                     // SAFETY: cur is a live, heap-allocated data node.
                     f((*cur).value().expect("data node has a value"))
@@ -253,7 +255,8 @@ impl<T, G: LevelGenerator, const N: usize> SkipList<T, N, G> {
         // exists.  The &mut T borrow created by `value_mut()` expires before
         // `filter_rebuild` performs any structural mutation on the node.
         let (new_rank, new_tail) = unsafe {
-            self.head.filter_rebuild(
+            Node::filter_rebuild(
+                self.head,
                 |cur| {
                     // SAFETY: cur is a live, heap-allocated data node.
                     f((*cur).value_mut().expect("data node has a value"))

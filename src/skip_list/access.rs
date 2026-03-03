@@ -4,10 +4,7 @@
 //! the [`Index`](core::ops::Index) / [`IndexMut`](core::ops::IndexMut)
 //! operators for position-based element access.
 
-use core::{
-    ops::{Index, IndexMut},
-    ptr::NonNull,
-};
+use core::ops::{Index, IndexMut};
 
 use crate::{
     level_generator::LevelGenerator,
@@ -44,7 +41,7 @@ impl<T, G: LevelGenerator, const N: usize> SkipList<T, N, G> {
         if index >= self.len {
             return None;
         }
-        IndexVisitor::new(&self.head, index.saturating_add(1))
+        IndexVisitor::new(self.head_ref(), index.saturating_add(1))
             .traverse()
             .and_then(|node| node.value())
     }
@@ -99,7 +96,7 @@ impl<T, G: LevelGenerator, const N: usize> SkipList<T, N, G> {
     #[inline]
     #[must_use]
     pub fn front(&self) -> Option<&T> {
-        self.head.next()?.value()
+        self.head_ref().next_as_ref()?.value()
     }
 
     /// Returns a mutable reference to the first element, or `None` if the
@@ -124,15 +121,15 @@ impl<T, G: LevelGenerator, const N: usize> SkipList<T, N, G> {
     #[inline]
     #[must_use]
     pub fn front_mut(&mut self) -> Option<&mut T> {
-        // SAFETY: &mut self guarantees exclusive access to all nodes.  We
-        // convert the shared reference from next() to a raw pointer and
-        // re-borrow it as &mut T, which is sound because no other reference to
-        // the front node can exist concurrently.  The `?` propagates None when
-        // the list is empty.  The returned &mut T is bounded by &mut self.
-        unsafe {
-            let front_ptr: *mut Node<T, N> = NonNull::from(self.head.next()?).as_ptr();
-            (*front_ptr).value_mut()
-        }
+        // SAFETY: `&mut self` guarantees exclusive access; `as_ref()` on the
+        // head sentinel is valid for its lifetime.  `next()` returns the
+        // stored `NonNull` directly, avoiding a Frozen provenance tag under
+        // Tree Borrows.  The `?` propagates `None` when the list is empty.
+        let front_ptr: *mut Node<T, N> =
+            unsafe { self.head.as_ref().next()?.as_ptr() };
+        // SAFETY: `front_ptr` is a live, exclusively-owned node derived
+        // immediately above; the returned `&mut T` is bounded by `&mut self`.
+        unsafe { (*front_ptr).value_mut() }
     }
 
     /// Returns a reference to the last element, or `None` if the list is

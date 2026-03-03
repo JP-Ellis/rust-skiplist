@@ -103,7 +103,7 @@ impl<'a, T, Q: ?Sized, F: Fn(&T, &Q) -> Ordering, const N: usize> Visitor
 
         // No skip-link can advance us; fall back to the sequential next pointer.
         self.level = 0;
-        if let Some(next) = self.current.next() {
+        if let Some(next) = self.current.next_as_ref() {
             let ord = next
                 .value()
                 .map_or(Ordering::Less, |v| (self.cmp)(v, self.target));

@@ -70,7 +70,7 @@ impl<T, G: LevelGenerator, const N: usize> SkipList<T, N, G> {
         // into_parts() releases the &mut borrow so the subsequent unsafe block
         // can take raw pointers to nodes.
         let (_, precursors, precursor_distances) = {
-            let mut visitor = IndexMutVisitor::new(&mut self.head, new_rank);
+            let mut visitor = IndexMutVisitor::new(self.head, new_rank);
             visitor.traverse();
             visitor.into_parts()
         };
@@ -82,16 +82,12 @@ impl<T, G: LevelGenerator, const N: usize> SkipList<T, N, G> {
         // each iteration accesses a distinct links[l] index.
         let new_node_nonnull: NonNull<Node<T, N>> = unsafe {
             // Insert the new node right after the level-0 predecessor.
-            let pred0_ptr = precursors[0].as_ptr();
-            (*pred0_ptr).insert_after(Node::with_value(height, value));
-
-            // Obtain a raw pointer to the new node without holding a live &mut.
-            let new_raw: *mut Node<T, N> = NonNull::from(
-                (*pred0_ptr)
-                    .next_mut()
-                    .expect("node was just inserted after predecessor"),
-            )
-            .as_ptr();
+            // insert_after returns node_ptr with the allocation's root provenance
+            // (Box::into_raw).  Storing it directly in Links avoids the
+            // sibling-tag issue that arises when using next_mut() (which creates
+            // a child reborrow that subsequent insert_after writes can Disable).
+            let new_raw: *mut Node<T, N> =
+                Node::insert_after(precursors[0], Node::with_value(height, value)).as_ptr();
 
             // Wire skip links.
             //
@@ -133,7 +129,7 @@ impl<T, G: LevelGenerator, const N: usize> SkipList<T, N, G> {
                 }
             }
 
-            // SAFETY: new_raw was derived from NonNull::from(next_mut()), so it
+            // SAFETY: new_raw comes from insert_after (Box::into_raw), so it
             // is non-null.  Return it so self.tail can be updated outside.
             NonNull::new_unchecked(new_raw)
         };
@@ -199,7 +195,7 @@ impl<T, G: LevelGenerator, const N: usize> SkipList<T, N, G> {
         // IndexMutVisitor records the predecessor at each level.
         // into_parts() releases the &mut borrow so the unsafe block can use raw ptrs.
         let (_, precursors, precursor_distances) = {
-            let mut visitor = IndexMutVisitor::new(&mut self.head, target_rank);
+            let mut visitor = IndexMutVisitor::new(self.head, target_rank);
             visitor.traverse();
             visitor.into_parts()
         };
@@ -354,8 +350,16 @@ mod tests {
         list.insert(0, 42);
         assert_eq!(list.len(), 1);
         assert!(!list.is_empty());
-        assert_eq!(list.head.next().and_then(|n| n.value()), Some(&42));
-        assert!(list.head.next().and_then(|n| n.next()).is_none());
+        assert_eq!(
+            list.head_ref().next_as_ref().and_then(|n| n.value()),
+            Some(&42)
+        );
+        assert!(
+            list.head_ref()
+                .next_as_ref()
+                .and_then(|n| n.next_as_ref())
+                .is_none()
+        );
     }
 
     #[test]
@@ -365,13 +369,13 @@ mod tests {
         list.push_back(3);
         list.insert(0, 1);
         assert_eq!(list.len(), 3);
-        let n1 = list.head.next().expect("n1");
+        let n1 = list.head_ref().next_as_ref().expect("n1");
         assert_eq!(n1.value(), Some(&1));
-        let n2 = n1.next().expect("n2");
+        let n2 = n1.next_as_ref().expect("n2");
         assert_eq!(n2.value(), Some(&2));
-        let n3 = n2.next().expect("n3");
+        let n3 = n2.next_as_ref().expect("n3");
         assert_eq!(n3.value(), Some(&3));
-        assert!(n3.next().is_none());
+        assert!(n3.next_as_ref().is_none());
     }
 
     #[test]
@@ -381,13 +385,13 @@ mod tests {
         list.push_back(2);
         list.insert(2, 3);
         assert_eq!(list.len(), 3);
-        let n1 = list.head.next().expect("n1");
+        let n1 = list.head_ref().next_as_ref().expect("n1");
         assert_eq!(n1.value(), Some(&1));
-        let n2 = n1.next().expect("n2");
+        let n2 = n1.next_as_ref().expect("n2");
         assert_eq!(n2.value(), Some(&2));
-        let n3 = n2.next().expect("n3");
+        let n3 = n2.next_as_ref().expect("n3");
         assert_eq!(n3.value(), Some(&3));
-        assert!(n3.next().is_none());
+        assert!(n3.next_as_ref().is_none());
     }
 
     #[test]
@@ -397,13 +401,13 @@ mod tests {
         list.push_back(3);
         list.insert(1, 2);
         assert_eq!(list.len(), 3);
-        let n1 = list.head.next().expect("n1");
+        let n1 = list.head_ref().next_as_ref().expect("n1");
         assert_eq!(n1.value(), Some(&1));
-        let n2 = n1.next().expect("n2");
+        let n2 = n1.next_as_ref().expect("n2");
         assert_eq!(n2.value(), Some(&2));
-        let n3 = n2.next().expect("n3");
+        let n3 = n2.next_as_ref().expect("n3");
         assert_eq!(n3.value(), Some(&3));
-        assert!(n3.next().is_none());
+        assert!(n3.next_as_ref().is_none());
     }
 
     #[test]
@@ -446,13 +450,13 @@ mod tests {
         assert_eq!(list.len(), 3);
         // head.links[0] → n1(1) at distance 1 (unchanged)
         {
-            let link: &Link<_, _> = list.head.links()[0].as_ref().expect("head link");
+            let link: &Link<_, _> = list.head_ref().links()[0].as_ref().expect("head link");
             assert_eq!(link.distance().get(), 1);
             assert_eq!(unsafe { link.node().as_ref() }.value(), Some(&1));
         }
         // n1(1).links[0] → new(2) at distance 1
         {
-            let n1 = list.head.next().expect("n1");
+            let n1 = list.head_ref().next_as_ref().expect("n1");
             assert_eq!(n1.value(), Some(&1));
             let link: &Link<_, _> = n1.links()[0].as_ref().expect("n1 link");
             assert_eq!(link.distance().get(), 1);
@@ -460,7 +464,12 @@ mod tests {
         }
         // new(2).links[0] → n3(3) at distance 1
         {
-            let new_node = list.head.next().expect("n1").next().expect("new_node");
+            let new_node = list
+                .head_ref()
+                .next_as_ref()
+                .expect("n1")
+                .next_as_ref()
+                .expect("new_node");
             assert_eq!(new_node.value(), Some(&2));
             let link: &Link<_, _> = new_node.links()[0].as_ref().expect("new_node link");
             assert_eq!(link.distance().get(), 1);
@@ -469,12 +478,12 @@ mod tests {
         // n3(3).links[0] = None
         {
             let n3 = list
-                .head
-                .next()
+                .head_ref()
+                .next_as_ref()
                 .expect("n1")
-                .next()
+                .next_as_ref()
                 .expect("new_node")
-                .next()
+                .next_as_ref()
                 .expect("n3");
             assert_eq!(n3.value(), Some(&3));
             assert!(n3.links()[0].is_none());
@@ -492,13 +501,13 @@ mod tests {
         assert_eq!(list.pop_back(), Some(3)); // [0, 2]
         list.insert(2, 4); // [0, 2, 4]
         assert_eq!(list.len(), 3);
-        let n1 = list.head.next().expect("n1");
+        let n1 = list.head_ref().next_as_ref().expect("n1");
         assert_eq!(n1.value(), Some(&0));
-        let n2 = n1.next().expect("n2");
+        let n2 = n1.next_as_ref().expect("n2");
         assert_eq!(n2.value(), Some(&2));
-        let n3 = n2.next().expect("n3");
+        let n3 = n2.next_as_ref().expect("n3");
         assert_eq!(n3.value(), Some(&4));
-        assert!(n3.next().is_none());
+        assert!(n3.next_as_ref().is_none());
     }
 
     #[test]
@@ -511,11 +520,11 @@ mod tests {
         list.insert(3, 4); // [0, 1, 2, 4]
         list.insert(3, 3); // [0, 1, 2, 3, 4]
         assert_eq!(list.len(), 5);
-        let mut node = list.head.next().expect("first");
+        let mut node = list.head_ref().next_as_ref().expect("first");
         for expected in 0..5_i32 {
             assert_eq!(node.value(), Some(&expected));
             if expected < 4 {
-                node = node.next().expect("next");
+                node = node.next_as_ref().expect("next");
             }
         }
     }
@@ -529,7 +538,7 @@ mod tests {
         assert_eq!(list.remove(0), 42);
         assert_eq!(list.len(), 0);
         assert!(list.is_empty());
-        assert!(list.head.next().is_none());
+        assert!(list.head_ref().next_as_ref().is_none());
     }
 
     #[test]
@@ -540,11 +549,11 @@ mod tests {
         list.push_back(3);
         assert_eq!(list.remove(0), 1);
         assert_eq!(list.len(), 2);
-        let n1 = list.head.next().expect("n1");
+        let n1 = list.head_ref().next_as_ref().expect("n1");
         assert_eq!(n1.value(), Some(&2));
-        let n2 = n1.next().expect("n2");
+        let n2 = n1.next_as_ref().expect("n2");
         assert_eq!(n2.value(), Some(&3));
-        assert!(n2.next().is_none());
+        assert!(n2.next_as_ref().is_none());
     }
 
     #[test]
@@ -555,11 +564,11 @@ mod tests {
         list.push_back(3);
         assert_eq!(list.remove(2), 3);
         assert_eq!(list.len(), 2);
-        let n1 = list.head.next().expect("n1");
+        let n1 = list.head_ref().next_as_ref().expect("n1");
         assert_eq!(n1.value(), Some(&1));
-        let n2 = n1.next().expect("n2");
+        let n2 = n1.next_as_ref().expect("n2");
         assert_eq!(n2.value(), Some(&2));
-        assert!(n2.next().is_none());
+        assert!(n2.next_as_ref().is_none());
     }
 
     #[test]
@@ -570,11 +579,11 @@ mod tests {
         list.push_back(3);
         assert_eq!(list.remove(1), 2);
         assert_eq!(list.len(), 2);
-        let n1 = list.head.next().expect("n1");
+        let n1 = list.head_ref().next_as_ref().expect("n1");
         assert_eq!(n1.value(), Some(&1));
-        let n2 = n1.next().expect("n2");
+        let n2 = n1.next_as_ref().expect("n2");
         assert_eq!(n2.value(), Some(&3));
-        assert!(n2.next().is_none());
+        assert!(n2.next_as_ref().is_none());
     }
 
     #[test]
@@ -630,13 +639,13 @@ mod tests {
         assert_eq!(list.len(), 2);
         // head.links[0] → n1(1) at distance 1 (unchanged)
         {
-            let link: &Link<_, _> = list.head.links()[0].as_ref().expect("head link");
+            let link: &Link<_, _> = list.head_ref().links()[0].as_ref().expect("head link");
             assert_eq!(link.distance().get(), 1);
             assert_eq!(unsafe { link.node().as_ref() }.value(), Some(&1));
         }
         // n1(1).links[0] → n3(3) at distance 1 (previously pointed to n2)
         {
-            let n1 = list.head.next().expect("n1");
+            let n1 = list.head_ref().next_as_ref().expect("n1");
             assert_eq!(n1.value(), Some(&1));
             let link: &Link<_, _> = n1.links()[0].as_ref().expect("n1 link");
             assert_eq!(link.distance().get(), 1);
@@ -644,7 +653,12 @@ mod tests {
         }
         // n3(3).links[0] = None
         {
-            let n3 = list.head.next().expect("n1").next().expect("n3");
+            let n3 = list
+                .head_ref()
+                .next_as_ref()
+                .expect("n1")
+                .next_as_ref()
+                .expect("n3");
             assert_eq!(n3.value(), Some(&3));
             assert!(n3.links()[0].is_none());
         }
@@ -662,11 +676,11 @@ mod tests {
         list.push_back(5); // [4, 3, 5]
         assert_eq!(list.remove(2), 5); // [4, 3]
         assert_eq!(list.len(), 2);
-        let n1 = list.head.next().expect("n1");
+        let n1 = list.head_ref().next_as_ref().expect("n1");
         assert_eq!(n1.value(), Some(&4));
-        let n2 = n1.next().expect("n2");
+        let n2 = n1.next_as_ref().expect("n2");
         assert_eq!(n2.value(), Some(&3));
-        assert!(n2.next().is_none());
+        assert!(n2.next_as_ref().is_none());
     }
 
     #[test]
@@ -700,7 +714,7 @@ mod tests {
             list.remove(list.len() / 2);
         }
         assert_eq!(list.len(), 0);
-        assert!(list.head.next().is_none());
+        assert!(list.head_ref().next_as_ref().is_none());
     }
 
     // MARK: swap

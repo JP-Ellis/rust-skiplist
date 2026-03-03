@@ -48,7 +48,8 @@ impl<T, G: LevelGenerator, const N: usize> SkipList<T, N, G> {
     #[inline]
     pub fn iter(&self) -> Iter<'_, T, N> {
         Iter {
-            front: self.head.next().map(NonNull::from),
+            // SAFETY: self.head is a valid, exclusively-owned head sentinel.
+            front: unsafe { self.head.as_ref() }.next(),
             back: self.tail,
             len: self.len,
             _marker: PhantomData,
@@ -85,7 +86,8 @@ impl<T, G: LevelGenerator, const N: usize> SkipList<T, N, G> {
     #[inline]
     pub fn iter_mut(&mut self) -> IterMut<'_, T, N> {
         IterMut {
-            front: self.head.next().map(NonNull::from),
+            // SAFETY: self.head is a valid, exclusively-owned head sentinel.
+            front: unsafe { self.head.as_ref().next() },
             back: self.tail,
             len: self.len,
             _marker: PhantomData,
@@ -303,7 +305,8 @@ impl<T, G: LevelGenerator, const N: usize> SkipList<T, N, G> {
         // modify the chain; the on_drop closure pops the node and extracts the
         // value before the box is dropped.
         let (new_rank, new_tail) = unsafe {
-            self.head.filter_rebuild(
+            Node::filter_rebuild(
+                self.head,
                 |_cur| {
                     let in_range = current_index >= start && current_index < end;
                     current_index = current_index.saturating_add(1);
@@ -357,7 +360,8 @@ impl<T, G: LevelGenerator, const N: usize> SkipList<T, N, G> {
     where
         F: FnMut(&mut T) -> bool,
     {
-        let current = self.head.next().map(NonNull::from);
+        // SAFETY: self.head is a valid, exclusively-owned head sentinel.
+        let current = unsafe { self.head.as_ref().next() };
         ExtractIf {
             current,
             any_removed: false,
@@ -486,7 +490,7 @@ impl<'a, T, const N: usize> Iterator for Iter<'a, T, N> {
         // No &mut references to any node exist while this shared Iter is
         // alive.
         let node: &'a Node<T, N> = unsafe { front_ptr.as_ref() };
-        self.front = node.next().map(NonNull::from);
+        self.front = node.next();
         self.len = self.len.saturating_sub(1);
         node.value()
     }
@@ -510,10 +514,10 @@ impl<'a, T, const N: usize> DoubleEndedIterator for Iter<'a, T, N> {
         // Walk backward.  The head sentinel has no value; the filter ensures
         // `back` becomes None when we step past the first data node.
         // `len` independently prevents accessing a stale `back` pointer.
+        // SAFETY: prev() returns a valid pointer into the same list allocation.
         self.back = node
             .prev()
-            .filter(|p| p.value().is_some())
-            .map(NonNull::from);
+            .filter(|p| unsafe { p.as_ref() }.value().is_some());
         self.len = self.len.saturating_sub(1);
         node.value()
     }
@@ -594,7 +598,7 @@ impl<T: fmt::Debug, const N: usize> fmt::Debug for IterMut<'_, T, N> {
             if let Some(v) = node.value() {
                 builder.entry(v);
             }
-            node_ptr = node.next().map(NonNull::from);
+            node_ptr = node.next();
             remaining = remaining.saturating_sub(1);
         }
         builder.finish()
@@ -617,8 +621,7 @@ impl<'a, T, const N: usize> Iterator for IterMut<'a, T, N> {
         // lifetime.  We advance self.front before returning, so no two calls
         // to next() can yield a reference to the same node.
         let node: &'a mut Node<T, N> = unsafe { front_ptr.as_mut() };
-        // node.next() is an immutable reborrow; it ends before value_mut().
-        self.front = node.next().map(NonNull::from);
+        self.front = node.next();
         self.len = self.len.saturating_sub(1);
         node.value_mut()
     }
@@ -643,10 +646,10 @@ impl<'a, T, const N: usize> DoubleEndedIterator for IterMut<'a, T, N> {
         // Walk backward.  The head sentinel has no value; the filter ensures
         // `back` becomes None when we step past the first data node.
         // `len` independently prevents accessing a stale `back` pointer.
+        // SAFETY: prev() returns a valid pointer into the same list allocation.
         self.back = node
             .prev()
-            .filter(|p| p.value().is_some())
-            .map(NonNull::from);
+            .filter(|p| unsafe { p.as_ref() }.value().is_some());
         self.len = self.len.saturating_sub(1);
         node.value_mut()
     }
@@ -895,7 +898,7 @@ where
             if let Some(v) = node.value() {
                 builder.entry(v);
             }
-            ptr = node.next().map(NonNull::from);
+            ptr = node.next();
         }
         builder.finish()
     }
@@ -932,7 +935,7 @@ where
             // We capture next_opt before any mutation of the current node.
             unsafe {
                 let current: *mut Node<T, N> = current_nn.as_ptr();
-                let next_opt = (*current).next().map(NonNull::from);
+                let next_opt = (*current).next();
 
                 let value_ref = (*current).value_mut().expect("data node has value");
                 if (self.pred)(value_ref) {
@@ -943,10 +946,9 @@ where
                     // the predecessor data node (or None if the list is now
                     // empty).
                     if self.list.tail == Some(current_nn) {
-                        self.list.tail = (*current)
-                            .prev()
-                            .filter(|p| p.value().is_some())
-                            .map(NonNull::from);
+                        // SAFETY: prev() returns a valid pointer into the
+                        // same list allocation.
+                        self.list.tail = (*current).prev().filter(|p| p.as_ref().value().is_some());
                     }
                     let mut boxed = (*current).pop();
                     return Some(boxed.take_value().expect("data node has value"));
@@ -986,7 +988,7 @@ where
         //
         // SAFETY: &'a mut SkipList is held exclusively.  All raw pointers
         // originate from its heap allocations.
-        let (_, new_tail) = unsafe { self.list.head.filter_rebuild(|_| true, |_| {}) };
+        let (_, new_tail) = unsafe { Node::filter_rebuild(self.list.head, |_| true, |_| {}) };
         self.list.tail = new_tail;
         // self.list.len is already correct: decremented in Iterator::next
         // once per removed element.

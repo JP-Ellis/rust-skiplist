@@ -49,22 +49,14 @@ impl<T, G: LevelGenerator, const N: usize> SkipList<T, N, G> {
     pub fn push_front(&mut self, value: T) {
         // height ∈ [1, max_levels]: generator.level() ∈ [0, total).
         let height = self.generator.level().saturating_add(1);
-        let max_levels = self.head.level();
+        let max_levels = self.head_ref().level();
 
         // SAFETY: Node::with_value produces a detached node (prev = next = None),
         // which is the only kind insert_after accepts.
-        unsafe { self.head.insert_after(Node::with_value(height, value)) };
-
-        // SAFETY: insert_after placed new_node immediately after head on the heap.
-        // Converting the &mut to NonNull releases the borrow on this line, so
-        // no live &mut exists when we later obtain raw pointers to both nodes.
-        let new_node_ptr: NonNull<Node<T, N>> = unsafe {
-            NonNull::from(
-                self.head
-                    .next_mut()
-                    .expect("node was just inserted after head"),
-            )
-        };
+        // SAFETY: insert_after returns node_ptr with the allocation's root
+        // provenance (Box::into_raw), so storing it in Links is safe.
+        let new_node_ptr: NonNull<Node<T, N>> =
+            unsafe { Node::insert_after(self.head, Node::with_value(height, value)) };
 
         // Update skip links so the structure remains consistent.
         //
@@ -86,7 +78,7 @@ impl<T, G: LevelGenerator, const N: usize> SkipList<T, N, G> {
         // SAFETY: head_ptr and new_raw point to distinct, heap-allocated Node<T>
         // values.  No safe references to either node exist during this block.
         unsafe {
-            let head_ptr: *mut Node<T, N> = &raw mut *self.head;
+            let head_ptr: *mut Node<T, N> = self.head.as_ptr();
             let new_raw: *mut Node<T, N> = new_node_ptr.as_ptr();
 
             for l in 0..height {
@@ -154,7 +146,7 @@ impl<T, G: LevelGenerator, const N: usize> SkipList<T, N, G> {
         // (all ranks are ≤ len < len+1), recording the rightmost predecessor at
         // each level.  into_parts() releases the &mut borrow.
         let (tail_ptr, precursors, precursor_distances) = {
-            let mut visitor = IndexMutVisitor::new(&mut self.head, self.len.saturating_add(1));
+            let mut visitor = IndexMutVisitor::new(self.head, self.len.saturating_add(1));
             visitor.traverse();
             visitor.into_parts()
         };
@@ -164,17 +156,10 @@ impl<T, G: LevelGenerator, const N: usize> SkipList<T, N, G> {
         // No safe &mut references to any node exist while this block runs.
         let new_node_nonnull: NonNull<Node<T, N>> = unsafe {
             // `tail_ptr` is the rightmost node (or head if the list is empty).
-            (*tail_ptr.as_ptr()).insert_after(Node::with_value(height, value));
-
-            // Obtain a stable raw pointer to new_node.  Converting the &mut
-            // returned by next_mut() to NonNull releases the borrow on this line,
-            // so no live &mut exists when we later use new_raw.
-            let new_raw: *mut Node<T, N> = NonNull::from(
-                (*tail_ptr.as_ptr())
-                    .next_mut()
-                    .expect("node was just inserted after tail"),
-            )
-            .as_ptr();
+            // insert_after returns node_ptr with the allocation's root provenance
+            // (Box::into_raw), so storing it in Links avoids sibling-tag issues.
+            let new_raw: *mut Node<T, N> =
+                Node::insert_after(tail_ptr, Node::with_value(height, value)).as_ptr();
 
             // new_rank is the 0-based rank of new_node (head = 0, elements 1..=n).
             // pred_rank ≤ self.len < new_rank, so distance ≥ 1 for all levels.
@@ -197,7 +182,7 @@ impl<T, G: LevelGenerator, const N: usize> SkipList<T, N, G> {
             // Levels height..max_levels need no update: new_node is at the end
             // and no existing skip link spans past the old tail.
 
-            // SAFETY: new_raw was derived from NonNull::from(next_mut()), so it
+            // SAFETY: new_raw comes from insert_after (Box::into_raw), so it
             // is non-null.  Return it so self.tail can be updated outside.
             NonNull::new_unchecked(new_raw)
         };
@@ -249,20 +234,20 @@ impl<T, G: LevelGenerator, const N: usize> SkipList<T, N, G> {
             return None;
         }
 
-        let max_levels = self.head.level();
+        let max_levels = self.head_ref().level();
 
         // SAFETY: All raw pointers originate from heap allocations owned by this
         // SkipList.  No safe &mut references to any node exist while this block
         // runs.  head_ptr and front_ptr are distinct heap allocations; all slice
         // accesses are bounded by front_height ≤ max_levels = links.len().
         let value = unsafe {
-            let head_ptr: *mut Node<T, N> = &raw mut *self.head;
+            let head_ptr: *mut Node<T, N> = self.head.as_ptr();
 
             // front_ptr is the node at rank 1.  The list is non-empty, so
             // head.next is Some.  Converting the &mut to NonNull releases the
             // borrow immediately, leaving no live &mut when we later use head_ptr.
             let front_ptr: *mut Node<T, N> =
-                NonNull::from((*head_ptr).next_mut().expect("list is non-empty")).as_ptr();
+                NonNull::from((*head_ptr).next_as_mut().expect("list is non-empty")).as_ptr();
 
             let front_height = (*front_ptr).level();
 
@@ -346,7 +331,7 @@ impl<T, G: LevelGenerator, const N: usize> SkipList<T, N, G> {
         // IndexMutVisitor with target = self.len advances to just before the tail,
         // recording the predecessor at each level.  into_parts() releases &mut.
         let (_, precursors, _) = {
-            let mut visitor = IndexMutVisitor::new(&mut self.head, self.len);
+            let mut visitor = IndexMutVisitor::new(self.head, self.len);
             visitor.traverse();
             visitor.into_parts()
         };
@@ -404,8 +389,16 @@ mod tests {
         list.push_front(42);
         assert_eq!(list.len(), 1);
         assert!(!list.is_empty());
-        assert_eq!(list.head.next().and_then(|n| n.value()), Some(&42));
-        assert!(list.head.next().and_then(|n| n.next()).is_none());
+        assert_eq!(
+            list.head_ref().next_as_ref().and_then(|n| n.value()),
+            Some(&42)
+        );
+        assert!(
+            list.head_ref()
+                .next_as_ref()
+                .and_then(|n| n.next_as_ref())
+                .is_none()
+        );
     }
 
     #[test]
@@ -417,13 +410,13 @@ mod tests {
         assert_eq!(list.len(), 3);
 
         // Last pushed element is at the front: 3 → 2 → 1
-        let n1 = list.head.next().expect("n1");
+        let n1 = list.head_ref().next_as_ref().expect("n1");
         assert_eq!(n1.value(), Some(&3));
-        let n2 = n1.next().expect("n2");
+        let n2 = n1.next_as_ref().expect("n2");
         assert_eq!(n2.value(), Some(&2));
-        let n3 = n2.next().expect("n3");
+        let n3 = n2.next_as_ref().expect("n3");
         assert_eq!(n3.value(), Some(&1));
-        assert!(n3.next().is_none());
+        assert!(n3.next_as_ref().is_none());
     }
 
     #[test]
@@ -454,7 +447,7 @@ mod tests {
         list.push_front(10);
         // After first push: head.links[0] → node(10) at distance 1
         {
-            let link: &Link<_, _> = list.head.links()[0].as_ref().expect("head link");
+            let link: &Link<_, _> = list.head_ref().links()[0].as_ref().expect("head link");
             assert_eq!(link.distance().get(), 1);
             assert_eq!(unsafe { link.node().as_ref() }.value(), Some(&10));
         }
@@ -462,13 +455,13 @@ mod tests {
         list.push_front(20);
         // After second push: head.links[0] → node(20) at distance 1
         {
-            let link: &Link<_, _> = list.head.links()[0].as_ref().expect("head link");
+            let link: &Link<_, _> = list.head_ref().links()[0].as_ref().expect("head link");
             assert_eq!(link.distance().get(), 1);
             assert_eq!(unsafe { link.node().as_ref() }.value(), Some(&20));
         }
         // node(20).links[0] → node(10) at distance 1
         {
-            let front = list.head.next().expect("front node");
+            let front = list.head_ref().next_as_ref().expect("front node");
             assert_eq!(front.value(), Some(&20));
             let link: &Link<_, _> = front.links()[0].as_ref().expect("front link");
             assert_eq!(link.distance().get(), 1);
@@ -484,8 +477,16 @@ mod tests {
         list.push_back(42);
         assert_eq!(list.len(), 1);
         assert!(!list.is_empty());
-        assert_eq!(list.head.next().and_then(|n| n.value()), Some(&42));
-        assert!(list.head.next().and_then(|n| n.next()).is_none());
+        assert_eq!(
+            list.head_ref().next_as_ref().and_then(|n| n.value()),
+            Some(&42)
+        );
+        assert!(
+            list.head_ref()
+                .next_as_ref()
+                .and_then(|n| n.next_as_ref())
+                .is_none()
+        );
     }
 
     #[test]
@@ -497,13 +498,13 @@ mod tests {
         assert_eq!(list.len(), 3);
 
         // Elements are in insertion order: 1 → 2 → 3
-        let n1 = list.head.next().expect("n1");
+        let n1 = list.head_ref().next_as_ref().expect("n1");
         assert_eq!(n1.value(), Some(&1));
-        let n2 = n1.next().expect("n2");
+        let n2 = n1.next_as_ref().expect("n2");
         assert_eq!(n2.value(), Some(&2));
-        let n3 = n2.next().expect("n3");
+        let n3 = n2.next_as_ref().expect("n3");
         assert_eq!(n3.value(), Some(&3));
-        assert!(n3.next().is_none());
+        assert!(n3.next_as_ref().is_none());
     }
 
     #[test]
@@ -534,7 +535,7 @@ mod tests {
         list.push_back(10);
         // After first push: head.links[0] → node(10) at distance 1
         {
-            let link: &Link<_, _> = list.head.links()[0].as_ref().expect("head link");
+            let link: &Link<_, _> = list.head_ref().links()[0].as_ref().expect("head link");
             assert_eq!(link.distance().get(), 1);
             assert_eq!(unsafe { link.node().as_ref() }.value(), Some(&10));
         }
@@ -542,13 +543,13 @@ mod tests {
         list.push_back(20);
         // head.links[0] still → node(10) at distance 1 (unchanged)
         {
-            let link: &Link<_, _> = list.head.links()[0].as_ref().expect("head link");
+            let link: &Link<_, _> = list.head_ref().links()[0].as_ref().expect("head link");
             assert_eq!(link.distance().get(), 1);
             assert_eq!(unsafe { link.node().as_ref() }.value(), Some(&10));
         }
         // node(10).links[0] → node(20) at distance 1
         {
-            let front = list.head.next().expect("front node");
+            let front = list.head_ref().next_as_ref().expect("front node");
             assert_eq!(front.value(), Some(&10));
             let link: &Link<_, _> = front.links()[0].as_ref().expect("front link");
             assert_eq!(link.distance().get(), 1);
@@ -557,10 +558,10 @@ mod tests {
         // node(20).links[0] = None
         {
             let second = list
-                .head
-                .next()
+                .head_ref()
+                .next_as_ref()
                 .expect("first node")
-                .next()
+                .next_as_ref()
                 .expect("second node");
             assert_eq!(second.value(), Some(&20));
             assert!(second.links()[0].is_none());
@@ -575,13 +576,13 @@ mod tests {
         list.push_front(1); // [1, 2, 3]
         assert_eq!(list.len(), 3);
 
-        let n1 = list.head.next().expect("n1");
+        let n1 = list.head_ref().next_as_ref().expect("n1");
         assert_eq!(n1.value(), Some(&1));
-        let n2 = n1.next().expect("n2");
+        let n2 = n1.next_as_ref().expect("n2");
         assert_eq!(n2.value(), Some(&2));
-        let n3 = n2.next().expect("n3");
+        let n3 = n2.next_as_ref().expect("n3");
         assert_eq!(n3.value(), Some(&3));
-        assert!(n3.next().is_none());
+        assert!(n3.next_as_ref().is_none());
     }
 
     // MARK: pop_front
@@ -599,7 +600,7 @@ mod tests {
         assert_eq!(list.pop_front(), Some(42));
         assert!(list.is_empty());
         assert_eq!(list.len(), 0);
-        assert!(list.head.next().is_none());
+        assert!(list.head_ref().next_as_ref().is_none());
         // Second pop on now-empty list
         assert_eq!(list.pop_front(), None);
     }
@@ -655,7 +656,7 @@ mod tests {
         assert_eq!(list.pop_front(), Some(10));
         assert_eq!(list.len(), 2);
         {
-            let link: &Link<_, _> = list.head.links()[0]
+            let link: &Link<_, _> = list.head_ref().links()[0]
                 .as_ref()
                 .expect("head link after 1st pop");
             assert_eq!(link.distance().get(), 1);
@@ -666,7 +667,7 @@ mod tests {
         assert_eq!(list.pop_front(), Some(20));
         assert_eq!(list.len(), 1);
         {
-            let link: &Link<_, _> = list.head.links()[0]
+            let link: &Link<_, _> = list.head_ref().links()[0]
                 .as_ref()
                 .expect("head link after 2nd pop");
             assert_eq!(link.distance().get(), 1);
@@ -676,7 +677,7 @@ mod tests {
         // Third pop_front: removes 30, head link becomes None
         assert_eq!(list.pop_front(), Some(30));
         assert_eq!(list.len(), 0);
-        assert!(list.head.links()[0].is_none());
+        assert!(list.head_ref().links()[0].is_none());
     }
 
     #[test]
@@ -709,7 +710,7 @@ mod tests {
         assert_eq!(list.pop_back(), Some(42));
         assert!(list.is_empty());
         assert_eq!(list.len(), 0);
-        assert!(list.head.next().is_none());
+        assert!(list.head_ref().next_as_ref().is_none());
         // Second pop on now-empty list
         assert_eq!(list.pop_back(), None);
     }
@@ -766,7 +767,7 @@ mod tests {
         assert_eq!(list.len(), 2);
         {
             // head.links[0] still → node(10) at distance 1
-            let link: &Link<_, _> = list.head.links()[0]
+            let link: &Link<_, _> = list.head_ref().links()[0]
                 .as_ref()
                 .expect("head link after 1st pop_back");
             assert_eq!(link.distance().get(), 1);
@@ -774,14 +775,19 @@ mod tests {
         }
         {
             // node(10).links[0] → node(20) at distance 1
-            let n1 = list.head.next().expect("n1");
+            let n1 = list.head_ref().next_as_ref().expect("n1");
             let link: &Link<_, _> = n1.links()[0].as_ref().expect("n1 link");
             assert_eq!(link.distance().get(), 1);
             assert_eq!(unsafe { link.node().as_ref() }.value(), Some(&20));
         }
         {
             // node(20).links[0] = None (was cleared by pop_back)
-            let n2 = list.head.next().expect("n1").next().expect("n2");
+            let n2 = list
+                .head_ref()
+                .next_as_ref()
+                .expect("n1")
+                .next_as_ref()
+                .expect("n2");
             assert!(n2.links()[0].is_none());
         }
 
@@ -790,7 +796,7 @@ mod tests {
         assert_eq!(list.len(), 1);
         {
             // head.links[0] → node(10) at distance 1
-            let link: &Link<_, _> = list.head.links()[0]
+            let link: &Link<_, _> = list.head_ref().links()[0]
                 .as_ref()
                 .expect("head link after 2nd pop_back");
             assert_eq!(link.distance().get(), 1);
@@ -800,7 +806,7 @@ mod tests {
         // Third pop_back: removes 10, head link becomes None
         assert_eq!(list.pop_back(), Some(10));
         assert_eq!(list.len(), 0);
-        assert!(list.head.links()[0].is_none());
+        assert!(list.head_ref().links()[0].is_none());
     }
 
     #[test]

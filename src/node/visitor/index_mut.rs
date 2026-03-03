@@ -24,12 +24,15 @@ use crate::node::{
 ///
 /// # Safety
 ///
-/// The visitor borrows `head` mutably for its lifetime `'a`.  All `NonNull`
-/// pointers inside it point into the same list and are valid for `'a`.
-pub(crate) struct IndexMutVisitor<'a, T, const N: usize> {
+/// The caller must guarantee that the `NonNull<Node>` passed to [`new`]
+/// remains valid and exclusively accessible for the lifetime of this visitor.
+/// All `NonNull` pointers stored inside the visitor point into the same list.
+///
+/// [`new`]: IndexMutVisitor::new
+pub(crate) struct IndexMutVisitor<T, const N: usize> {
     /// Raw pointer to the current node.
     ///
-    /// Stored as `NonNull` rather than `&'a mut` to avoid holding an exclusive
+    /// Stored as `NonNull` rather than `&mut` to avoid holding an exclusive
     /// reference while `precursors` may alias the same allocation at a
     /// different level.
     current: NonNull<Node<T, N>>,
@@ -49,20 +52,34 @@ pub(crate) struct IndexMutVisitor<'a, T, const N: usize> {
     /// precursor's link distance this is sufficient to compute the new link
     /// distances after insertion or removal.
     precursor_distances: ArrayVec<usize, N>,
-    /// Ties the raw pointer lifetime to `'a`.
-    _marker: PhantomData<&'a mut Node<T, N>>,
+    /// Variance marker: acts like `*mut Node<T, N>`, invariant in `T`,
+    /// not automatically `Send`/`Sync`.
+    _marker: PhantomData<*mut Node<T, N>>,
 }
 
-impl<'a, T, const N: usize> IndexMutVisitor<'a, T, N> {
+impl<T, const N: usize> IndexMutVisitor<T, N> {
     /// Create a new mutable index visitor starting at `head`.
     ///
     /// # Arguments
     ///
-    /// - `head`: The head node of the skip list.
+    /// - `head`: A raw `NonNull` pointer to the head node of the skip list.
+    ///   Must carry mutable provenance so that precursor pointers stored during
+    ///   traversal can be used for subsequent writes.
     /// - `target`: The 0-based index to locate.
-    pub(crate) fn new(head: &'a mut Node<T, N>, target: usize) -> Self {
-        let max_levels = head.level();
-        let current = NonNull::from_mut(head);
+    ///
+    /// # Safety
+    ///
+    /// `head` must be valid and exclusively accessible for the lifetime of the
+    /// returned visitor.
+    pub(crate) fn new(head: NonNull<Node<T, N>>, target: usize) -> Self {
+        // `head` must come from a `&mut` borrow (Reserved/Active provenance in
+        // Tree Borrows terms): the raw pointer is stored in `precursors` and
+        // later used as the self pointer for `insert_after`, which requires
+        // write access. Deriving it from a shared reference would violate
+        // Tree Borrows when the write occurs.
+        // SAFETY: caller guarantees head is valid.
+        let max_levels = unsafe { head.as_ref() }.level();
+        let current = head;
         Self {
             current,
             index: 0,
@@ -106,10 +123,10 @@ impl<'a, T, const N: usize> IndexMutVisitor<'a, T, N> {
     }
 }
 
-impl<T, const N: usize> Visitor for IndexMutVisitor<'_, T, N> {
-    /// Node references are raw const pointers to avoid lifetime conflicts with
-    /// the `&mut` borrow.  Callers that need a shared reference can convert
-    /// via [`NonNull::as_ref`] inside an `unsafe` block.
+impl<T, const N: usize> Visitor for IndexMutVisitor<T, N> {
+    // `NodeRef` is `NonNull` (not `&Node`) to avoid holding a shared reference
+    // while `precursors` may alias the same allocation. Callers that need a
+    // shared reference can call `NonNull::as_ref` inside an `unsafe` block.
     type NodeRef = NonNull<Node<T, N>>;
 
     fn current(&self) -> Self::NodeRef {
@@ -176,14 +193,17 @@ impl<T, const N: usize> Visitor for IndexMutVisitor<'_, T, N> {
             }
         }
 
-        // No skip-link can advance us further.  Step via `next` to close the
-        // final gap.  Since found() is false we know self.index < self.target,
+        // No skip-link can advance us further.  Step via `next_ptr` to close
+        // the final gap.  Since found() is false we know self.index < self.target,
         // so self.index + 1 <= self.target and the advance is always valid.
+        // `next_ptr` returns the stored raw NonNull directly, preserving its
+        // original provenance (not Frozen), so it is safe to use as self_ptr
+        // in a subsequent `insert_after` call.
         self.level = 0;
-        // SAFETY: `self.current` is valid for `'a` and no other `&mut` exists.
+        // SAFETY: `self.current` is valid and no other `&mut` exists.
         let next_opt = unsafe { self.current.as_ref() }.next();
-        if let Some(next) = next_opt {
-            self.current = NonNull::from(next);
+        if let Some(next_nn) = next_opt {
+            self.current = next_nn;
             self.index = self.index.saturating_add(1);
             return Step::Advanced(self.current);
         }
@@ -192,7 +212,7 @@ impl<T, const N: usize> Visitor for IndexMutVisitor<'_, T, N> {
     }
 }
 
-impl<T, const N: usize> VisitorMut for IndexMutVisitor<'_, T, N> {
+impl<T, const N: usize> VisitorMut for IndexMutVisitor<T, N> {
     type NodeMut = NonNull<Node<T, N>>;
     type Precursor = NonNull<Node<T, N>>;
 
@@ -211,6 +231,8 @@ impl<T, const N: usize> VisitorMut for IndexMutVisitor<'_, T, N> {
 )]
 #[cfg(test)]
 mod tests {
+    use core::ptr::NonNull;
+
     use anyhow::Result;
     use pretty_assertions::assert_eq;
     use rstest::rstest;
@@ -225,7 +247,7 @@ mod tests {
     #[rstest]
     fn find_index_2(skiplist: Result<Box<Node<u8, MAX_LEVELS>>>) -> Result<()> {
         let mut head = skiplist?;
-        let mut visitor = IndexMutVisitor::new(&mut head, 2);
+        let mut visitor = IndexMutVisitor::new(NonNull::from_mut(&mut *head), 2);
 
         let found = visitor.traverse();
 
@@ -239,7 +261,7 @@ mod tests {
     #[rstest]
     fn find_index_not_found(skiplist: Result<Box<Node<u8, MAX_LEVELS>>>) -> Result<()> {
         let mut head = skiplist?;
-        let mut visitor = IndexMutVisitor::new(&mut head, 5);
+        let mut visitor = IndexMutVisitor::new(NonNull::from_mut(&mut *head), 5);
 
         let found = visitor.traverse();
 
@@ -255,7 +277,7 @@ mod tests {
         let mut head = skiplist?;
 
         // Target = 3 (node v3, value 3).
-        let mut visitor = IndexMutVisitor::new(&mut head, 3);
+        let mut visitor = IndexMutVisitor::new(NonNull::from_mut(&mut *head), 3);
         while let Step::Advanced(_) = visitor.step() {}
 
         for &dist in visitor.precursor_distances() {
@@ -270,7 +292,7 @@ mod tests {
         skiplist: Result<Box<Node<u8, MAX_LEVELS>>>,
     ) -> Result<()> {
         let mut head = skiplist?;
-        let mut visitor = IndexMutVisitor::new(&mut head, 99);
+        let mut visitor = IndexMutVisitor::new(NonNull::from_mut(&mut *head), 99);
 
         loop {
             let s = visitor.step();
@@ -290,7 +312,7 @@ mod tests {
     #[rstest]
     fn current_mut_matches_current(skiplist: Result<Box<Node<u8, MAX_LEVELS>>>) -> Result<()> {
         let mut head = skiplist?;
-        let mut visitor = IndexMutVisitor::new(&mut head, 2);
+        let mut visitor = IndexMutVisitor::new(NonNull::from_mut(&mut *head), 2);
         visitor.traverse();
 
         assert_eq!(visitor.current(), visitor.current_mut());
@@ -302,7 +324,7 @@ mod tests {
     fn precursors_length(skiplist: Result<Box<Node<u8, MAX_LEVELS>>>) -> Result<()> {
         let mut head = skiplist?;
         let max_levels = head.level();
-        let mut visitor = IndexMutVisitor::new(&mut head, 2);
+        let mut visitor = IndexMutVisitor::new(NonNull::from_mut(&mut *head), 2);
         visitor.traverse();
 
         assert_eq!(visitor.precursors().len(), max_levels);

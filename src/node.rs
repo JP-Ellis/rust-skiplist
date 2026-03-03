@@ -44,7 +44,7 @@
 //! 2. Each node owns the immediately following node through the `next` pointer.
 //!
 //! As a result of (2), getting a mutable reference to the next node through
-//! [`next_mut`][Node::next_mut] requires that no other mutable reference
+//! [`next_as_mut`][Node::next_as_mut] requires that no other mutable reference
 //! to that node exists, which is why the method is marked `unsafe`.
 //!
 //! ## Pointers
@@ -92,6 +92,29 @@
 //! library's [`LinkedList`][std::collections::LinkedList] is implemented, with
 //! the node being similar to
 //! [`linked_list::Node`](https://doc.rust-lang.org/stable/src/alloc/collections/linked_list.rs.html).
+//!
+//! ## Pointer and Provenance Safety
+//!
+//! `Node` exposes three accessor families for `next` and `prev`:
+//!
+//! | Method | Returns | Provenance | When to use |
+//! |--------|---------|------------|-------------|
+//! | [`next`][Node::next] / [`prev`][Node::prev] | `Option<NonNull<Self>>` | Original (Reserved/Active) | **Default choice.** Any time the pointer is stored, passed to a function, used across loop iterations, or may later be written through. |
+//! | [`next_as_ref`][Node::next_as_ref] / [`prev_as_ref`][Node::prev_as_ref] | `Option<&Self>` | Frozen (shared reborrow) | **Inline, read-only access only.** Safe when the result is consumed within the same expression and never converted back to a raw pointer. Example: `node.next_as_ref()?.value()`. |
+//! | [`next_as_mut`][Node::next_as_mut] / [`prev_as_mut`][Node::prev_as_mut] | `Option<&mut Self>` | Exclusive reborrow | Short-lived inline mutation; see individual method safety docs. |
+//!
+//! ### The Frozen anti-pattern
+//!
+//! **Never** write `node.next_as_ref().map(NonNull::from)` (or the `prev`
+//! equivalent).  Calling `next_as_ref()` performs a *shared* reborrow of the
+//! neighbouring node, which Tree Borrows records with a **Frozen** provenance
+//! tag.  Converting the resulting `&Node` back to `NonNull` via `NonNull::from`
+//! silently carries that Frozen tag into the raw pointer.  Any subsequent write
+//! through that pointer, or through any child pointer derived from it, is
+//! undefined behaviour under Tree Borrows.
+//!
+//! If you need a raw pointer to the next/previous node, use `next()` / `prev()`
+//! directly: they return the stored `NonNull` without creating any reborrow.
 
 #![expect(dead_code, reason = "library is still being implemented")]
 
@@ -208,9 +231,18 @@ impl<V, const N: usize> Node<V, N> {
         self.links.len()
     }
 
-    /// Get a reference to the next node.
+    /// Get a shared reference to the next node.
+    ///
+    /// The returned reference has **Frozen** provenance under Tree Borrows.
+    /// Use it for **inline, read-only access only**: consume the result in the
+    /// same expression and never convert it back to a raw pointer.
+    ///
+    /// > ⚠ **Do not call `.map(NonNull::from)` on the result.**  Doing so
+    /// > silently captures the Frozen provenance tag; any subsequent write
+    /// > through that pointer is UB.  Use [`next`][Self::next] instead when a
+    /// > raw pointer is needed.
     #[inline]
-    pub(crate) fn next(&self) -> Option<&Self> {
+    pub(crate) fn next_as_ref(&self) -> Option<&Self> {
         // SAFETY: The pointer can never be null, and the value is
         // [convertible](https://doc.rust-lang.org/stable/std/ptr/index.html#pointer-to-reference-conversion).
         self.next.map(|ptr| unsafe { ptr.as_ref() })
@@ -225,16 +257,40 @@ impl<V, const N: usize> Node<V, N> {
     /// necessary but not sufficient: the same next node can be reached through
     /// a different parent's `next` pointer, creating aliasing `&mut`
     /// references.
+    ///
+    /// > ⚠ **Do not convert the result to `NonNull` and store it.**  Use
+    /// > [`next`][Self::next] when a storable raw pointer is needed.
     #[inline]
-    pub(crate) unsafe fn next_mut(&mut self) -> Option<&mut Self> {
+    pub(crate) unsafe fn next_as_mut(&mut self) -> Option<&mut Self> {
         // SAFETY: The pointer can never be null, and the value is
         // [convertible](https://doc.rust-lang.org/stable/std/ptr/index.html#pointer-to-reference-conversion).
         self.next.map(|mut ptr| unsafe { ptr.as_mut() })
     }
 
-    /// Get a reference to the previous node.
+    /// Returns the raw `NonNull` pointer to the next node, preserving its
+    /// original provenance.
+    ///
+    /// Unlike [`next_as_ref`][Self::next_as_ref], no shared reborrow is created
+    /// and the provenance tag is not downgraded to Frozen under Tree Borrows.
+    /// Use this method any time the pointer is stored, passed to a function,
+    /// used across loop iterations, or may later be written through.
     #[inline]
-    pub(crate) fn prev(&self) -> Option<&Self> {
+    pub(crate) fn next(&self) -> Option<NonNull<Self>> {
+        self.next
+    }
+
+    /// Get a shared reference to the previous node.
+    ///
+    /// The returned reference has **Frozen** provenance under Tree Borrows.
+    /// Use it for **inline, read-only access only**: consume the result in the
+    /// same expression and never convert it back to a raw pointer.
+    ///
+    /// > ⚠ **Do not call `.map(NonNull::from)` on the result.**  Doing so
+    /// > silently captures the Frozen provenance tag; any subsequent write
+    /// > through that pointer is UB.  Use [`prev`][Self::prev] instead when a
+    /// > raw pointer is needed.
+    #[inline]
+    pub(crate) fn prev_as_ref(&self) -> Option<&Self> {
         // SAFETY: The pointer can never be null, and the value is
         // [convertible](https://doc.rust-lang.org/stable/std/ptr/index.html#pointer-to-reference-conversion).
         self.prev.map(|ptr| unsafe { ptr.as_ref() })
@@ -244,15 +300,31 @@ impl<V, const N: usize> Node<V, N> {
     ///
     /// # Arguments
     ///
-    /// Unlike [`next_mut`][Node::next_mut], the current node does _not_ own the
-    /// previous node. The fact that `self` is borrowed mutably does not imply
-    /// that the previous node is not being used elsewhere. As a result, the
-    /// caller must ensure that the previous node is not being used elsewhere.
+    /// Unlike [`next_as_mut`][Node::next_as_mut], the current node does _not_
+    /// own the previous node. The fact that `self` is borrowed mutably does not
+    /// imply that the previous node is not being used elsewhere. As a result,
+    /// the caller must ensure that the previous node is not being used
+    /// elsewhere.
+    ///
+    /// > ⚠ **Do not convert the result to `NonNull` and store it.**  Use
+    /// > [`prev`][Self::prev] when a storable raw pointer is needed.
     #[inline]
-    pub(crate) unsafe fn prev_mut(&mut self) -> Option<&mut Self> {
+    pub(crate) unsafe fn prev_as_mut(&mut self) -> Option<&mut Self> {
         // SAFETY: The pointer can never be null, and the value is
         // [convertible](https://doc.rust-lang.org/stable/std/ptr/index.html#pointer-to-reference-conversion).
         self.prev.map(|mut ptr| unsafe { ptr.as_mut() })
+    }
+
+    /// Returns the raw `NonNull` pointer to the previous node, preserving its
+    /// original provenance.
+    ///
+    /// Unlike [`prev_as_ref`][Self::prev_as_ref], no shared reborrow is created
+    /// and the provenance tag is not downgraded to Frozen under Tree Borrows.
+    /// Use this method any time the pointer is stored, passed to a function,
+    /// used across loop iterations, or may later be written through.
+    #[inline]
+    pub(crate) fn prev(&self) -> Option<NonNull<Self>> {
+        self.prev
     }
 
     /// Get a reference to the value.
@@ -334,7 +406,7 @@ impl<V, const N: usize> Node<V, N> {
     /// The caller must uphold **all** of the following:
     ///
     /// 1. **Heap allocation**: `self` must have been originally allocated via
-    ///    [`Box::new`] and then leaked (e.g. via [`Box::leak`] into a
+    ///    [`Box::new`] and then stored (e.g. via [`Box::into_raw`] into a
     ///    [`NonNull`] pointer).
     /// 2. **Node type**: `self` must not be a [`NodeType::Head`] or
     ///    [`NodeType::Detached`] node.  Popping the head would make the rest
@@ -395,7 +467,7 @@ impl<V, const N: usize> Node<V, N> {
         let mut current = self.next.take();
         while let Some(ptr) = current {
             // SAFETY: Every node reachable via `next` was heap-allocated via
-            // `Box::new` and then leaked through `Box::leak` in
+            // `Box::new` and then stored via `Box::into_raw` in
             // `insert_after`.  We take ownership by removing the pointer from
             // the previous node's `next` before reconstructing the `Box`, so
             // no other owner exists.
@@ -449,42 +521,64 @@ impl<V, const N: usize> Node<V, N> {
     /// The new node to be inserted must be a standalone node and not part of a
     /// list (i.e., it must not have a `prev` or `next` pointer).
     ///
-    /// This method takes ownership of the node to insert, and inserts it after
-    /// the current node. It modifies the current node, the new node, and the
-    /// node following the current node so that their `next` and `prev` pointers
-    /// are updated to point to each other.
+    /// Inserts `node` into the list immediately after `self_ptr`.
+    ///
+    /// Takes ownership of the node to insert and updates the `next`/`prev`
+    /// pointers of the predecessor, the new node, and the former successor so
+    /// that they form a consistent doubly-linked sequence.
     ///
     /// # Safety
     ///
-    /// This method does not alter the links of the node being inserted, or
-    /// surrounding nodes. As a result, while traversing the list to find a
-    /// specific node, it is important to keep track of the links to the node and
-    /// links over the node.
+    /// - `self_ptr` must be a valid, exclusively-accessible pointer to a live
+    ///   `Node`.  No other `&mut` borrow of that node may exist when this
+    ///   function is called.
+    /// - This function does not update the skip-links of any node; the caller
+    ///   is responsible for keeping skip-link distances consistent.
+    ///
+    /// # Tree Borrows note
+    ///
+    /// `self_ptr` is stored directly in `node.prev`.  Storing `self_ptr`
+    /// (rather than a new child reborrow of it) means that subsequent writes
+    /// through any child of `self_ptr` are NOT foreign to `self_ptr`, so
+    /// `self_ptr` is never transitioned to Disabled.
     #[inline]
-    pub(crate) unsafe fn insert_after(&mut self, mut node: Self) {
+    pub(crate) unsafe fn insert_after(
+        mut self_ptr: NonNull<Self>,
+        mut node: Self,
+    ) -> NonNull<Self> {
         debug_assert!(
             matches!(node.node_type(), NodeType::Detached),
             "Can only insert detached nodes."
         );
 
-        node.prev = Some(NonNull::from(&mut *self));
-        node.next = self.next;
+        // SAFETY: caller guarantees self_ptr is valid and exclusively accessible.
+        let self_ref = unsafe { self_ptr.as_mut() };
 
-        // Move ownership of the new node through box-and-leak to ensure that the
-        // node is allocated on the heap and not deallocated when the function
-        // returns.
-        let node_ptr = NonNull::from(Box::leak(Box::new(node)));
+        // Store self_ptr directly: no new child reborrow tag is created.
+        node.prev = Some(self_ptr);
+        node.next = self_ref.next;
+
+        // Box::into_raw preserves the allocation's root provenance without
+        // creating an intermediate &mut reborrow layer.  Storing this
+        // node_ptr in Link objects means that subsequent accesses to the
+        // new node's memory go through children of node_ptr (not siblings),
+        // so node_ptr is never Disabled by foreign writes under Tree Borrows.
+        // SAFETY: Box::into_raw returns a non-null pointer.
+        let node_ptr = unsafe { NonNull::new_unchecked(Box::into_raw(Box::new(node))) };
 
         // If self has a 'next' node, update its 'prev' pointer to point to the
         // new node.
-        if let Some(next_ptr) = self.next.as_mut() {
+        if let Some(next_ptr) = self_ref.next.as_mut() {
             // SAFETY: The pointer can never be null, and the value is
             // [convertible](https://doc.rust-lang.org/stable/std/ptr/index.html#pointer-to-reference-conversion).
             unsafe { next_ptr.as_mut() }.prev = Some(node_ptr);
         }
 
-        // Finally, update self's 'next' pointer to point to the new node
-        self.next = Some(node_ptr);
+        // Update the predecessor's `next` pointer.  Writing through self_ref
+        // (a child of self_ptr) is NOT foreign to self_ptr, so the tag stored
+        // in node.prev above is never Disabled.
+        self_ref.next = Some(node_ptr);
+        node_ptr
     }
 
     /// Detaches the chain of nodes that follow `self` and returns a raw
@@ -574,7 +668,7 @@ impl<V, const N: usize> Node<V, N> {
                   unsafe-crossing raw-pointer variables"
     )]
     pub(crate) unsafe fn filter_rebuild<F, D>(
-        &mut self,
+        head: NonNull<Self>,
         mut keep: F,
         mut on_drop: D,
     ) -> (usize, Option<NonNull<Self>>)
@@ -582,8 +676,10 @@ impl<V, const N: usize> Node<V, N> {
         F: FnMut(*mut Self) -> bool,
         D: FnMut(Box<Self>),
     {
-        let head_ptr: *mut Self = core::ptr::from_mut(self);
-        let max_levels = self.level();
+        let head_ptr: *mut Self = head.as_ptr();
+        // SAFETY: head is a valid, exclusively-owned head sentinel per the
+        // function's safety contract.
+        let max_levels = unsafe { (*head_ptr).level() };
         let mut predecessors: ArrayVec<(*mut Self, usize), N> =
             iter::repeat_n((head_ptr, 0_usize), max_levels).collect();
         let mut new_rank: usize = 0;
@@ -597,11 +693,11 @@ impl<V, const N: usize> Node<V, N> {
                 *link = None;
             }
 
-            let mut current_opt = (*head_ptr).next().map(NonNull::from);
+            let mut current_opt = (*head_ptr).next();
             while let Some(cur_nn) = current_opt {
                 let cur: *mut Self = cur_nn.as_ptr();
                 // Save successor before any structural mutation.
-                let next_opt = (*cur).next().map(NonNull::from);
+                let next_opt = (*cur).next();
 
                 if keep(cur) {
                     new_rank = new_rank.saturating_add(1);
@@ -641,13 +737,13 @@ impl<V, const N: usize> Node<V, N> {
     ///
     /// # Safety
     ///
-    /// Same as [`filter_rebuild`](Self::filter_rebuild): `self` must be the
+    /// Same as [`filter_rebuild`](Self::filter_rebuild): `head` must be the
     /// exclusively-owned head sentinel of a valid prev/next chain, with no
     /// other live references to any node in the chain.
     #[inline]
-    pub(crate) unsafe fn rebuild(&mut self) -> Option<NonNull<Self>> {
+    pub(crate) unsafe fn rebuild(head: NonNull<Self>) -> Option<NonNull<Self>> {
         // SAFETY: forwarded from caller.
-        let (_, tail) = unsafe { self.filter_rebuild(|_| true, |_| {}) };
+        let (_, tail) = unsafe { Self::filter_rebuild(head, |_| true, |_| {}) };
         tail
     }
 }
@@ -668,7 +764,7 @@ impl<V: Debug, const N: usize> Node<V, N> {
         let mut index = 0_usize;
         loop {
             hm.insert(NonNull::from(current), index);
-            if let Some(next) = current.next() {
+            if let Some(next) = current.next_as_ref() {
                 current = next;
                 index = index.saturating_add(1);
             } else {
@@ -783,7 +879,7 @@ impl<V: Debug, const N: usize> Node<V, N> {
                 write!(output, "??")?;
             }
 
-            if let Some(next) = current.next() {
+            if let Some(next) = current.next_as_ref() {
                 write!(output, " -> ")?;
                 current = next;
             } else {
@@ -801,7 +897,7 @@ impl<V: Debug, const N: usize> Node<V, N> {
                 rev_string.insert_str(0, "??");
             }
 
-            if let Some(prev) = current.prev() {
+            if let Some(prev) = current.prev_as_ref() {
                 rev_string.insert_str(0, " <- ");
                 current = prev;
             } else {
@@ -842,7 +938,7 @@ impl<V: Debug, const N: usize> Node<V, N> {
                 current.level(),
                 current.value()
             )?;
-            if let Some(node) = current.next() {
+            if let Some(node) = current.next_as_ref() {
                 current = node;
                 index = index.saturating_add(1);
             } else {
@@ -871,7 +967,7 @@ impl<V: Debug, const N: usize> Node<V, N> {
                 NonNull::from(current),
                 current.next
             )?;
-            if let Some(node) = current.next() {
+            if let Some(node) = current.next_as_ref() {
                 current = node;
                 index = index.saturating_add(1);
             } else {
@@ -910,14 +1006,14 @@ impl<V, const N: usize> Drop for Node<V, N> {
         // Walk the chain, reconstructing each heap-allocated node as a `Box`
         // and immediately dropping it.  Each `Box::from_raw` is safe because:
         //   1. Every node reachable via `next` was allocated with `Box::new`
-        //      and leaked (see `insert_after`).
+        //      and stored via `Box::into_raw` (see `insert_after`).
         //   2. We take `next` out of the node before reconstructing it as a
         //      `Box`, so this path is only visited once per node.
         // Skip links become dangling as nodes are freed, but they are owned by
         // the nodes themselves and are freed together with each node.
         while let Some(next_ptr) = self.next.take() {
             // SAFETY: `next_ptr` points to a heap-allocated `Node<V>` that
-            // was created via `Box::new` + `Box::leak` in `insert_after`.
+            // was created via `Box::new` + `Box::into_raw` in `insert_after`.
             // We have taken ownership by removing it from `self.next`, so no
             // other `Box` wraps this pointer.
             let mut next_box: Box<Node<V, N>> = unsafe { Box::from_raw(next_ptr.as_ptr()) };
@@ -963,11 +1059,11 @@ pub(crate) mod tests {
     fn new_node_properties() {
         let mut node = Node::<(), MAX_LEVELS>::new(MAX_LEVELS);
 
-        assert!(node.next().is_none());
-        assert!(unsafe { node.next_mut() }.is_none());
+        assert!(node.next_as_ref().is_none());
+        assert!(unsafe { node.next_as_mut() }.is_none());
 
-        assert!(node.prev().is_none());
-        assert!(unsafe { node.prev_mut() }.is_none());
+        assert!(node.prev_as_ref().is_none());
+        assert!(unsafe { node.prev_as_mut() }.is_none());
 
         assert!(node.value().is_none());
         assert!(node.value_mut().is_none());
@@ -996,20 +1092,31 @@ pub(crate) mod tests {
         v4.value = Some(40);
 
         unsafe {
-            head.insert_after(v1);
-            head.next_mut().expect("v1 not found").insert_after(v2);
-            head.next_mut()
-                .expect("v1 not found")
-                .next_mut()
-                .expect("v2 not found")
-                .insert_after(v3);
-            head.next_mut()
-                .expect("v1 not found")
-                .next_mut()
-                .expect("v2 not found")
-                .next_mut()
-                .expect("v3 not found")
-                .insert_after(v4);
+            Node::insert_after(NonNull::from_mut(&mut *head), v1);
+            Node::insert_after(
+                NonNull::from_mut(head.next_as_mut().expect("v1 not found")),
+                v2,
+            );
+            Node::insert_after(
+                NonNull::from_mut(
+                    head.next_as_mut()
+                        .expect("v1 not found")
+                        .next_as_mut()
+                        .expect("v2 not found"),
+                ),
+                v3,
+            );
+            Node::insert_after(
+                NonNull::from_mut(
+                    head.next_as_mut()
+                        .expect("v1 not found")
+                        .next_as_mut()
+                        .expect("v2 not found")
+                        .next_as_mut()
+                        .expect("v3 not found"),
+                ),
+                v4,
+            );
         }
 
         // Build higher level links:
@@ -1023,10 +1130,10 @@ pub(crate) mod tests {
         let v2_v3: Link<_, _>;
         let v3_v4: Link<_, _>;
         {
-            let v1_ref = head.next().expect("v1 not found");
-            let v2_ref = v1_ref.next().expect("v2 not found");
-            let v3_ref = v2_ref.next().expect("v3 not found");
-            let v4_ref = v3_ref.next().expect("tail not found");
+            let v1_ref = head.next_as_ref().expect("v1 not found");
+            let v2_ref = v1_ref.next_as_ref().expect("v2 not found");
+            let v3_ref = v2_ref.next_as_ref().expect("v3 not found");
+            let v4_ref = v3_ref.next_as_ref().expect("tail not found");
             head_v3 = Link::new(NonNull::from(v3_ref), 3)?;
             head_v2 = Link::new(NonNull::from(v2_ref), 2)?;
             v2_v3 = Link::new(NonNull::from(v3_ref), 1)?;
@@ -1037,17 +1144,17 @@ pub(crate) mod tests {
             head.links[1] = Some(head_v3);
             head.links[0] = Some(head_v2);
 
-            head.next_mut()
+            head.next_as_mut()
                 .expect("v1 not found")
-                .next_mut()
+                .next_as_mut()
                 .expect("v2 not found")
                 .links[0] = Some(v2_v3);
 
-            head.next_mut()
+            head.next_as_mut()
                 .expect("v1 not found")
-                .next_mut()
+                .next_as_mut()
                 .expect("v2 not found")
-                .next_mut()
+                .next_as_mut()
                 .expect("v3 not found")
                 .links[0] = Some(v3_v4);
         }
@@ -1091,19 +1198,19 @@ pub(crate) mod tests {
         assert_matches!(head.node_type(), NodeType::Head);
         assert_eq!(head.level(), 3);
 
-        let mut node = head.next().expect("v1 not found");
+        let mut node = head.next_as_ref().expect("v1 not found");
         assert_matches!(node.node_type(), NodeType::Body);
         assert_eq!(node.level(), 0);
 
-        node = node.next().expect("v2 not found");
+        node = node.next_as_ref().expect("v2 not found");
         assert_matches!(node.node_type(), NodeType::Body);
         assert_eq!(node.level(), 1);
 
-        node = node.next().expect("v3 not found");
+        node = node.next_as_ref().expect("v3 not found");
         assert_matches!(node.node_type(), NodeType::Body);
         assert_eq!(node.level(), 1);
 
-        node = node.next().expect("v4 not found");
+        node = node.next_as_ref().expect("v4 not found");
         assert_matches!(node.node_type(), NodeType::Tail);
         assert_eq!(node.level(), 0);
 
@@ -1117,9 +1224,9 @@ pub(crate) mod tests {
         let mut head = skiplist?;
 
         // SAFETY: `head` is a valid node with `v1` as its next.
-        let v1 = unsafe { head.next_mut() }.expect("v1 not found");
+        let v1 = unsafe { head.next_as_mut() }.expect("v1 not found");
         // SAFETY: `v1` is a valid node with `v2` as its next.
-        let v2 = unsafe { v1.next_mut() }.expect("v2 not found");
+        let v2 = unsafe { v1.next_as_mut() }.expect("v2 not found");
         let detached_node = unsafe { v2.pop() };
 
         assert_eq!(detached_node.value, Some(20));
@@ -1159,7 +1266,7 @@ pub(crate) mod tests {
         new_node.value = Some(100);
 
         unsafe {
-            head.insert_after(new_node);
+            Node::insert_after(NonNull::from_mut(&mut *head), new_node);
         }
 
         // Insta is incompatible with Miri
@@ -1195,9 +1302,9 @@ pub(crate) mod tests {
         new_node.value = Some(100);
 
         // SAFETY: `head` is a valid node with `v1` as its next.
-        let v1 = unsafe { head.next_mut() }.expect("v1 not found");
+        let v1 = unsafe { head.next_as_mut() }.expect("v1 not found");
         // SAFETY: `v1` has exclusive access and no other references to its successor exist.
-        unsafe { v1.insert_after(new_node) };
+        unsafe { Node::insert_after(NonNull::from_mut(v1), new_node) };
 
         // Insta is incompatible with Miri
         if !cfg!(miri) {
@@ -1232,12 +1339,12 @@ pub(crate) mod tests {
         new_node.value = Some(100);
 
         // SAFETY: Each node is valid with the next node as its successor.
-        let v1 = unsafe { head.next_mut() }.expect("v1 not found");
-        let v2 = unsafe { v1.next_mut() }.expect("v2 not found");
-        let v3 = unsafe { v2.next_mut() }.expect("v3 not found");
-        let v4 = unsafe { v3.next_mut() }.expect("v4 not found");
+        let v1 = unsafe { head.next_as_mut() }.expect("v1 not found");
+        let v2 = unsafe { v1.next_as_mut() }.expect("v2 not found");
+        let v3 = unsafe { v2.next_as_mut() }.expect("v3 not found");
+        let v4 = unsafe { v3.next_as_mut() }.expect("v4 not found");
         // SAFETY: `v4` has exclusive access and no other references to its successor exist.
-        unsafe { v4.insert_after(new_node) };
+        unsafe { Node::insert_after(NonNull::from_mut(v4), new_node) };
 
         // Insta is incompatible with Miri
         if !cfg!(miri) {
@@ -1270,24 +1377,26 @@ pub(crate) mod tests {
     #[rstest]
     fn filter_rebuild_empty_list() {
         let mut head = Box::new(Node::<u8, MAX_LEVELS>::new(MAX_LEVELS));
-        let (new_len, new_tail) = unsafe { head.filter_rebuild(|_| true, |_| {}) };
+        let (new_len, new_tail) =
+            unsafe { Node::filter_rebuild(NonNull::from_mut(&mut *head), |_| true, |_| {}) };
         assert_eq!(new_len, 0);
         assert!(new_tail.is_none());
-        assert!(head.next().is_none());
+        assert!(head.next_as_ref().is_none());
     }
 
     #[rstest]
     fn filter_rebuild_keep_all(skiplist: Result<Box<Node<u8, MAX_LEVELS>>>) -> Result<()> {
         let mut head = skiplist?;
-        let (new_len, new_tail) = unsafe { head.filter_rebuild(|_| true, |_| {}) };
+        let (new_len, new_tail) =
+            unsafe { Node::filter_rebuild(NonNull::from_mut(&mut *head), |_| true, |_| {}) };
 
         assert_eq!(new_len, 4);
         let vals: Vec<u8> = {
             let mut v = Vec::new();
-            let mut cur = head.next();
+            let mut cur = head.next_as_ref();
             while let Some(n) = cur {
                 v.push(*n.value().expect("data node"));
-                cur = n.next();
+                cur = n.next_as_ref();
             }
             v
         };
@@ -1327,7 +1436,8 @@ pub(crate) mod tests {
         let mut dropped_vals: Vec<u8> = Vec::new();
         let mut head = skiplist?;
         let (new_len, new_tail) = unsafe {
-            head.filter_rebuild(
+            Node::filter_rebuild(
+                NonNull::from_mut(&mut *head),
                 |_| false,
                 |mut b| dropped_vals.push(b.take_value().expect("data node")),
             )
@@ -1335,7 +1445,7 @@ pub(crate) mod tests {
 
         assert_eq!(new_len, 0);
         assert!(new_tail.is_none());
-        assert!(head.next().is_none());
+        assert!(head.next_as_ref().is_none());
         // on_drop called in traversal order.
         assert_eq!(dropped_vals, [10, 20, 30, 40]);
 
@@ -1365,7 +1475,8 @@ pub(crate) mod tests {
         // Keep v1 (value 10) and v3 (value 30); drop v2 and v4.
         let mut head = skiplist?;
         let (new_len, new_tail) = unsafe {
-            head.filter_rebuild(
+            Node::filter_rebuild(
+                NonNull::from_mut(&mut *head),
                 |cur| {
                     let v = (*cur).value().copied();
                     v == Some(10) || v == Some(30)
@@ -1377,10 +1488,10 @@ pub(crate) mod tests {
         assert_eq!(new_len, 2);
         let vals: Vec<u8> = {
             let mut v = Vec::new();
-            let mut cur = head.next();
+            let mut cur = head.next_as_ref();
             while let Some(n) = cur {
                 v.push(*n.value().expect("data node"));
-                cur = n.next();
+                cur = n.next_as_ref();
             }
             v
         };
@@ -1419,7 +1530,8 @@ pub(crate) mod tests {
         let mut head = skiplist?;
         // Keep v2 and v4; drop v1 and v3.
         unsafe {
-            head.filter_rebuild(
+            Node::filter_rebuild(
+                NonNull::from_mut(&mut *head),
                 |cur| {
                     let v = (*cur).value().copied();
                     v == Some(20) || v == Some(40)
@@ -1442,7 +1554,8 @@ pub(crate) mod tests {
         let mut head = skiplist?;
         // Drop v2 and v3 (both height 1); keep v1 (height 0) and v4 (height 0).
         unsafe {
-            head.filter_rebuild(
+            Node::filter_rebuild(
+                NonNull::from_mut(&mut *head),
                 |cur| {
                     let v = (*cur).value().copied();
                     v != Some(20) && v != Some(30)
@@ -1454,10 +1567,10 @@ pub(crate) mod tests {
         // Chain must be head -> v1 -> v4.
         let vals: Vec<u8> = {
             let mut v = Vec::new();
-            let mut cur = head.next();
+            let mut cur = head.next_as_ref();
             while let Some(n) = cur {
                 v.push(*n.value().expect("data node"));
-                cur = n.next();
+                cur = n.next_as_ref();
             }
             v
         };
@@ -1503,7 +1616,7 @@ pub(crate) mod tests {
         //   v3.links[0]   → None             — v4 has height 0 so nothing wires into v3.links[0]
         let mut head = skiplist?;
         unsafe {
-            head.filter_rebuild(|_| true, |_| {});
+            Node::filter_rebuild(NonNull::from_mut(&mut *head), |_| true, |_| {});
         }
 
         let link0 = head.links()[0]
@@ -1515,7 +1628,7 @@ pub(crate) mod tests {
         assert!(head.links()[1].is_none(), "head.links[1] must be None");
         assert!(head.links()[2].is_none(), "head.links[2] must be None");
 
-        let v2 = head.next().expect("v1").next().expect("v2");
+        let v2 = head.next_as_ref().expect("v1").next_as_ref().expect("v2");
         let v2_link0 = v2.links()[0].as_ref().expect("v2.links[0] must be Some");
         assert_eq!(
             unsafe { v2_link0.node().as_ref() }.value().copied(),
@@ -1523,7 +1636,7 @@ pub(crate) mod tests {
         );
         assert_eq!(v2_link0.distance().get(), 1);
 
-        let v3 = v2.next().expect("v3");
+        let v3 = v2.next_as_ref().expect("v3");
         assert!(v3.links()[0].is_none(), "v3.links[0] must be None");
 
         // Insta is incompatible with Miri
@@ -1556,38 +1669,38 @@ pub(crate) mod tests {
         // Build list1: head1 → v1(10) → v2(20), all height 0 (no skip links).
         let mut head1 = Box::new(Node::<u8, MAX_LEVELS>::new(MAX_LEVELS));
         unsafe {
-            head1.insert_after(Node::with_value(0, 10_u8));
-            head1
-                .next_mut()
-                .expect("v1")
-                .insert_after(Node::with_value(0, 20_u8));
+            Node::insert_after(NonNull::from_mut(&mut *head1), Node::with_value(0, 10_u8));
+            Node::insert_after(
+                NonNull::from_mut(head1.next_as_mut().expect("v1")),
+                Node::with_value(0, 20_u8),
+            );
         }
 
         // Build list2: head2 → v3(30) → v4(40), all height 0 (no skip links).
         let mut head2 = Box::new(Node::<u8, MAX_LEVELS>::new(MAX_LEVELS));
         unsafe {
-            head2.insert_after(Node::with_value(0, 30_u8));
-            head2
-                .next_mut()
-                .expect("v3")
-                .insert_after(Node::with_value(0, 40_u8));
+            Node::insert_after(NonNull::from_mut(&mut *head2), Node::with_value(0, 30_u8));
+            Node::insert_after(
+                NonNull::from_mut(head2.next_as_mut().expect("v3")),
+                Node::with_value(0, 40_u8),
+            );
         }
 
         unsafe {
             // Find v2 (tail of list1) and join. Moving *head2 out of the Box
             // frees the allocation; join immediately updates v3.prev to point
             // to v2, so the stale back-pointer is never dereferenced.
-            let v2 = head1.next_mut().expect("v1").next_mut().expect("v2");
+            let v2 = head1.next_as_mut().expect("v1").next_as_mut().expect("v2");
             debug_assert!(matches!(v2.node_type(), NodeType::Tail));
             v2.join(*head2);
         }
 
         let vals: Vec<u8> = {
             let mut v = Vec::new();
-            let mut cur = head1.next();
+            let mut cur = head1.next_as_ref();
             while let Some(n) = cur {
                 v.push(*n.value().expect("data node"));
-                cur = n.next();
+                cur = n.next_as_ref();
             }
             v
         };
@@ -1621,11 +1734,11 @@ pub(crate) mod tests {
         // Build list1: head1 → v1(10) → v2(20), all height 0.
         let mut head1 = Box::new(Node::<u8, MAX_LEVELS>::new(MAX_LEVELS));
         unsafe {
-            head1.insert_after(Node::with_value(0, 10_u8));
-            head1
-                .next_mut()
-                .expect("v1")
-                .insert_after(Node::with_value(0, 20_u8));
+            Node::insert_after(NonNull::from_mut(&mut *head1), Node::with_value(0, 10_u8));
+            Node::insert_after(
+                NonNull::from_mut(head1.next_as_mut().expect("v1")),
+                Node::with_value(0, 20_u8),
+            );
         }
 
         // Joining an empty head2 (no nodes) must leave list1 unchanged.
@@ -1633,17 +1746,17 @@ pub(crate) mod tests {
         // SAFETY: Moving *head2 frees the allocation; join sees head.next = None
         // and leaves self.next unchanged.
         unsafe {
-            let v2 = head1.next_mut().expect("v1").next_mut().expect("v2");
+            let v2 = head1.next_as_mut().expect("v1").next_as_mut().expect("v2");
             debug_assert!(matches!(v2.node_type(), NodeType::Tail));
             v2.join(*head2);
         }
 
         let vals: Vec<u8> = {
             let mut v = Vec::new();
-            let mut cur = head1.next();
+            let mut cur = head1.next_as_ref();
             while let Some(n) = cur {
                 v.push(*n.value().expect("data node"));
-                cur = n.next();
+                cur = n.next_as_ref();
             }
             v
         };
@@ -1676,27 +1789,27 @@ pub(crate) mod tests {
         // Build head → v1(10) → v2(20) → v3(30), all height 0 (no skip links).
         let mut head = Box::new(Node::<u8, MAX_LEVELS>::new(MAX_LEVELS));
         unsafe {
-            head.insert_after(Node::with_value(0, 10_u8));
-            head.next_mut()
-                .expect("v1")
-                .insert_after(Node::with_value(0, 20_u8));
-            head.next_mut()
-                .expect("v1")
-                .next_mut()
-                .expect("v2")
-                .insert_after(Node::with_value(0, 30_u8));
+            Node::insert_after(NonNull::from_mut(&mut *head), Node::with_value(0, 10_u8));
+            Node::insert_after(
+                NonNull::from_mut(head.next_as_mut().expect("v1")),
+                Node::with_value(0, 20_u8),
+            );
+            Node::insert_after(
+                NonNull::from_mut(head.next_as_mut().expect("v1").next_as_mut().expect("v2")),
+                Node::with_value(0, 30_u8),
+            );
         }
 
         // Truncate after v1; v2 and v3 are freed.
         // SAFETY: v1 is exclusively owned and no other references to v2/v3 exist.
-        unsafe { head.next_mut().expect("v1").truncate_next() };
+        unsafe { head.next_as_mut().expect("v1").truncate_next() };
 
         let vals: Vec<u8> = {
             let mut v = Vec::new();
-            let mut cur = head.next();
+            let mut cur = head.next_as_ref();
             while let Some(n) = cur {
                 v.push(*n.value().expect("data node"));
-                cur = n.next();
+                cur = n.next_as_ref();
             }
             v
         };
@@ -1725,7 +1838,7 @@ pub(crate) mod tests {
     fn truncate_next_empties_list() -> Result<()> {
         // Build head → v1(10), height 0.
         let mut head = Box::new(Node::<u8, MAX_LEVELS>::new(MAX_LEVELS));
-        unsafe { head.insert_after(Node::with_value(0, 10_u8)) };
+        unsafe { Node::insert_after(NonNull::from_mut(&mut *head), Node::with_value(0, 10_u8)) };
 
         // Truncate directly on head; v1 is freed.
         // SAFETY: head is exclusively owned and no other references to v1 exist.
@@ -1733,7 +1846,7 @@ pub(crate) mod tests {
             head.truncate_next();
         }
 
-        assert!(head.next().is_none());
+        assert!(head.next_as_ref().is_none());
 
         // Insta is incompatible with Miri
         if !cfg!(miri) {
@@ -1761,7 +1874,7 @@ pub(crate) mod tests {
         // SAFETY: head is exclusively owned; there is no chain to detach.
         let result = unsafe { head.take_next_chain() };
         assert!(result.is_none());
-        assert!(head.next().is_none());
+        assert!(head.next_as_ref().is_none());
     }
 
     #[rstest]
@@ -1774,11 +1887,14 @@ pub(crate) mod tests {
         // SAFETY: `head` is exclusively owned; no other references exist.
         let first_nn = unsafe { head.take_next_chain() }.expect("fixture is non-empty");
 
-        assert!(head.next().is_none(), "head must be empty after take");
+        assert!(
+            head.next_as_ref().is_none(),
+            "head must be empty after take"
+        );
         // SAFETY: `first_nn` is a live heap-allocated node whose ownership was
         // transferred to us by take_next_chain.
         assert!(
-            unsafe { first_nn.as_ref() }.prev().is_none(),
+            unsafe { first_nn.as_ref() }.prev_as_ref().is_none(),
             "first detached node must have no prev"
         );
 
@@ -1790,10 +1906,10 @@ pub(crate) mod tests {
 
         let vals: Vec<u8> = {
             let mut v = Vec::new();
-            let mut cur = head2.next();
+            let mut cur = head2.next_as_ref();
             while let Some(n) = cur {
                 v.push(*n.value().expect("data node"));
-                cur = n.next();
+                cur = n.next_as_ref();
             }
             v
         };
@@ -1834,17 +1950,17 @@ pub(crate) mod tests {
         for link in head.links_mut() {
             *link = None;
         }
-        let mut cur = unsafe { head.next_mut() };
+        let mut cur = unsafe { head.next_as_mut() };
         while let Some(n) = cur {
             for link in n.links_mut() {
                 *link = None;
             }
-            cur = unsafe { n.next_mut() };
+            cur = unsafe { n.next_as_mut() };
         }
 
         // SAFETY: head is exclusively owned; all data nodes are live heap
         // allocations reachable through the next chain.
-        let tail = unsafe { head.rebuild() };
+        let tail = unsafe { Node::rebuild(NonNull::from_mut(&mut *head)) };
 
         assert_eq!(
             unsafe { tail.expect("non-empty").as_ref() }

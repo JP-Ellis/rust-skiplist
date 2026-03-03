@@ -69,7 +69,7 @@ impl<'a, T, Q: ?Sized, F: Fn(&T, &Q) -> Ordering, const N: usize> OrdMutVisitor<
     /// - `cmp`: Comparator returning `Ordering` for a node value vs. the target.
     fn new(head: &'a mut Node<T, N>, target: &'a Q, cmp: F) -> Self {
         let max_levels = head.level();
-        let current = NonNull::from(&*head);
+        let current = NonNull::from_mut(head);
         Self {
             current,
             level: max_levels,
@@ -166,9 +166,9 @@ impl<T, Q: ?Sized, F: Fn(&T, &Q) -> Ordering, const N: usize> Visitor
         // No skip-link can advance us; fall back to the sequential next pointer.
         self.level = 0;
         // SAFETY: `self.current` is valid for `'a` and no other `&mut` exists.
-        let next_opt = unsafe { self.current.as_ref() }.next();
-        if let Some(next) = next_opt {
-            let ord = next
+        if let Some(next_nn) = unsafe { self.current.as_ref() }.next() {
+            // SAFETY: next_nn is a valid heap-allocated node.
+            let ord = unsafe { next_nn.as_ref() }
                 .value()
                 .map_or(Ordering::Less, |v| (self.cmp)(v, self.target));
             if ord == Ordering::Greater {
@@ -176,7 +176,7 @@ impl<T, Q: ?Sized, F: Fn(&T, &Q) -> Ordering, const N: usize> Visitor
                 // target is absent from the list.
                 return Step::Exhausted;
             }
-            self.current = NonNull::from(next);
+            self.current = next_nn;
             self.found = ord == Ordering::Equal;
             return Step::Advanced(self.current);
         }

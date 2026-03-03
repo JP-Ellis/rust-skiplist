@@ -36,12 +36,20 @@ impl<T, G: LevelGenerator, const N: usize> SkipList<T, N, G> {
     /// ```
     #[inline]
     pub fn clear(&mut self) {
-        let max_levels = self.head.level();
-        // Replacing `*self.head` with a fresh sentinel node drops the old
-        // sentinel in-place.  `Node::drop` iterates the entire `next` chain
-        // and frees each node one at a time, so this is O(n) and
-        // non-recursive regardless of list length.
-        *self.head = Node::new(max_levels);
+        let max_levels = self.head_ref().level();
+        // Drop the old sentinel in-place.  `Node::drop` iterates the entire
+        // `next` chain and frees each node one at a time, so this is O(n) and
+        // non-recursive regardless of list length.  Then write a fresh
+        // sentinel into the same allocation.
+        //
+        // SAFETY: `self.head` is a live, exclusively-owned allocation;
+        // `drop_in_place` drops the old `Node<T, N>` (and its linked chain),
+        // leaving the memory valid but uninitialized.
+        unsafe { core::ptr::drop_in_place(self.head.as_ptr()) };
+        // SAFETY: The allocation is still live after `drop_in_place`; `write`
+        // initializes it with a fresh sentinel; no destructor runs on the
+        // `write` side.
+        unsafe { self.head.as_ptr().write(Node::new(max_levels)) };
         self.tail = None;
         self.len = 0;
     }
@@ -100,13 +108,13 @@ impl<T, G: LevelGenerator, const N: usize> SkipList<T, N, G> {
         }
 
         // 0 < len < self.len: keep elements at ranks 1..=len; drop the rest.
-        let max_levels = self.head.level();
+        let max_levels = self.head_ref().level();
 
         // IndexMutVisitor with target = len records, for each level l, the last
         // node at level l with rank < len.  precursors[0].links[0] points to the
         // new tail at rank len.  into_parts() releases the &mut borrow.
         let (_, precursors, _) = {
-            let mut visitor = IndexMutVisitor::new(&mut self.head, len);
+            let mut visitor = IndexMutVisitor::new(self.head, len);
             visitor.traverse();
             visitor.into_parts()
         };
@@ -205,12 +213,15 @@ impl<T, G: LevelGenerator, const N: usize> SkipList<T, N, G> {
         );
 
         let tail_len = self.len.saturating_sub(at);
-        let max_levels = self.head.level();
+        let max_levels = self.head_ref().level();
 
         // Edge case: nothing to split off, return an empty list.
         if tail_len == 0 {
+            // SAFETY: `Box::into_raw` transfers ownership; freed in `Drop`.
+            let head =
+                unsafe { NonNull::new_unchecked(Box::into_raw(Box::new(Node::new(max_levels)))) };
             return Self {
-                head: Box::new(Node::new(max_levels)),
+                head,
                 tail: None,
                 len: 0,
                 generator: self.generator.clone(),
@@ -220,8 +231,11 @@ impl<T, G: LevelGenerator, const N: usize> SkipList<T, N, G> {
         // Edge case: split at position 0, transfer everything to the result.
         if at == 0 {
             let old_len = self.len;
+            // SAFETY: `Box::into_raw` transfers ownership; freed in `Drop`.
+            let result_head =
+                unsafe { NonNull::new_unchecked(Box::into_raw(Box::new(Node::new(max_levels)))) };
             let mut result = Self {
-                head: Box::new(Node::new(max_levels)),
+                head: result_head,
                 tail: None, // set by rebuild below
                 len: old_len,
                 generator: self.generator.clone(),
@@ -232,14 +246,13 @@ impl<T, G: LevelGenerator, const N: usize> SkipList<T, N, G> {
             // exist.  take_next_chain detaches cleanly.  set_head_next
             // wires the first node to result.head.
             unsafe {
-                let head_ptr: *mut Node<T, N> = &raw mut *self.head;
+                let head_ptr: *mut Node<T, N> = self.head.as_ptr();
                 if let Some(first_nn) = (*head_ptr).take_next_chain() {
-                    result.head.set_head_next(first_nn);
+                    (*result.head.as_ptr()).set_head_next(first_nn);
                 }
             }
 
-            // Clear self.head's skip links (now all-None).
-            for link in self.head.links_mut() {
+            for link in self.head_mut().links_mut() {
                 *link = None;
             }
             self.tail = None;
@@ -250,7 +263,7 @@ impl<T, G: LevelGenerator, const N: usize> SkipList<T, N, G> {
             // SAFETY: result.head is exclusively owned; all nodes reachable
             // via result.head.next are live heap allocations.
             unsafe {
-                result.tail = result.head.rebuild();
+                result.tail = Node::rebuild(result.head);
             }
 
             return result;
@@ -276,22 +289,22 @@ impl<T, G: LevelGenerator, const N: usize> SkipList<T, N, G> {
                 .expect("pivot has a successor because at < self.len");
 
             // Build the returned list.
+            // SAFETY: `Box::into_raw` transfers ownership; freed in `Drop`.
+            let result_head =
+                NonNull::new_unchecked(Box::into_raw(Box::new(Node::new(max_levels))));
             let mut result = Self {
-                head: Box::new(Node::new(max_levels)),
+                head: result_head,
                 tail: None, // set by rebuild below
                 len: tail_len,
                 generator: self.generator.clone(),
             };
-            result.head.set_head_next(first_of_tail);
+            (*result.head.as_ptr()).set_head_next(first_of_tail);
 
             self.tail = Some(NonNull::new_unchecked(pivot));
             self.len = at;
 
-            // Rebuild skip links for self (nodes 0 .. at).
-            self.tail = self.head.rebuild();
-
-            // Rebuild skip links for result (nodes at .. original_len).
-            result.tail = result.head.rebuild();
+            self.tail = Node::rebuild(self.head);
+            result.tail = Node::rebuild(result.head);
 
             result
         }
@@ -351,11 +364,11 @@ impl<T, G: LevelGenerator, const N: usize> SkipList<T, N, G> {
 
         let self_len = self.len;
         let other_len = other.len;
-        let max_levels = self.head.level();
+        let max_levels = self.head_ref().level();
 
         // Slow path: different level-generator sizes, fall back to re-insertion
         // to avoid out-of-bounds indexing in the fast-path link wiring below.
-        if max_levels != other.head.level() {
+        if max_levels != other.head_ref().level() {
             while let Some(val) = other.pop_front() {
                 self.push_back(val);
             }
@@ -368,7 +381,7 @@ impl<T, G: LevelGenerator, const N: usize> SkipList<T, N, G> {
         // recording the rightmost predecessor at each level.
         // into_parts() releases the &mut borrow on self.head.
         let (_, precursors, precursor_distances) = {
-            let mut visitor = IndexMutVisitor::new(&mut self.head, self_len.saturating_add(1));
+            let mut visitor = IndexMutVisitor::new(self.head, self_len.saturating_add(1));
             visitor.traverse();
             visitor.into_parts()
         };
@@ -378,8 +391,8 @@ impl<T, G: LevelGenerator, const N: usize> SkipList<T, N, G> {
         // disjoint `Box<Node<T>>` allocation.  Within the block each node field is
         // accessed at most once, so no simultaneous aliasing occurs.
         unsafe {
-            let head_ptr: *mut Node<T, N> = &raw mut *self.head;
-            let other_head_ptr: *mut Node<T, N> = &raw mut *other.head;
+            let head_ptr: *mut Node<T, N> = self.head.as_ptr();
+            let other_head_ptr: *mut Node<T, N> = other.head.as_ptr();
 
             // Step 1: detach other's node chain from other's sentinel head.
             let first_nn = (*other_head_ptr)
@@ -472,7 +485,7 @@ mod tests {
         assert_eq!(list.len(), 0);
         assert_eq!(list.front(), None);
         assert_eq!(list.back(), None);
-        assert!(list.head.next().is_none());
+        assert!(list.head_ref().next_as_ref().is_none());
     }
 
     #[test]
@@ -558,7 +571,12 @@ mod tests {
         assert_eq!(list.len(), 1);
         assert_eq!(list.front(), Some(&1));
         assert_eq!(list.back(), Some(&1));
-        assert!(list.head.next().and_then(|n| n.next()).is_none());
+        assert!(
+            list.head_ref()
+                .next_as_ref()
+                .and_then(|n| n.next_as_ref())
+                .is_none()
+        );
     }
 
     #[test]
