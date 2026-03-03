@@ -113,8 +113,10 @@ impl<T, G: LevelGenerator, const N: usize> SkipList<T, N, G> {
                 if l < height {
                     let distance = new_rank.saturating_sub(pred_rank);
                     let old_link = (*pred_ptr).links_mut()[l].take();
-                    (*pred_ptr).links_mut()[l] =
-                        Some(Link::new(&*new_raw, distance).expect("distance >= 1"));
+                    (*pred_ptr).links_mut()[l] = Some(
+                        Link::new(NonNull::new_unchecked(new_raw), distance)
+                            .expect("distance >= 1"),
+                    );
                     (*new_raw).links_mut()[l] = if let Some(old) = old_link {
                         let new_d = old
                             .distance()
@@ -208,13 +210,11 @@ impl<T, G: LevelGenerator, const N: usize> SkipList<T, N, G> {
         let (value, pred0) = unsafe {
             // The target is precursors[0]'s level-0 successor.
             // index < len guarantees this link exists.
-            let target_ptr: *mut Node<T, N> = NonNull::from(
-                (*precursors[0].as_ptr()).links()[0]
-                    .as_ref()
-                    .expect("precursors[0].links[0] points to the target node")
-                    .node(),
-            )
-            .as_ptr();
+            let target_ptr: *mut Node<T, N> = (*precursors[0].as_ptr()).links()[0]
+                .as_ref()
+                .expect("precursors[0].links[0] points to the target node")
+                .node()
+                .as_ptr();
 
             let target_height = (*target_ptr).level();
 
@@ -448,7 +448,7 @@ mod tests {
         {
             let link: &Link<_, _> = list.head.links()[0].as_ref().expect("head link");
             assert_eq!(link.distance().get(), 1);
-            assert_eq!(link.node().value(), Some(&1));
+            assert_eq!(unsafe { link.node().as_ref() }.value(), Some(&1));
         }
         // n1(1).links[0] → new(2) at distance 1
         {
@@ -456,7 +456,7 @@ mod tests {
             assert_eq!(n1.value(), Some(&1));
             let link: &Link<_, _> = n1.links()[0].as_ref().expect("n1 link");
             assert_eq!(link.distance().get(), 1);
-            assert_eq!(link.node().value(), Some(&2));
+            assert_eq!(unsafe { link.node().as_ref() }.value(), Some(&2));
         }
         // new(2).links[0] → n3(3) at distance 1
         {
@@ -464,7 +464,7 @@ mod tests {
             assert_eq!(new_node.value(), Some(&2));
             let link: &Link<_, _> = new_node.links()[0].as_ref().expect("new_node link");
             assert_eq!(link.distance().get(), 1);
-            assert_eq!(link.node().value(), Some(&3));
+            assert_eq!(unsafe { link.node().as_ref() }.value(), Some(&3));
         }
         // n3(3).links[0] = None
         {
@@ -632,7 +632,7 @@ mod tests {
         {
             let link: &Link<_, _> = list.head.links()[0].as_ref().expect("head link");
             assert_eq!(link.distance().get(), 1);
-            assert_eq!(link.node().value(), Some(&1));
+            assert_eq!(unsafe { link.node().as_ref() }.value(), Some(&1));
         }
         // n1(1).links[0] → n3(3) at distance 1 (previously pointed to n2)
         {
@@ -640,7 +640,7 @@ mod tests {
             assert_eq!(n1.value(), Some(&1));
             let link: &Link<_, _> = n1.links()[0].as_ref().expect("n1 link");
             assert_eq!(link.distance().get(), 1);
-            assert_eq!(link.node().value(), Some(&3));
+            assert_eq!(unsafe { link.node().as_ref() }.value(), Some(&3));
         }
         // n3(3).links[0] = None
         {

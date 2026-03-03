@@ -117,13 +117,11 @@ impl<T, G: LevelGenerator, const N: usize> SkipList<T, N, G> {
         let new_tail_ptr: *mut Node<T, N> = unsafe {
             // The new tail is the level-0 successor of precursors[0].
             // It exists because 0 < len < self.len.
-            let new_tail_ptr: *mut Node<T, N> = NonNull::from(
-                (*precursors[0].as_ptr()).links()[0]
-                    .as_ref()
-                    .expect("the node at rank `len` exists because len < self.len")
-                    .node(),
-            )
-            .as_ptr();
+            let new_tail_ptr: *mut Node<T, N> = (*precursors[0].as_ptr()).links()[0]
+                .as_ref()
+                .expect("the node at rank `len` exists because len < self.len")
+                .node()
+                .as_ptr();
 
             let new_tail_height = (*new_tail_ptr).level();
 

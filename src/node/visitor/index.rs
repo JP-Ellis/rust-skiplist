@@ -61,16 +61,18 @@ impl<'a, T, const N: usize> Visitor for IndexVisitor<'a, T, N> {
         }
 
         for (level, maybe_link) in (0..self.level).zip(self.current.links()).rev() {
-            if let Some(link) = maybe_link {
-                if self.index.saturating_add(link.distance().get()) <= self.target {
-                    self.current = link.node();
-                    // Use level + 1 so the same level is reconsidered at the new
-                    // node; setting to `level` would skip it, degrading O(log n)
-                    // traversal to O(n) when consecutive nodes share a high level.
-                    self.level = level.saturating_add(1);
-                    self.index = self.index.saturating_add(link.distance().get());
-                    return Step::Advanced(self.current);
-                }
+            if let Some(link) = maybe_link
+                && self.index.saturating_add(link.distance().get()) <= self.target
+            {
+                // SAFETY: link.node() is a valid heap-allocated node
+                // that lives at least as long as the visitor's `'a`.
+                self.current = unsafe { link.node().as_ref() };
+                // Use level + 1 so the same level is reconsidered at the new
+                // node; setting to `level` would skip it, degrading O(log n)
+                // traversal to O(n) when consecutive nodes share a high level.
+                self.level = level.saturating_add(1);
+                self.index = self.index.saturating_add(link.distance().get());
+                return Step::Advanced(self.current);
             }
         }
 

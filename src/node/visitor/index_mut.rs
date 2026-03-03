@@ -62,7 +62,7 @@ impl<'a, T, const N: usize> IndexMutVisitor<'a, T, N> {
     /// - `target`: The 0-based index to locate.
     pub(crate) fn new(head: &'a mut Node<T, N>, target: usize) -> Self {
         let max_levels = head.level();
-        let current = NonNull::from(&*head);
+        let current = NonNull::from_mut(head);
         Self {
             current,
             index: 0,
@@ -159,7 +159,7 @@ impl<T, const N: usize> Visitor for IndexMutVisitor<'_, T, N> {
                         // link[level] points to < target, so it is not the
                         // precursor for this level.  We will record it later
                         // if the same level overshoots at the new node.
-                        self.current = NonNull::from(link.node());
+                        self.current = link.node();
                         // Use level + 1 so the same level is reconsidered at
                         // the new node (mirrors the fix in `IndexVisitor`).
                         self.level = level.saturating_add(1);

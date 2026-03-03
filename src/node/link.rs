@@ -40,33 +40,30 @@ impl<V, const N: usize> Link<V, N> {
     /// * `distance` - Number of list positions to the target node. Must be
     ///   at least 1; passing 0 returns [`LinkError::InvalidDistance`].
     ///
-    /// - `next`: The node that this link points to.
-    /// - `distance`: The distance to the next node.
-    pub(crate) fn new(node: &Node<V, N>, distance: usize) -> Result<Self, LinkError> {
+    /// # Errors
+    ///
+    /// Returns [`LinkError::InvalidDistance`] if `distance` is zero.
+    pub(crate) fn new(node: NonNull<Node<V, N>>, distance: usize) -> Result<Self, LinkError> {
         Ok(Link {
-            node: NonNull::from(node),
+            node,
             distance: NonZeroUsize::new(distance).ok_or(LinkError::InvalidDistance)?,
         })
     }
 
-    /// Get a reference to the next node.
-    pub(crate) fn node(&self) -> &Node<V, N> {
-        // SAFETY: The pointer can never be null, and the value is
-        // [convertible](https://doc.rust-lang.org/stable/std/ptr/index.html#pointer-to-reference-conversion).
-        unsafe { self.node.as_ref() }
-    }
-
-    /// Get a mutable reference to the next node.
+    /// Return the raw pointer to the target node.
     ///
-    /// # Safety
+    /// The caller is responsible for choosing the appropriate access mode:
     ///
-    /// The caller must ensure that the reference is not used elsewhere while
-    /// this mutable reference is held. In most cases, this is not a problem as
-    /// the caller will have a mutable reference to the source node.
-    pub(crate) unsafe fn node_mut(&mut self) -> &mut Node<V, N> {
-        // SAFETY: The pointer can never be null, and the value is
-        // [convertible](https://doc.rust-lang.org/stable/std/ptr/index.html#pointer-to-reference-conversion).
-        unsafe { self.node.as_mut() }
+    /// - Read-only: `unsafe { link.node().as_ref() }`
+    /// - Mutable: `unsafe { link.node().as_mut() }`
+    /// - Raw pointer arithmetic: `link.node().as_ptr()`
+    // Returning NonNull rather than &Node avoids creating a shared reborrow
+    // here, which under Tree Borrows would downgrade the pointer's Reserved
+    // tag to Frozen and break callers that need mutable access (e.g., the
+    // mutable visitors). Callers must choose the reborrow that matches their
+    // actual access pattern.
+    pub(crate) fn node(&self) -> NonNull<Node<V, N>> {
+        self.node
     }
 
     /// Return the distance to the target node.
@@ -127,7 +124,7 @@ pub(crate) enum LinkError {
 
 #[cfg(test)]
 mod tests {
-    use std::{num::NonZeroUsize, ptr};
+    use std::{num::NonZeroUsize, ptr::NonNull};
 
     use anyhow::{Result, anyhow};
     use pretty_assertions::assert_eq;
@@ -138,8 +135,8 @@ mod tests {
     #[test]
     fn link_new() -> Result<()> {
         let node: Node<i32, 3> = Node::new(3);
-        let link = Link::new(&node, 1)?;
-        assert_eq!(ptr::from_ref(link.node()), ptr::from_ref(&node));
+        let link = Link::new(NonNull::from(&node), 1)?;
+        assert_eq!(link.node(), NonNull::from(&node));
         assert_eq!(
             link.distance(),
             NonZeroUsize::new(1).ok_or(anyhow!("Invalid distance"))?
@@ -150,7 +147,7 @@ mod tests {
     #[test]
     fn link_increment_distance() -> Result<()> {
         let node: Node<i32, 3> = Node::new(3);
-        let mut link = Link::new(&node, 1)?;
+        let mut link = Link::new(NonNull::from(&node), 1)?;
         assert_eq!(
             link.increment_distance()?,
             NonZeroUsize::new(2).expect("NonZeroUsize::new failed")
@@ -161,7 +158,7 @@ mod tests {
     #[test]
     fn link_decrement_distance() -> Result<()> {
         let node: Node<i32, 3> = Node::new(3);
-        let mut link = Link::new(&node, 2)?;
+        let mut link = Link::new(NonNull::from(&node), 2)?;
         assert_eq!(
             link.decrement_distance()?,
             NonZeroUsize::new(1).expect("NonZeroUsize::new failed")
@@ -172,7 +169,7 @@ mod tests {
     #[test]
     fn link_decrement_distance_underflow() -> Result<()> {
         let node: Node<i32, 3> = Node::new(3);
-        let mut link = Link::new(&node, 1)?;
+        let mut link = Link::new(NonNull::from(&node), 1)?;
         assert!(matches!(
             link.decrement_distance(),
             Err(LinkError::DistanceUnderflow)
@@ -183,7 +180,7 @@ mod tests {
     #[test]
     fn link_increment_distance_overflow() -> Result<()> {
         let node: Node<i32, 3> = Node::new(3);
-        let mut link = Link::new(&node, usize::MAX)?;
+        let mut link = Link::new(NonNull::from(&node), usize::MAX)?;
         assert!(matches!(
             link.increment_distance(),
             Err(LinkError::DistanceOverflow)

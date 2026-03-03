@@ -78,7 +78,9 @@ impl<'a, T, Q: ?Sized, F: Fn(&T, &Q) -> Ordering, const N: usize> Visitor
 
         for (level, maybe_link) in (0..self.level).zip(self.current.links()).rev() {
             if let Some(link) = maybe_link {
-                let node = link.node();
+                // SAFETY: link.node() is a valid heap-allocated node
+                // that lives at least as long as the visitor's `'a`.
+                let node = unsafe { link.node().as_ref() };
                 // A node with no value (head sentinel) is treated as strictly
                 // less than any target so that links to sentinel-like nodes are
                 // always followed. In a well-formed skip list every skip-link

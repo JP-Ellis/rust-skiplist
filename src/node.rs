@@ -616,8 +616,10 @@ impl<V, const N: usize> Node<V, N> {
                     for l in 0..height {
                         let (pred_ptr, pred_rank) = predecessors[l];
                         let dist = new_rank.saturating_sub(pred_rank);
-                        (*pred_ptr).links_mut()[l] =
-                            Some(Link::new(&*cur, dist).expect("dist >= 1 by construction"));
+                        (*pred_ptr).links_mut()[l] = Some(
+                            Link::new(NonNull::new_unchecked(cur), dist)
+                                .expect("dist >= 1 by construction"),
+                        );
                         predecessors[l] = (cur, new_rank);
                     }
                 } else {
@@ -763,7 +765,8 @@ impl<V: Debug, const N: usize> Node<V, N> {
                         " {}-> ",
                         "------".repeat(link.distance().get().saturating_sub(1))
                     )?;
-                    current = link.node();
+                    // SAFETY: link.node() is a valid heap-allocated node.
+                    current = unsafe { link.node().as_ref() };
                 } else {
                     writeln!(output)?;
                     break;
@@ -934,6 +937,8 @@ impl<V, const N: usize> Drop for Node<V, N> {
 )]
 #[cfg(test)]
 pub(crate) mod tests {
+    use core::ptr::NonNull;
+
     use anyhow::Result;
     use insta::assert_snapshot;
     use pretty_assertions::{assert_eq, assert_matches};
@@ -1022,10 +1027,10 @@ pub(crate) mod tests {
             let v2_ref = v1_ref.next().expect("v2 not found");
             let v3_ref = v2_ref.next().expect("v3 not found");
             let v4_ref = v3_ref.next().expect("tail not found");
-            head_v3 = Link::new(v3_ref, 3)?;
-            head_v2 = Link::new(v2_ref, 2)?;
-            v2_v3 = Link::new(v3_ref, 1)?;
-            v3_v4 = Link::new(v4_ref, 1)?;
+            head_v3 = Link::new(NonNull::from(v3_ref), 3)?;
+            head_v2 = Link::new(NonNull::from(v2_ref), 2)?;
+            v2_v3 = Link::new(NonNull::from(v3_ref), 1)?;
+            v3_v4 = Link::new(NonNull::from(v4_ref), 1)?;
         }
 
         unsafe {
@@ -1504,7 +1509,7 @@ pub(crate) mod tests {
         let link0 = head.links()[0]
             .as_ref()
             .expect("head.links[0] must be Some");
-        assert_eq!(link0.node().value().copied(), Some(20));
+        assert_eq!(unsafe { link0.node().as_ref() }.value().copied(), Some(20));
         assert_eq!(link0.distance().get(), 2);
 
         assert!(head.links()[1].is_none(), "head.links[1] must be None");
@@ -1512,7 +1517,10 @@ pub(crate) mod tests {
 
         let v2 = head.next().expect("v1").next().expect("v2");
         let v2_link0 = v2.links()[0].as_ref().expect("v2.links[0] must be Some");
-        assert_eq!(v2_link0.node().value().copied(), Some(30));
+        assert_eq!(
+            unsafe { v2_link0.node().as_ref() }.value().copied(),
+            Some(30)
+        );
         assert_eq!(v2_link0.distance().get(), 1);
 
         let v3 = v2.next().expect("v3");

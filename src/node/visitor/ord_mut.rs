@@ -133,11 +133,12 @@ impl<T, Q: ?Sized, F: Fn(&T, &Q) -> Ordering, const N: usize> Visitor
                 let maybe_link = links.get(level).and_then(|l| l.as_ref());
 
                 if let Some(link) = maybe_link {
-                    let node = link.node();
+                    let node_ptr = link.node();
                     // Treat a value-less node (head sentinel) as strictly less
                     // than any target. In a well-formed skip list every
                     // skip-link target has a value, so this is defensive.
-                    let ord = node
+                    // SAFETY: node_ptr is a valid heap-allocated node.
+                    let ord = unsafe { node_ptr.as_ref() }
                         .value()
                         .map_or(Ordering::Less, |v| (self.cmp)(v, self.target));
 
@@ -147,7 +148,7 @@ impl<T, Q: ?Sized, F: Fn(&T, &Q) -> Ordering, const N: usize> Visitor
                         // link[level] points to < target, so it is not the
                         // precursor for this level. We will record it later
                         // if the same level overshoots at the new node.
-                        self.current = NonNull::from(node);
+                        self.current = node_ptr;
                         // Use level + 1 so the same level is reconsidered at
                         // the new node (mirrors the fix in `IndexVisitor`).
                         self.level = level.saturating_add(1);
