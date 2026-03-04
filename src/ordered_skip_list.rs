@@ -32,6 +32,7 @@ use crate::{
 
 mod access;
 mod insert_remove;
+pub mod iter;
 
 /// An ordered skip list parameterised by a comparator.
 ///
