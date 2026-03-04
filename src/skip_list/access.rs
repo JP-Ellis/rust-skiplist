@@ -125,8 +125,7 @@ impl<T, G: LevelGenerator, const N: usize> SkipList<T, N, G> {
         // head sentinel is valid for its lifetime.  `next()` returns the
         // stored `NonNull` directly, avoiding a Frozen provenance tag under
         // Tree Borrows.  The `?` propagates `None` when the list is empty.
-        let front_ptr: *mut Node<T, N> =
-            unsafe { self.head.as_ref().next()?.as_ptr() };
+        let front_ptr: *mut Node<T, N> = unsafe { self.head.as_ref().next()?.as_ptr() };
         // SAFETY: `front_ptr` is a live, exclusively-owned node derived
         // immediately above; the returned `&mut T` is bounded by `&mut self`.
         unsafe { (*front_ptr).value_mut() }

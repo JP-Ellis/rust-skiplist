@@ -52,6 +52,7 @@
 pub mod comparator;
 pub mod level_generator;
 mod node;
+pub mod ordered_skip_list;
 pub mod skip_list;
 
 #[cfg(feature = "partial-ord")]
