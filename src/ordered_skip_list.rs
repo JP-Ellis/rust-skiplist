@@ -30,6 +30,8 @@ use crate::{
     node::Node,
 };
 
+mod insert_remove;
+
 /// An ordered skip list parameterised by a comparator.
 ///
 /// `OrderedSkipList<T, N, C, G>` maintains all elements in the total order

@@ -35,6 +35,7 @@ mod ord_mut;
 
 pub(crate) use index::IndexVisitor;
 pub(crate) use index_mut::IndexMutVisitor;
+pub(crate) use ord_mut::OrdMutVisitor;
 
 /// Outcome of a single [`Visitor::step`] call.
 #[derive(Debug, PartialEq, Eq)]
