@@ -22,28 +22,34 @@ use crate::node::{
 /// every adjacent pair `(a, b)`, `cmp(a.value, target)` must not be
 /// `Ordering::Greater` when `cmp(b.value, target)` is `Ordering::Less`.
 /// Violating this contract may cause the visitor to return a false negative.
-struct OrdVisitor<'a, T, Q: ?Sized, F: Fn(&T, &Q) -> Ordering, const N: usize> {
+pub(crate) struct OrdVisitor<'a, 'b, T, Q: ?Sized, F: Fn(&T, &Q) -> Ordering, const N: usize> {
     /// Current node under consideration.
     current: &'a Node<T, N>,
     /// Highest level still under consideration.
     level: usize,
     /// Whether the target has been found.
     found: bool,
-    /// The value being searched for.
-    target: &'a Q,
+    /// The value being searched for. `'b` is independent of `'a` so that
+    /// callers can pass a shorter-lived target while the returned node ref
+    /// still carries the longer list lifetime `'a`.
+    target: &'b Q,
     /// Comparator: `cmp(node_value, target)`.
     cmp: F,
 }
 
-impl<'a, T, Q: ?Sized, F: Fn(&T, &Q) -> Ordering, const N: usize> OrdVisitor<'a, T, Q, F, N> {
+impl<'a, 'b, T, Q: ?Sized, F: Fn(&T, &Q) -> Ordering, const N: usize>
+    OrdVisitor<'a, 'b, T, Q, F, N>
+{
     /// Create a new ordered visitor starting at `head`.
     ///
     /// # Arguments
     ///
-    /// - `head`: The head node of the skip list.
-    /// - `target`: The value to search for.
+    /// - `head`: The head node of the skip list. The returned node ref
+    ///   carries the same lifetime `'a`.
+    /// - `target`: The value to search for. Its lifetime `'b` is independent
+    ///   of `'a` and need not outlive the traversal result.
     /// - `cmp`: Comparator returning `Ordering` for a node value vs. the target.
-    fn new(head: &'a Node<T, N>, target: &'a Q, cmp: F) -> Self {
+    pub(crate) fn new(head: &'a Node<T, N>, target: &'b Q, cmp: F) -> Self {
         Self {
             current: head,
             level: head.level(),
@@ -55,7 +61,7 @@ impl<'a, T, Q: ?Sized, F: Fn(&T, &Q) -> Ordering, const N: usize> OrdVisitor<'a,
 }
 
 impl<'a, T, Q: ?Sized, F: Fn(&T, &Q) -> Ordering, const N: usize> Visitor
-    for OrdVisitor<'a, T, Q, F, N>
+    for OrdVisitor<'a, '_, T, Q, F, N>
 {
     type NodeRef = &'a Node<T, N>;
 

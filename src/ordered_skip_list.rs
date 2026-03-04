@@ -30,6 +30,7 @@ use crate::{
     node::Node,
 };
 
+mod access;
 mod insert_remove;
 
 /// An ordered skip list parameterised by a comparator.
