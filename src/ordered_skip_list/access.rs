@@ -8,6 +8,54 @@ use crate::{
 };
 
 impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, N, C, G> {
+    /// Returns a shared reference to the first (smallest) element, or `None`
+    /// if the list is empty.
+    ///
+    /// This operation is `$O(1)$`.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use skiplist::ordered_skip_list::OrderedSkipList;
+    ///
+    /// let mut list = OrderedSkipList::<i32>::new();
+    /// assert_eq!(list.first(), None);
+    /// list.insert(3);
+    /// list.insert(1);
+    /// list.insert(2);
+    /// assert_eq!(list.first(), Some(&1));
+    /// ```
+    #[inline]
+    #[must_use]
+    pub fn first(&self) -> Option<&T> {
+        self.head_ref().next_as_ref()?.value()
+    }
+
+    /// Returns a shared reference to the last (largest) element, or `None`
+    /// if the list is empty.
+    ///
+    /// This operation is `$O(1)$`.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use skiplist::ordered_skip_list::OrderedSkipList;
+    ///
+    /// let mut list = OrderedSkipList::<i32>::new();
+    /// assert_eq!(list.last(), None);
+    /// list.insert(3);
+    /// list.insert(1);
+    /// list.insert(2);
+    /// assert_eq!(list.last(), Some(&3));
+    /// ```
+    #[inline]
+    #[must_use]
+    pub fn last(&self) -> Option<&T> {
+        // SAFETY: self.tail is Some iff len > 0, an invariant maintained by all
+        // mutating operations. The pointer remains valid for the lifetime of &self.
+        unsafe { self.tail?.as_ref().value() }
+    }
+
     /// Returns `true` if the list contains an element that compares equal to
     /// `value`.
     ///
@@ -239,5 +287,77 @@ mod tests {
         list.insert(2);
         assert_eq!(list.get_by_value(&2), Some(&2));
         assert_eq!(list.get_by_value(&4), None);
+    }
+
+    // MARK: first
+
+    #[test]
+    fn first_empty() {
+        let list = OrderedSkipList::<i32>::new();
+        assert_eq!(list.first(), None);
+    }
+
+    #[test]
+    fn first_single_element() {
+        let mut list = OrderedSkipList::<i32>::new();
+        list.insert(42);
+        assert_eq!(list.first(), Some(&42));
+    }
+
+    #[test]
+    fn first_multiple_elements() {
+        let mut list = OrderedSkipList::<i32>::new();
+        list.insert(3);
+        list.insert(1);
+        list.insert(2);
+        assert_eq!(list.first(), Some(&1));
+    }
+
+    #[test]
+    fn first_custom_comparator() {
+        // Largest-first ordering: "first" is the element that sorts first,
+        // i.e. the largest value.
+        let mut list: OrderedSkipList<i32, 16, _> =
+            OrderedSkipList::with_comparator(FnComparator(|a: &i32, b: &i32| b.cmp(a)));
+        list.insert(3);
+        list.insert(1);
+        list.insert(2);
+        assert_eq!(list.first(), Some(&3));
+    }
+
+    // MARK: last
+
+    #[test]
+    fn last_empty() {
+        let list = OrderedSkipList::<i32>::new();
+        assert_eq!(list.last(), None);
+    }
+
+    #[test]
+    fn last_single_element() {
+        let mut list = OrderedSkipList::<i32>::new();
+        list.insert(42);
+        assert_eq!(list.last(), Some(&42));
+    }
+
+    #[test]
+    fn last_multiple_elements() {
+        let mut list = OrderedSkipList::<i32>::new();
+        list.insert(3);
+        list.insert(1);
+        list.insert(2);
+        assert_eq!(list.last(), Some(&3));
+    }
+
+    #[test]
+    fn last_custom_comparator() {
+        // Largest-first ordering: "last" is the element that sorts last,
+        // i.e. the smallest value.
+        let mut list: OrderedSkipList<i32, 16, _> =
+            OrderedSkipList::with_comparator(FnComparator(|a: &i32, b: &i32| b.cmp(a)));
+        list.insert(3);
+        list.insert(1);
+        list.insert(2);
+        assert_eq!(list.last(), Some(&1));
     }
 }

@@ -14,6 +14,201 @@ use crate::{
 };
 
 impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, N, C, G> {
+    /// Removes and returns the first (smallest) element, or `None` if the
+    /// list is empty.
+    ///
+    /// This operation is `$O(\log n)$` on average.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use skiplist::ordered_skip_list::OrderedSkipList;
+    ///
+    /// let mut list = OrderedSkipList::<i32>::new();
+    /// list.insert(3);
+    /// list.insert(1);
+    /// list.insert(2);
+    /// assert_eq!(list.pop_first(), Some(1));
+    /// assert_eq!(list.pop_first(), Some(2));
+    /// assert_eq!(list.pop_first(), Some(3));
+    /// assert_eq!(list.pop_first(), None);
+    /// ```
+    #[expect(
+        clippy::expect_used,
+        clippy::missing_panics_doc,
+        clippy::unwrap_in_result,
+        reason = "head.next is Some because is_empty() was checked first; \
+                  all expects fire only on internal invariant violations, not user input"
+    )]
+    #[expect(
+        clippy::indexing_slicing,
+        reason = "l is bounded by front_height ≤ max_levels, which equals the length \
+                  of the links slice on every node, so all accesses are in bounds"
+    )]
+    #[expect(
+        clippy::multiple_unsafe_ops_per_block,
+        reason = "link unwiring, pointer extraction, and node pop all touch provably \
+                  disjoint heap nodes; splitting across blocks would require \
+                  unsafe-crossing raw-pointer variables"
+    )]
+    #[inline]
+    pub fn pop_first(&mut self) -> Option<T> {
+        if self.is_empty() {
+            return None;
+        }
+
+        // SAFETY: All raw pointers originate from heap allocations owned by this
+        // OrderedSkipList.  No safe &mut references to any node exist while this
+        // block runs.  head_ptr and front_ptr are distinct heap allocations; all
+        // slice accesses are bounded by front_height ≤ max_levels = links.len().
+        let value = unsafe {
+            let head_ptr: *mut Node<T, N> = self.head.as_ptr();
+
+            // front_ptr is the node at rank 1.  The list is non-empty, so
+            // head.next is Some.  Converting the &mut to NonNull releases the
+            // borrow immediately, leaving no live &mut when we later use head_ptr.
+            let front_ptr: *mut Node<T, N> =
+                NonNull::from((*head_ptr).next_as_mut().expect("list is non-empty")).as_ptr();
+
+            let front_height = (*front_ptr).level();
+
+            // Splice out front_node: move its skip links back to head.
+            //
+            // Unlike SkipList::pop_front, we do NOT adjust distances for levels
+            // l >= front_height.  Distances in OrderedSkipList are all stored as
+            // 1 (intentionally wrong until OrdIndexMutVisitor in Step 11).
+            // Decrementing them would underflow NonZeroUsize.
+            //
+            // For l < front_height: head.links[l] pointed to front_node.
+            //   Replace with front_node.links[l] (the next node at that level).
+            // For l >= front_height: head.links[l] already skips over front_node
+            //   and needs no change (pointer is still correct; distance remains
+            //   its placeholder value of 1).
+            for l in 0..front_height {
+                (*head_ptr).links_mut()[l] = (*front_ptr).links_mut()[l].take();
+            }
+
+            let mut popped = (*front_ptr).pop();
+            popped.take_value()
+        };
+
+        self.len = self.len.saturating_sub(1);
+        if self.len == 0 {
+            self.tail = None;
+        }
+        value
+    }
+
+    /// Removes and returns the last (largest) element, or `None` if the list
+    /// is empty.
+    ///
+    /// This operation is `$O(\log n)$` on average.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use skiplist::ordered_skip_list::OrderedSkipList;
+    ///
+    /// let mut list = OrderedSkipList::<i32>::new();
+    /// list.insert(3);
+    /// list.insert(1);
+    /// list.insert(2);
+    /// assert_eq!(list.pop_last(), Some(3));
+    /// assert_eq!(list.pop_last(), Some(2));
+    /// assert_eq!(list.pop_last(), Some(1));
+    /// assert_eq!(list.pop_last(), None);
+    /// ```
+    #[expect(
+        clippy::expect_used,
+        clippy::missing_panics_doc,
+        clippy::unwrap_in_result,
+        reason = "self.tail is Some because is_empty() was checked first; \
+                  all expects fire only on internal invariant violations, not user input"
+    )]
+    #[expect(
+        clippy::indexing_slicing,
+        reason = "l is bounded by tail_height ≤ max_levels, which equals the length \
+                  of the links slice on every node, so all accesses are in bounds"
+    )]
+    #[expect(
+        clippy::multiple_unsafe_ops_per_block,
+        reason = "link clearing and node pop touch provably disjoint heap nodes; \
+                  splitting across blocks would require unsafe-crossing raw-pointer variables"
+    )]
+    #[inline]
+    pub fn pop_last(&mut self) -> Option<T> {
+        if self.is_empty() {
+            return None;
+        }
+
+        let tail_ptr: NonNull<Node<T, N>> = self.tail.expect("non-empty list has a tail");
+
+        // SAFETY: tail_ptr is a live, valid data node for the lifetime of
+        // &mut self.  No other &mut reference to it exists.
+        let tail_height = unsafe { tail_ptr.as_ref() }.level();
+
+        // Find the predecessor of the tail at each skip level using a
+        // pointer-equality forward traversal.
+        //
+        // At each level l < tail_height we advance from `current` while the
+        // level-l link does NOT point to the tail.  When we stop, `current`
+        // is the unique predecessor at level l (the node whose link[l] = tail).
+        // We do NOT reset `current` between levels: the skip-list structure
+        // guarantees we can only advance forward.
+        //
+        // For levels l >= tail_height, no node can link directly to the tail
+        // (tail has no tower slot at those levels), so no links need clearing.
+        let precursors: [NonNull<Node<T, N>>; N] = {
+            let mut arr = [self.head; N];
+            let mut current = self.head;
+
+            for l in (0..tail_height).rev() {
+                loop {
+                    // SAFETY: `current` is a valid node in this list, live for
+                    // the duration of &mut self.  No exclusive reference exists.
+                    let maybe_link = unsafe { current.as_ref() }
+                        .links()
+                        .get(l)
+                        .and_then(|lk| lk.as_ref());
+                    match maybe_link {
+                        None => break, // no link at this level; current is precursor
+                        Some(link) if link.node() == tail_ptr => break, // current is precursor
+                        Some(link) => current = link.node(),
+                    }
+                }
+                arr[l] = current;
+            }
+            arr
+        };
+
+        // SAFETY: All raw pointers come from NonNull<Node<T, N>> values captured
+        // during traversal or from self.tail.  No safe &mut references to any
+        // node exist while this block runs.
+        let value = unsafe {
+            let tail_raw = tail_ptr.as_ptr();
+
+            // Clear all skip links pointing to the tail.
+            // For levels >= tail_height no link points to the tail: no-op.
+            for (l, pred_nn) in precursors.iter().enumerate().take(tail_height) {
+                (*pred_nn.as_ptr()).links_mut()[l] = None;
+            }
+
+            let mut popped = (*tail_raw).pop();
+            popped.take_value()
+        };
+
+        // Update the cached tail pointer.  When the list becomes empty,
+        // precursors[0] equals head; we set tail to None rather than pointing
+        // at the sentinel.
+        self.tail = if self.len == 1 {
+            None
+        } else {
+            Some(precursors[0])
+        };
+        self.len = self.len.saturating_sub(1);
+        value
+    }
+
     /// Inserts `value` into the list at its sorted position.
     ///
     /// All elements are maintained in the order defined by the list's
@@ -126,7 +321,7 @@ mod tests {
     use pretty_assertions::assert_eq;
 
     use super::super::OrderedSkipList;
-    use crate::level_generator::geometric::Geometric;
+    use crate::{comparator::FnComparator, level_generator::geometric::Geometric};
 
     // MARK: insert
 
@@ -270,5 +465,166 @@ mod tests {
                 None => break,
             };
         }
+    }
+
+    // MARK: pop_first
+
+    #[test]
+    fn pop_first_from_empty() {
+        let mut list = OrderedSkipList::<i32>::new();
+        assert_eq!(list.pop_first(), None);
+    }
+
+    #[test]
+    fn pop_first_single_element() {
+        let mut list = OrderedSkipList::<i32>::new();
+        list.insert(42);
+        assert_eq!(list.pop_first(), Some(42));
+        assert!(list.is_empty());
+        assert_eq!(list.len(), 0);
+        // Second pop on now-empty list
+        assert_eq!(list.pop_first(), None);
+    }
+
+    #[test]
+    fn pop_first_returns_ascending_order() {
+        let g = Geometric::new(1, 0.5).expect("valid parameters");
+        let mut list = OrderedSkipList::<i32, 1>::with_level_generator(g);
+        list.insert(3);
+        list.insert(1);
+        list.insert(2);
+        assert_eq!(list.pop_first(), Some(1));
+        assert_eq!(list.pop_first(), Some(2));
+        assert_eq!(list.pop_first(), Some(3));
+        assert_eq!(list.pop_first(), None);
+    }
+
+    #[test]
+    fn pop_first_len_decrements() {
+        let mut list = OrderedSkipList::<usize>::new();
+        for i in 0..20_usize {
+            list.insert(i);
+        }
+        for remaining in (0..20_usize).rev() {
+            list.pop_first();
+            assert_eq!(list.len(), remaining);
+        }
+        assert_eq!(list.pop_first(), None);
+    }
+
+    #[test]
+    fn pop_first_duplicate_at_front() {
+        let g = Geometric::new(1, 0.5).expect("valid parameters");
+        let mut list = OrderedSkipList::<i32, 1>::with_level_generator(g);
+        list.insert(1);
+        list.insert(1);
+        list.insert(2);
+        assert_eq!(list.pop_first(), Some(1));
+        assert_eq!(list.pop_first(), Some(1));
+        assert_eq!(list.pop_first(), Some(2));
+        assert_eq!(list.pop_first(), None);
+    }
+
+    #[test]
+    fn pop_first_custom_comparator() {
+        // Largest-first ordering: pop_first removes the largest element.
+        let mut list: OrderedSkipList<i32, 16, _> =
+            OrderedSkipList::with_comparator(FnComparator(|a: &i32, b: &i32| b.cmp(a)));
+        list.insert(1);
+        list.insert(3);
+        list.insert(2);
+        assert_eq!(list.pop_first(), Some(3));
+        assert_eq!(list.pop_first(), Some(2));
+        assert_eq!(list.pop_first(), Some(1));
+        assert_eq!(list.pop_first(), None);
+    }
+
+    // MARK: pop_last
+
+    #[test]
+    fn pop_last_from_empty() {
+        let mut list = OrderedSkipList::<i32>::new();
+        assert_eq!(list.pop_last(), None);
+    }
+
+    #[test]
+    fn pop_last_single_element() {
+        let mut list = OrderedSkipList::<i32>::new();
+        list.insert(42);
+        assert_eq!(list.pop_last(), Some(42));
+        assert!(list.is_empty());
+        assert_eq!(list.len(), 0);
+        // Second pop on now-empty list
+        assert_eq!(list.pop_last(), None);
+    }
+
+    #[test]
+    fn pop_last_returns_descending_order() {
+        let g = Geometric::new(1, 0.5).expect("valid parameters");
+        let mut list = OrderedSkipList::<i32, 1>::with_level_generator(g);
+        list.insert(3);
+        list.insert(1);
+        list.insert(2);
+        assert_eq!(list.pop_last(), Some(3));
+        assert_eq!(list.pop_last(), Some(2));
+        assert_eq!(list.pop_last(), Some(1));
+        assert_eq!(list.pop_last(), None);
+    }
+
+    #[test]
+    fn pop_last_len_decrements() {
+        let mut list = OrderedSkipList::<usize>::new();
+        for i in 0..20_usize {
+            list.insert(i);
+        }
+        for remaining in (0..20_usize).rev() {
+            list.pop_last();
+            assert_eq!(list.len(), remaining);
+        }
+        assert_eq!(list.pop_last(), None);
+    }
+
+    #[test]
+    fn pop_last_duplicate_at_back() {
+        let g = Geometric::new(1, 0.5).expect("valid parameters");
+        let mut list = OrderedSkipList::<i32, 1>::with_level_generator(g);
+        list.insert(1);
+        list.insert(2);
+        list.insert(2);
+        assert_eq!(list.pop_last(), Some(2));
+        assert_eq!(list.pop_last(), Some(2));
+        assert_eq!(list.pop_last(), Some(1));
+        assert_eq!(list.pop_last(), None);
+    }
+
+    #[test]
+    fn pop_last_custom_comparator() {
+        // Largest-first ordering: pop_last removes the smallest element.
+        let mut list: OrderedSkipList<i32, 16, _> =
+            OrderedSkipList::with_comparator(FnComparator(|a: &i32, b: &i32| b.cmp(a)));
+        list.insert(1);
+        list.insert(3);
+        list.insert(2);
+        assert_eq!(list.pop_last(), Some(1));
+        assert_eq!(list.pop_last(), Some(2));
+        assert_eq!(list.pop_last(), Some(3));
+        assert_eq!(list.pop_last(), None);
+    }
+
+    #[test]
+    fn pop_first_and_pop_last_interleaved() {
+        let mut list = OrderedSkipList::<i32>::new();
+        for i in 1..=6 {
+            list.insert(i); // [1, 2, 3, 4, 5, 6]
+        }
+        assert_eq!(list.pop_last(), Some(6)); // [1, 2, 3, 4, 5]
+        assert_eq!(list.pop_first(), Some(1)); // [2, 3, 4, 5]
+        assert_eq!(list.pop_last(), Some(5)); // [2, 3, 4]
+        assert_eq!(list.pop_first(), Some(2)); // [3, 4]
+        assert_eq!(list.pop_last(), Some(4)); // [3]
+        assert_eq!(list.pop_first(), Some(3)); // []
+        assert_eq!(list.pop_last(), None);
+        assert_eq!(list.pop_first(), None);
+        assert_eq!(list.len(), 0);
     }
 }
