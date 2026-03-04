@@ -46,6 +46,11 @@ rstest = "0.26.1"
 [badges]
 codecov = { branch = "master", repository = "JP-Ellis/rust-skiplist", service = "github" }
 
+[features]
+## Enable `PartialOrdComparator`, which uses `PartialOrd` and panics when
+## elements are incomparable (i.e. `partial_cmp` returns `None`).
+partial-ord = []
+
 [lints]
   [lints.rust]
   future-incompatible = "warn"

@@ -44,7 +44,16 @@
 // layers in the above diagram, with level 0 being the bottom-most layer, level
 // 1 being the one above level 0, etc.
 
-// New modules
+#![expect(
+    clippy::pub_use,
+    reason = "creating the main public API from private modules"
+)]
+
+pub mod comparator;
 pub mod level_generator;
 mod node;
 pub mod skip_list;
+
+#[cfg(feature = "partial-ord")]
+pub use comparator::PartialOrdComparator;
+pub use comparator::{Comparator, FnComparator, OrdComparator};
