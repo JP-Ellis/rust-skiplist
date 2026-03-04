@@ -245,9 +245,9 @@ mod tests {
     };
 
     #[rstest]
-    fn find_index_2(skiplist: Result<Box<Node<u8, MAX_LEVELS>>>) -> Result<()> {
-        let mut head = skiplist?;
-        let mut visitor = IndexMutVisitor::new(NonNull::from_mut(&mut *head), 2);
+    fn find_index_2(skiplist: Result<NonNull<Node<u8, MAX_LEVELS>>>) -> Result<()> {
+        let head = skiplist?;
+        let mut visitor = IndexMutVisitor::new(head, 2);
 
         let found = visitor.traverse();
 
@@ -255,44 +255,47 @@ mod tests {
         // SAFETY: pointer is valid for the duration of `head`'s lifetime.
         let value = found.map(|ptr| unsafe { ptr.as_ref() }.value().copied());
         assert_eq!(value, Some(Some(20)));
+        unsafe { drop(Box::from_raw(head.as_ptr())) };
         Ok(())
     }
 
     #[rstest]
-    fn find_index_not_found(skiplist: Result<Box<Node<u8, MAX_LEVELS>>>) -> Result<()> {
-        let mut head = skiplist?;
-        let mut visitor = IndexMutVisitor::new(NonNull::from_mut(&mut *head), 5);
+    fn find_index_not_found(skiplist: Result<NonNull<Node<u8, MAX_LEVELS>>>) -> Result<()> {
+        let head = skiplist?;
+        let mut visitor = IndexMutVisitor::new(head, 5);
 
         let found = visitor.traverse();
 
         assert!(!visitor.found());
         assert!(found.is_none());
+        unsafe { drop(Box::from_raw(head.as_ptr())) };
         Ok(())
     }
 
     /// After traversal, every precursor must point to a node whose index is
     /// strictly less than the target.
     #[rstest]
-    fn precursors_are_before_target(skiplist: Result<Box<Node<u8, MAX_LEVELS>>>) -> Result<()> {
-        let mut head = skiplist?;
+    fn precursors_are_before_target(skiplist: Result<NonNull<Node<u8, MAX_LEVELS>>>) -> Result<()> {
+        let head = skiplist?;
 
         // Target = 3 (node v3, value 3).
-        let mut visitor = IndexMutVisitor::new(NonNull::from_mut(&mut *head), 3);
+        let mut visitor = IndexMutVisitor::new(head, 3);
         while let Step::Advanced(_) = visitor.step() {}
 
         for &dist in visitor.precursor_distances() {
             assert!(dist < 3, "precursor distance {dist} should be < 3");
         }
+        unsafe { drop(Box::from_raw(head.as_ptr())) };
         Ok(())
     }
 
     /// Stepping past the end of the list produces `Exhausted`.
     #[rstest]
     fn exhausted_when_target_out_of_range(
-        skiplist: Result<Box<Node<u8, MAX_LEVELS>>>,
+        skiplist: Result<NonNull<Node<u8, MAX_LEVELS>>>,
     ) -> Result<()> {
-        let mut head = skiplist?;
-        let mut visitor = IndexMutVisitor::new(NonNull::from_mut(&mut *head), 99);
+        let head = skiplist?;
+        let mut visitor = IndexMutVisitor::new(head, 99);
 
         loop {
             let s = visitor.step();
@@ -305,30 +308,34 @@ mod tests {
                 Step::FoundTarget => panic!("should not find target 99"),
             }
         }
+        unsafe { drop(Box::from_raw(head.as_ptr())) };
         Ok(())
     }
 
     /// `current_mut()` returns the same pointer as `current()`.
     #[rstest]
-    fn current_mut_matches_current(skiplist: Result<Box<Node<u8, MAX_LEVELS>>>) -> Result<()> {
-        let mut head = skiplist?;
-        let mut visitor = IndexMutVisitor::new(NonNull::from_mut(&mut *head), 2);
+    fn current_mut_matches_current(skiplist: Result<NonNull<Node<u8, MAX_LEVELS>>>) -> Result<()> {
+        let head = skiplist?;
+        let mut visitor = IndexMutVisitor::new(head, 2);
         visitor.traverse();
 
         assert_eq!(visitor.current(), visitor.current_mut());
+        unsafe { drop(Box::from_raw(head.as_ptr())) };
         Ok(())
     }
 
     /// `precursors()` has one entry per level.
     #[rstest]
-    fn precursors_length(skiplist: Result<Box<Node<u8, MAX_LEVELS>>>) -> Result<()> {
-        let mut head = skiplist?;
-        let max_levels = head.level();
-        let mut visitor = IndexMutVisitor::new(NonNull::from_mut(&mut *head), 2);
+    fn precursors_length(skiplist: Result<NonNull<Node<u8, MAX_LEVELS>>>) -> Result<()> {
+        let head = skiplist?;
+        // SAFETY: head is valid for the duration of this test.
+        let max_levels = unsafe { head.as_ref() }.level();
+        let mut visitor = IndexMutVisitor::new(head, 2);
         visitor.traverse();
 
         assert_eq!(visitor.precursors().len(), max_levels);
         assert_eq!(visitor.precursor_distances().len(), max_levels);
+        unsafe { drop(Box::from_raw(head.as_ptr())) };
         Ok(())
     }
 }

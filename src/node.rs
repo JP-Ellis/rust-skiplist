@@ -1078,100 +1078,67 @@ pub(crate) mod tests {
     /// head -------> 20 -> 30 -> 40
     /// head -> 10 -> 20 -> 30 -> 40
     #[fixture]
-    pub(crate) fn skiplist() -> Result<Box<Node<u8, MAX_LEVELS>>> {
-        let mut head = Box::new(Node::new(MAX_LEVELS));
+    pub(crate) fn skiplist() -> Result<NonNull<Node<u8, MAX_LEVELS>>> {
+        // Allocate the head sentinel via Box::into_raw so that `head_nn`
+        // carries **root allocation provenance** (T_alloc, no parent tag).
+        // Returning NonNull (not Box::from_raw) avoids Miri creating a
+        // protected function-call sibling tag at the test boundary.  All
+        // accesses to head's allocation (including the Box::deref_mut calls
+        // inside filter_rebuild) go through children of T_alloc, which are
+        // never foreign to T_alloc (= v1.prev).  See MIRI.md Issue 3 /
+        // Anti-pattern B.
+        let mut head_nn = unsafe {
+            NonNull::new_unchecked(Box::into_raw(Box::new(Node::<u8, MAX_LEVELS>::new(
+                MAX_LEVELS,
+            ))))
+        };
+
         let mut v1 = Node::<u8, MAX_LEVELS>::new(0);
         let mut v2 = Node::<u8, MAX_LEVELS>::new(1);
         let mut v3 = Node::<u8, MAX_LEVELS>::new(1);
         let mut v4 = Node::<u8, MAX_LEVELS>::new(0);
 
-        // Internal values
         v1.value = Some(10);
         v2.value = Some(20);
         v3.value = Some(30);
         v4.value = Some(40);
 
         unsafe {
-            Node::insert_after(NonNull::from_mut(&mut *head), v1);
-            Node::insert_after(
-                NonNull::from_mut(head.next_as_mut().expect("v1 not found")),
-                v2,
-            );
-            Node::insert_after(
-                NonNull::from_mut(
-                    head.next_as_mut()
-                        .expect("v1 not found")
-                        .next_as_mut()
-                        .expect("v2 not found"),
-                ),
-                v3,
-            );
-            Node::insert_after(
-                NonNull::from_mut(
-                    head.next_as_mut()
-                        .expect("v1 not found")
-                        .next_as_mut()
-                        .expect("v2 not found")
-                        .next_as_mut()
-                        .expect("v3 not found"),
-                ),
-                v4,
-            );
+            // Chain insert_after return values: each returned NonNull carries
+            // root allocation provenance (Box::into_raw), so storing it as the
+            // successor's `prev` pointer never creates sibling tags.  See
+            // MIRI.md Issue 4 / Anti-pattern B.
+            let v1_ptr = Node::insert_after(head_nn, v1);
+            let mut v2_ptr = Node::insert_after(v1_ptr, v2);
+            let mut v3_ptr = Node::insert_after(v2_ptr, v3);
+            let v4_ptr = Node::insert_after(v3_ptr, v4);
+
+            // Build higher level links using root-provenance pointers directly:
+            // eliminates NonNull::from(&node_ref) Frozen-tag construction and
+            // next_as_mut() chain navigation.  See MIRI.md Anti-patterns A & B.
+            //
+            // head -------------> v3
+            // head -------> v2 -> v3 -> v4
+            // head -> v1 -> v2 -> v3 -> v4
+            head_nn.as_mut().links[1] = Some(Link::new(v3_ptr, 3)?);
+            head_nn.as_mut().links[0] = Some(Link::new(v2_ptr, 2)?);
+            v2_ptr.as_mut().links[0] = Some(Link::new(v3_ptr, 1)?);
+            v3_ptr.as_mut().links[0] = Some(Link::new(v4_ptr, 1)?);
         }
 
-        // Build higher level links:
-        //
-        // head -------------> v3
-        // head -------> v2 -> v3 -> v4
-        // head -> v1 -> v2 -> v3 -> v4
-
-        let head_v3: Link<_, _>;
-        let head_v2: Link<_, _>;
-        let v2_v3: Link<_, _>;
-        let v3_v4: Link<_, _>;
-        {
-            let v1_ref = head.next_as_ref().expect("v1 not found");
-            let v2_ref = v1_ref.next_as_ref().expect("v2 not found");
-            let v3_ref = v2_ref.next_as_ref().expect("v3 not found");
-            let v4_ref = v3_ref.next_as_ref().expect("tail not found");
-            head_v3 = Link::new(NonNull::from(v3_ref), 3)?;
-            head_v2 = Link::new(NonNull::from(v2_ref), 2)?;
-            v2_v3 = Link::new(NonNull::from(v3_ref), 1)?;
-            v3_v4 = Link::new(NonNull::from(v4_ref), 1)?;
-        }
-
-        unsafe {
-            head.links[1] = Some(head_v3);
-            head.links[0] = Some(head_v2);
-
-            head.next_as_mut()
-                .expect("v1 not found")
-                .next_as_mut()
-                .expect("v2 not found")
-                .links[0] = Some(v2_v3);
-
-            head.next_as_mut()
-                .expect("v1 not found")
-                .next_as_mut()
-                .expect("v2 not found")
-                .next_as_mut()
-                .expect("v3 not found")
-                .links[0] = Some(v3_v4);
-        }
-
-        Ok(head)
+        Ok(head_nn)
     }
 
     // MARK: display
 
     #[rstest]
-    fn node_display(skiplist: Result<Box<Node<u8, MAX_LEVELS>>>) -> Result<()> {
+    fn node_display(skiplist: Result<NonNull<Node<u8, MAX_LEVELS>>>) -> Result<()> {
         let head = skiplist?;
 
         // Insta is incompatible with Miri
         if !cfg!(miri) {
             assert_snapshot!(
-                head.display()?,
+                unsafe { head.as_ref() }.display()?,
                 @"
                 [03]: 00
                 [02]: 00 -------------> 03
@@ -1188,17 +1155,19 @@ pub(crate) mod tests {
             );
         }
 
+        unsafe { drop(Box::from_raw(head.as_ptr())) };
         Ok(())
     }
 
     #[rstest]
-    fn node_properties(skiplist: Result<Box<Node<u8, MAX_LEVELS>>>) -> Result<()> {
+    fn node_properties(skiplist: Result<NonNull<Node<u8, MAX_LEVELS>>>) -> Result<()> {
         let head = skiplist?;
+        let head_ref = unsafe { head.as_ref() };
 
-        assert_matches!(head.node_type(), NodeType::Head);
-        assert_eq!(head.level(), 3);
+        assert_matches!(head_ref.node_type(), NodeType::Head);
+        assert_eq!(head_ref.level(), 3);
 
-        let mut node = head.next_as_ref().expect("v1 not found");
+        let mut node = head_ref.next_as_ref().expect("v1 not found");
         assert_matches!(node.node_type(), NodeType::Body);
         assert_eq!(node.level(), 0);
 
@@ -1214,17 +1183,18 @@ pub(crate) mod tests {
         assert_matches!(node.node_type(), NodeType::Tail);
         assert_eq!(node.level(), 0);
 
+        unsafe { drop(Box::from_raw(head.as_ptr())) };
         Ok(())
     }
 
     // MARK: pop
 
     #[rstest]
-    fn pop_node(skiplist: Result<Box<Node<u8, MAX_LEVELS>>>) -> Result<()> {
-        let mut head = skiplist?;
+    fn pop_node(skiplist: Result<NonNull<Node<u8, MAX_LEVELS>>>) -> Result<()> {
+        let head = skiplist?;
 
         // SAFETY: `head` is a valid node with `v1` as its next.
-        let v1 = unsafe { head.next_as_mut() }.expect("v1 not found");
+        let v1 = unsafe { (*head.as_ptr()).next_as_mut() }.expect("v1 not found");
         // SAFETY: `v1` is a valid node with `v2` as its next.
         let v2 = unsafe { v1.next_as_mut() }.expect("v2 not found");
         let detached_node = unsafe { v2.pop() };
@@ -1238,7 +1208,7 @@ pub(crate) mod tests {
             // links to be invalid as the node has been popped without updating the
             // links.
             assert_snapshot!(
-                head.display()?,
+                unsafe { head.as_ref() }.display()?,
                 @"
                 [03]: 00
                 [02]: 00 -------------> 02
@@ -1254,27 +1224,26 @@ pub(crate) mod tests {
             );
         }
 
+        unsafe { drop(Box::from_raw(head.as_ptr())) };
         Ok(())
     }
 
     // MARK: insert_after
 
     #[rstest]
-    fn insert_after_head_node(skiplist: Result<Box<Node<u8, MAX_LEVELS>>>) -> Result<()> {
-        let mut head = skiplist?;
+    fn insert_after_head_node(skiplist: Result<NonNull<Node<u8, MAX_LEVELS>>>) -> Result<()> {
+        let head = skiplist?;
         let mut new_node = Node::<u8, MAX_LEVELS>::new(MAX_LEVELS);
         new_node.value = Some(100);
 
-        unsafe {
-            Node::insert_after(NonNull::from_mut(&mut *head), new_node);
-        }
+        unsafe { Node::insert_after(head, new_node) };
 
         // Insta is incompatible with Miri
         if !cfg!(miri) {
             // Note: The sequence of values should be valid. The links are not
             // updated and therefore may result in UB when displayed.
             assert_snapshot!(
-                head.display()?,
+                unsafe { head.as_ref() }.display()?,
                 @"
                 [03]: 00
                 [02]: 00 -------------> 04
@@ -1292,17 +1261,18 @@ pub(crate) mod tests {
             );
         }
 
+        unsafe { drop(Box::from_raw(head.as_ptr())) };
         Ok(())
     }
 
     #[rstest]
-    fn insert_after_body_node(skiplist: Result<Box<Node<u8, MAX_LEVELS>>>) -> Result<()> {
-        let mut head = skiplist?;
+    fn insert_after_body_node(skiplist: Result<NonNull<Node<u8, MAX_LEVELS>>>) -> Result<()> {
+        let head = skiplist?;
         let mut new_node = Node::<u8, MAX_LEVELS>::new(MAX_LEVELS);
         new_node.value = Some(100);
 
         // SAFETY: `head` is a valid node with `v1` as its next.
-        let v1 = unsafe { head.next_as_mut() }.expect("v1 not found");
+        let v1 = unsafe { (*head.as_ptr()).next_as_mut() }.expect("v1 not found");
         // SAFETY: `v1` has exclusive access and no other references to its successor exist.
         unsafe { Node::insert_after(NonNull::from_mut(v1), new_node) };
 
@@ -1311,7 +1281,7 @@ pub(crate) mod tests {
             // Note: The sequence of values should be valid. The links are not
             // updated and therefore may result in UB when displayed.
             assert_snapshot!(
-                head.display()?,
+                unsafe { head.as_ref() }.display()?,
                 @"
                 [03]: 00
                 [02]: 00 -------------> 04
@@ -1329,17 +1299,18 @@ pub(crate) mod tests {
             );
         }
 
+        unsafe { drop(Box::from_raw(head.as_ptr())) };
         Ok(())
     }
 
     #[rstest]
-    fn insert_after_tail_node(skiplist: Result<Box<Node<u8, MAX_LEVELS>>>) -> Result<()> {
-        let mut head = skiplist?;
+    fn insert_after_tail_node(skiplist: Result<NonNull<Node<u8, MAX_LEVELS>>>) -> Result<()> {
+        let head = skiplist?;
         let mut new_node = Node::<u8, MAX_LEVELS>::new(MAX_LEVELS);
         new_node.value = Some(100);
 
         // SAFETY: Each node is valid with the next node as its successor.
-        let v1 = unsafe { head.next_as_mut() }.expect("v1 not found");
+        let v1 = unsafe { (*head.as_ptr()).next_as_mut() }.expect("v1 not found");
         let v2 = unsafe { v1.next_as_mut() }.expect("v2 not found");
         let v3 = unsafe { v2.next_as_mut() }.expect("v3 not found");
         let v4 = unsafe { v3.next_as_mut() }.expect("v4 not found");
@@ -1351,7 +1322,7 @@ pub(crate) mod tests {
             // Note: The sequence of values should be valid. The links are not
             // updated and therefore may result in UB when displayed.
             assert_snapshot!(
-                head.display()?,
+                unsafe { head.as_ref() }.display()?,
                 @"
                 [03]: 00
                 [02]: 00 -------------> 03
@@ -1369,6 +1340,7 @@ pub(crate) mod tests {
             );
         }
 
+        unsafe { drop(Box::from_raw(head.as_ptr())) };
         Ok(())
     }
 
@@ -1385,15 +1357,14 @@ pub(crate) mod tests {
     }
 
     #[rstest]
-    fn filter_rebuild_keep_all(skiplist: Result<Box<Node<u8, MAX_LEVELS>>>) -> Result<()> {
-        let mut head = skiplist?;
-        let (new_len, new_tail) =
-            unsafe { Node::filter_rebuild(NonNull::from_mut(&mut *head), |_| true, |_| {}) };
+    fn filter_rebuild_keep_all(skiplist: Result<NonNull<Node<u8, MAX_LEVELS>>>) -> Result<()> {
+        let head = skiplist?;
+        let (new_len, new_tail) = unsafe { Node::filter_rebuild(head, |_| true, |_| {}) };
 
         assert_eq!(new_len, 4);
         let vals: Vec<u8> = {
             let mut v = Vec::new();
-            let mut cur = head.next_as_ref();
+            let mut cur = unsafe { head.as_ref() }.next_as_ref();
             while let Some(n) = cur {
                 v.push(*n.value().expect("data node"));
                 cur = n.next_as_ref();
@@ -1412,7 +1383,7 @@ pub(crate) mod tests {
             // head.links[0] → v2 (distance 2), head.links[1..] → None.
             // v2.links[0] → v3 (distance 1), v3.links[0] → None.
             assert_snapshot!(
-                head.display()?,
+                unsafe { head.as_ref() }.display()?,
                 @"
                 [03]: 00
                 [02]: 00
@@ -1428,16 +1399,17 @@ pub(crate) mod tests {
                 "
             );
         }
+        unsafe { drop(Box::from_raw(head.as_ptr())) };
         Ok(())
     }
 
     #[rstest]
-    fn filter_rebuild_keep_none(skiplist: Result<Box<Node<u8, MAX_LEVELS>>>) -> Result<()> {
+    fn filter_rebuild_keep_none(skiplist: Result<NonNull<Node<u8, MAX_LEVELS>>>) -> Result<()> {
         let mut dropped_vals: Vec<u8> = Vec::new();
-        let mut head = skiplist?;
+        let head = skiplist?;
         let (new_len, new_tail) = unsafe {
             Node::filter_rebuild(
-                NonNull::from_mut(&mut *head),
+                head,
                 |_| false,
                 |mut b| dropped_vals.push(b.take_value().expect("data node")),
             )
@@ -1445,7 +1417,7 @@ pub(crate) mod tests {
 
         assert_eq!(new_len, 0);
         assert!(new_tail.is_none());
-        assert!(head.next_as_ref().is_none());
+        assert!(unsafe { head.as_ref() }.next_as_ref().is_none());
         // on_drop called in traversal order.
         assert_eq!(dropped_vals, [10, 20, 30, 40]);
 
@@ -1453,7 +1425,7 @@ pub(crate) mod tests {
         if !cfg!(miri) {
             // All nodes dropped; head has no links and no successors.
             assert_snapshot!(
-                head.display()?,
+                unsafe { head.as_ref() }.display()?,
                 @"
                 [03]: 00
                 [02]: 00
@@ -1465,18 +1437,19 @@ pub(crate) mod tests {
                 "
             );
         }
+        unsafe { drop(Box::from_raw(head.as_ptr())) };
         Ok(())
     }
 
     #[rstest]
     fn filter_rebuild_keep_first_and_third(
-        skiplist: Result<Box<Node<u8, MAX_LEVELS>>>,
+        skiplist: Result<NonNull<Node<u8, MAX_LEVELS>>>,
     ) -> Result<()> {
         // Keep v1 (value 10) and v3 (value 30); drop v2 and v4.
-        let mut head = skiplist?;
+        let head = skiplist?;
         let (new_len, new_tail) = unsafe {
             Node::filter_rebuild(
-                NonNull::from_mut(&mut *head),
+                head,
                 |cur| {
                     let v = (*cur).value().copied();
                     v == Some(10) || v == Some(30)
@@ -1488,7 +1461,7 @@ pub(crate) mod tests {
         assert_eq!(new_len, 2);
         let vals: Vec<u8> = {
             let mut v = Vec::new();
-            let mut cur = head.next_as_ref();
+            let mut cur = unsafe { head.as_ref() }.next_as_ref();
             while let Some(n) = cur {
                 v.push(*n.value().expect("data node"));
                 cur = n.next_as_ref();
@@ -1505,7 +1478,7 @@ pub(crate) mod tests {
         if !cfg!(miri) {
             // v1 (h0) and v3 (h1) retained.  head.links[0] → v3 (distance 2).
             assert_snapshot!(
-                head.display()?,
+                unsafe { head.as_ref() }.display()?,
                 @"
                 [03]: 00
                 [02]: 00
@@ -1519,19 +1492,20 @@ pub(crate) mod tests {
                 "
             );
         }
+        unsafe { drop(Box::from_raw(head.as_ptr())) };
         Ok(())
     }
 
     #[rstest]
     fn filter_rebuild_on_drop_receives_correct_values(
-        skiplist: Result<Box<Node<u8, MAX_LEVELS>>>,
+        skiplist: Result<NonNull<Node<u8, MAX_LEVELS>>>,
     ) -> Result<()> {
         let mut dropped: Vec<u8> = Vec::new();
-        let mut head = skiplist?;
+        let head = skiplist?;
         // Keep v2 and v4; drop v1 and v3.
         unsafe {
             Node::filter_rebuild(
-                NonNull::from_mut(&mut *head),
+                head,
                 |cur| {
                     let v = (*cur).value().copied();
                     v == Some(20) || v == Some(40)
@@ -1542,6 +1516,7 @@ pub(crate) mod tests {
 
         // Dropped values must arrive in traversal order: v1 then v3.
         assert_eq!(dropped, [10, 30]);
+        unsafe { drop(Box::from_raw(head.as_ptr())) };
         Ok(())
     }
 
@@ -1549,13 +1524,13 @@ pub(crate) mod tests {
     /// `None` because no retained node can anchor a skip link.
     #[rstest]
     fn filter_rebuild_links_consistent_after_partial_keep(
-        skiplist: Result<Box<Node<u8, MAX_LEVELS>>>,
+        skiplist: Result<NonNull<Node<u8, MAX_LEVELS>>>,
     ) -> Result<()> {
-        let mut head = skiplist?;
+        let head = skiplist?;
         // Drop v2 and v3 (both height 1); keep v1 (height 0) and v4 (height 0).
         unsafe {
             Node::filter_rebuild(
-                NonNull::from_mut(&mut *head),
+                head,
                 |cur| {
                     let v = (*cur).value().copied();
                     v != Some(20) && v != Some(30)
@@ -1567,7 +1542,7 @@ pub(crate) mod tests {
         // Chain must be head -> v1 -> v4.
         let vals: Vec<u8> = {
             let mut v = Vec::new();
-            let mut cur = head.next_as_ref();
+            let mut cur = unsafe { head.as_ref() }.next_as_ref();
             while let Some(n) = cur {
                 v.push(*n.value().expect("data node"));
                 cur = n.next_as_ref();
@@ -1576,7 +1551,7 @@ pub(crate) mod tests {
         };
         assert_eq!(vals, [10, 40]);
         // v1 and v4 both have height 0, so all head skip links must be None.
-        for link in head.links() {
+        for link in unsafe { head.as_ref() }.links() {
             assert!(link.is_none(), "head skip link should be None");
         }
 
@@ -1584,7 +1559,7 @@ pub(crate) mod tests {
         if !cfg!(miri) {
             // Neither kept node has skip-link slots, so all levels show only the head.
             assert_snapshot!(
-                head.display()?,
+                unsafe { head.as_ref() }.display()?,
                 @"
                 [03]: 00
                 [02]: 00
@@ -1598,13 +1573,14 @@ pub(crate) mod tests {
                 "
             );
         }
+        unsafe { drop(Box::from_raw(head.as_ptr())) };
         Ok(())
     }
 
     /// Rebuilding skip links over a keep-all pass must produce correct distances.
     #[rstest]
     fn filter_rebuild_keep_all_links_rebuilt(
-        skiplist: Result<Box<Node<u8, MAX_LEVELS>>>,
+        skiplist: Result<NonNull<Node<u8, MAX_LEVELS>>>,
     ) -> Result<()> {
         // Fixture node heights: v1=0, v2=1, v3=1, v4=0.
         //
@@ -1613,22 +1589,32 @@ pub(crate) mod tests {
         //   head.links[1] → None             (no height-2 node exists)
         //   head.links[2] → None             (no height-3 node exists)
         //   v2.links[0]   → v3 (distance 1)
-        //   v3.links[0]   → None             — v4 has height 0 so nothing wires into v3.links[0]
-        let mut head = skiplist?;
+        //   v3.links[0]   → None             (v4 has height 0 so nothing wires into v3.links[0])
+        let head = skiplist?;
         unsafe {
-            Node::filter_rebuild(NonNull::from_mut(&mut *head), |_| true, |_| {});
+            Node::filter_rebuild(head, |_| true, |_| {});
         }
 
-        let link0 = head.links()[0]
+        let link0 = unsafe { head.as_ref() }.links()[0]
             .as_ref()
             .expect("head.links[0] must be Some");
         assert_eq!(unsafe { link0.node().as_ref() }.value().copied(), Some(20));
         assert_eq!(link0.distance().get(), 2);
 
-        assert!(head.links()[1].is_none(), "head.links[1] must be None");
-        assert!(head.links()[2].is_none(), "head.links[2] must be None");
+        assert!(
+            unsafe { head.as_ref() }.links()[1].is_none(),
+            "head.links[1] must be None"
+        );
+        assert!(
+            unsafe { head.as_ref() }.links()[2].is_none(),
+            "head.links[2] must be None"
+        );
 
-        let v2 = head.next_as_ref().expect("v1").next_as_ref().expect("v2");
+        let v2 = unsafe { head.as_ref() }
+            .next_as_ref()
+            .expect("v1")
+            .next_as_ref()
+            .expect("v2");
         let v2_link0 = v2.links()[0].as_ref().expect("v2.links[0] must be Some");
         assert_eq!(
             unsafe { v2_link0.node().as_ref() }.value().copied(),
@@ -1643,7 +1629,7 @@ pub(crate) mod tests {
         if !cfg!(miri) {
             // Same structural outcome as filter_rebuild_keep_all.
             assert_snapshot!(
-                head.display()?,
+                unsafe { head.as_ref() }.display()?,
                 @"
                 [03]: 00
                 [02]: 00
@@ -1659,6 +1645,7 @@ pub(crate) mod tests {
                 "
             );
         }
+        unsafe { drop(Box::from_raw(head.as_ptr())) };
         Ok(())
     }
 
@@ -1879,16 +1866,16 @@ pub(crate) mod tests {
 
     #[rstest]
     fn take_next_chain_and_set_head_next_round_trip(
-        skiplist: Result<Box<Node<u8, MAX_LEVELS>>>,
+        skiplist: Result<NonNull<Node<u8, MAX_LEVELS>>>,
     ) -> Result<()> {
-        let mut head = skiplist?;
+        let head = skiplist?;
 
         // Detach the chain from head.
         // SAFETY: `head` is exclusively owned; no other references exist.
-        let first_nn = unsafe { head.take_next_chain() }.expect("fixture is non-empty");
+        let first_nn = unsafe { (*head.as_ptr()).take_next_chain() }.expect("fixture is non-empty");
 
         assert!(
-            head.next_as_ref().is_none(),
+            unsafe { head.as_ref() }.next_as_ref().is_none(),
             "head must be empty after take"
         );
         // SAFETY: `first_nn` is a live heap-allocated node whose ownership was
@@ -1937,20 +1924,23 @@ pub(crate) mod tests {
                 "
             );
         }
+        unsafe { drop(Box::from_raw(head.as_ptr())) };
         Ok(())
     }
 
     // MARK: rebuild
 
     #[rstest]
-    fn rebuild_produces_correct_links(skiplist: Result<Box<Node<u8, MAX_LEVELS>>>) -> Result<()> {
+    fn rebuild_produces_correct_links(
+        skiplist: Result<NonNull<Node<u8, MAX_LEVELS>>>,
+    ) -> Result<()> {
         let mut head = skiplist?;
 
         // Clear all skip links so that rebuild starts from a blank slate.
-        for link in head.links_mut() {
+        for link in unsafe { head.as_mut() }.links_mut() {
             *link = None;
         }
-        let mut cur = unsafe { head.next_as_mut() };
+        let mut cur = unsafe { (*head.as_ptr()).next_as_mut() };
         while let Some(n) = cur {
             for link in n.links_mut() {
                 *link = None;
@@ -1960,7 +1950,7 @@ pub(crate) mod tests {
 
         // SAFETY: head is exclusively owned; all data nodes are live heap
         // allocations reachable through the next chain.
-        let tail = unsafe { Node::rebuild(NonNull::from_mut(&mut *head)) };
+        let tail = unsafe { Node::rebuild(head) };
 
         assert_eq!(
             unsafe { tail.expect("non-empty").as_ref() }
@@ -1973,7 +1963,7 @@ pub(crate) mod tests {
         if !cfg!(miri) {
             // Links rebuilt from node heights: same outcome as filter_rebuild_keep_all.
             assert_snapshot!(
-                head.display()?,
+                unsafe { head.as_ref() }.display()?,
                 @"
                 [03]: 00
                 [02]: 00
@@ -1989,6 +1979,7 @@ pub(crate) mod tests {
                 "
             );
         }
+        unsafe { drop(Box::from_raw(head.as_ptr())) };
         Ok(())
     }
 }

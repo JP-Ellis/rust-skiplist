@@ -206,6 +206,8 @@ impl<T, Q: ?Sized, F: Fn(&T, &Q) -> Ordering, const N: usize> VisitorMut
 )]
 #[cfg(test)]
 mod tests {
+    use core::ptr::NonNull;
+
     use anyhow::Result;
     use pretty_assertions::assert_eq;
     use rstest::rstest;
@@ -218,9 +220,9 @@ mod tests {
     };
 
     #[rstest]
-    fn find_existing_value(skiplist: Result<Box<Node<u8, MAX_LEVELS>>>) -> Result<()> {
+    fn find_existing_value(skiplist: Result<NonNull<Node<u8, MAX_LEVELS>>>) -> Result<()> {
         let mut head = skiplist?;
-        let mut visitor = OrdMutVisitor::new(&mut head, &30_u8, Ord::cmp);
+        let mut visitor = OrdMutVisitor::new(unsafe { head.as_mut() }, &30_u8, Ord::cmp);
 
         let found = visitor.traverse();
 
@@ -228,66 +230,76 @@ mod tests {
         // SAFETY: pointer is valid for the duration of `head`'s lifetime.
         let value = found.map(|ptr| unsafe { ptr.as_ref() }.value().copied());
         assert_eq!(value, Some(Some(30)));
+        drop(visitor);
+        unsafe { drop(Box::from_raw(head.as_ptr())) };
         Ok(())
     }
 
     #[rstest]
-    fn find_first_value(skiplist: Result<Box<Node<u8, MAX_LEVELS>>>) -> Result<()> {
+    fn find_first_value(skiplist: Result<NonNull<Node<u8, MAX_LEVELS>>>) -> Result<()> {
         let mut head = skiplist?;
-        let mut visitor = OrdMutVisitor::new(&mut head, &10_u8, Ord::cmp);
+        let mut visitor = OrdMutVisitor::new(unsafe { head.as_mut() }, &10_u8, Ord::cmp);
 
         let found = visitor.traverse();
 
         assert!(visitor.found());
         let value = found.map(|ptr| unsafe { ptr.as_ref() }.value().copied());
         assert_eq!(value, Some(Some(10)));
+        drop(visitor);
+        unsafe { drop(Box::from_raw(head.as_ptr())) };
         Ok(())
     }
 
     #[rstest]
-    fn find_last_value(skiplist: Result<Box<Node<u8, MAX_LEVELS>>>) -> Result<()> {
+    fn find_last_value(skiplist: Result<NonNull<Node<u8, MAX_LEVELS>>>) -> Result<()> {
         let mut head = skiplist?;
-        let mut visitor = OrdMutVisitor::new(&mut head, &40_u8, Ord::cmp);
+        let mut visitor = OrdMutVisitor::new(unsafe { head.as_mut() }, &40_u8, Ord::cmp);
 
         let found = visitor.traverse();
 
         assert!(visitor.found());
         let value = found.map(|ptr| unsafe { ptr.as_ref() }.value().copied());
         assert_eq!(value, Some(Some(40)));
+        drop(visitor);
+        unsafe { drop(Box::from_raw(head.as_ptr())) };
         Ok(())
     }
 
     #[rstest]
-    fn value_not_found(skiplist: Result<Box<Node<u8, MAX_LEVELS>>>) -> Result<()> {
+    fn value_not_found(skiplist: Result<NonNull<Node<u8, MAX_LEVELS>>>) -> Result<()> {
         let mut head = skiplist?;
-        let mut visitor = OrdMutVisitor::new(&mut head, &25_u8, Ord::cmp);
+        let mut visitor = OrdMutVisitor::new(unsafe { head.as_mut() }, &25_u8, Ord::cmp);
 
         let found = visitor.traverse();
 
         assert!(!visitor.found());
         assert!(found.is_none());
+        drop(visitor);
+        unsafe { drop(Box::from_raw(head.as_ptr())) };
         Ok(())
     }
 
     #[rstest]
-    fn value_beyond_list(skiplist: Result<Box<Node<u8, MAX_LEVELS>>>) -> Result<()> {
+    fn value_beyond_list(skiplist: Result<NonNull<Node<u8, MAX_LEVELS>>>) -> Result<()> {
         let mut head = skiplist?;
-        let mut visitor = OrdMutVisitor::new(&mut head, &99_u8, Ord::cmp);
+        let mut visitor = OrdMutVisitor::new(unsafe { head.as_mut() }, &99_u8, Ord::cmp);
 
         let found = visitor.traverse();
 
         assert!(!visitor.found());
         assert!(found.is_none());
+        drop(visitor);
+        unsafe { drop(Box::from_raw(head.as_ptr())) };
         Ok(())
     }
 
     /// After traversal, every precursor must point to a node whose value is
     /// strictly less than the target (or the head sentinel with no value).
     #[rstest]
-    fn precursors_are_before_target(skiplist: Result<Box<Node<u8, MAX_LEVELS>>>) -> Result<()> {
+    fn precursors_are_before_target(skiplist: Result<NonNull<Node<u8, MAX_LEVELS>>>) -> Result<()> {
         let mut head = skiplist?;
         // Target = 30 (node v3).
-        let mut visitor = OrdMutVisitor::new(&mut head, &30_u8, Ord::cmp);
+        let mut visitor = OrdMutVisitor::new(unsafe { head.as_mut() }, &30_u8, Ord::cmp);
         while let Step::Advanced(_) = visitor.step() {}
 
         for &ptr in visitor.precursors() {
@@ -297,16 +309,18 @@ mod tests {
                 "precursor value {value:?} should be < 30"
             );
         }
+        drop(visitor);
+        unsafe { drop(Box::from_raw(head.as_ptr())) };
         Ok(())
     }
 
     /// Stepping past the end of the list produces `Exhausted`.
     #[rstest]
     fn exhausted_when_target_out_of_range(
-        skiplist: Result<Box<Node<u8, MAX_LEVELS>>>,
+        skiplist: Result<NonNull<Node<u8, MAX_LEVELS>>>,
     ) -> Result<()> {
         let mut head = skiplist?;
-        let mut visitor = OrdMutVisitor::new(&mut head, &99_u8, Ord::cmp);
+        let mut visitor = OrdMutVisitor::new(unsafe { head.as_mut() }, &99_u8, Ord::cmp);
 
         loop {
             let s = visitor.step();
@@ -319,29 +333,36 @@ mod tests {
                 Step::FoundTarget => panic!("should not find target 99"),
             }
         }
+        drop(visitor);
+        unsafe { drop(Box::from_raw(head.as_ptr())) };
         Ok(())
     }
 
     /// `current_mut()` returns the same pointer as `current()`.
     #[rstest]
-    fn current_mut_matches_current(skiplist: Result<Box<Node<u8, MAX_LEVELS>>>) -> Result<()> {
+    fn current_mut_matches_current(skiplist: Result<NonNull<Node<u8, MAX_LEVELS>>>) -> Result<()> {
         let mut head = skiplist?;
-        let mut visitor = OrdMutVisitor::new(&mut head, &20_u8, Ord::cmp);
+        let mut visitor = OrdMutVisitor::new(unsafe { head.as_mut() }, &20_u8, Ord::cmp);
         visitor.traverse();
 
         assert_eq!(visitor.current(), visitor.current_mut());
+        drop(visitor);
+        unsafe { drop(Box::from_raw(head.as_ptr())) };
         Ok(())
     }
 
     /// `precursors()` has one entry per level.
     #[rstest]
-    fn precursors_length(skiplist: Result<Box<Node<u8, MAX_LEVELS>>>) -> Result<()> {
+    fn precursors_length(skiplist: Result<NonNull<Node<u8, MAX_LEVELS>>>) -> Result<()> {
         let mut head = skiplist?;
-        let max_levels = head.level();
-        let mut visitor = OrdMutVisitor::new(&mut head, &20_u8, Ord::cmp);
+        // SAFETY: head is valid for the duration of this test.
+        let max_levels = unsafe { head.as_ref() }.level();
+        let mut visitor = OrdMutVisitor::new(unsafe { head.as_mut() }, &20_u8, Ord::cmp);
         visitor.traverse();
 
         assert_eq!(visitor.precursors().len(), max_levels);
+        drop(visitor);
+        unsafe { drop(Box::from_raw(head.as_ptr())) };
         Ok(())
     }
 }

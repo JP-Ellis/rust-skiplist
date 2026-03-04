@@ -127,6 +127,8 @@ impl<'a, T, Q: ?Sized, F: Fn(&T, &Q) -> Ordering, const N: usize> Visitor
 )]
 #[cfg(test)]
 mod tests {
+    use core::ptr::NonNull;
+
     use anyhow::Result;
     use pretty_assertions::assert_eq;
     use rstest::rstest;
@@ -139,88 +141,102 @@ mod tests {
     };
 
     #[rstest]
-    fn find_existing_value(skiplist: Result<Box<Node<u8, MAX_LEVELS>>>) -> Result<()> {
+    fn find_existing_value(skiplist: Result<NonNull<Node<u8, MAX_LEVELS>>>) -> Result<()> {
         let head = skiplist?;
-        let mut visitor = OrdVisitor::new(&head, &30_u8, Ord::cmp);
+        // SAFETY: head is a valid heap-allocated node for the duration of this test.
+        let mut visitor = OrdVisitor::new(unsafe { head.as_ref() }, &30_u8, Ord::cmp);
 
         let found = visitor.traverse();
 
         assert!(visitor.found());
         assert_eq!(found.and_then(|n| n.value().copied()), Some(30));
+        unsafe { drop(Box::from_raw(head.as_ptr())) };
         Ok(())
     }
 
     #[rstest]
-    fn find_first_value(skiplist: Result<Box<Node<u8, MAX_LEVELS>>>) -> Result<()> {
+    fn find_first_value(skiplist: Result<NonNull<Node<u8, MAX_LEVELS>>>) -> Result<()> {
         let head = skiplist?;
-        let mut visitor = OrdVisitor::new(&head, &10_u8, Ord::cmp);
+        // SAFETY: head is a valid heap-allocated node for the duration of this test.
+        let mut visitor = OrdVisitor::new(unsafe { head.as_ref() }, &10_u8, Ord::cmp);
 
         let found = visitor.traverse();
 
         assert!(visitor.found());
         assert_eq!(found.and_then(|n| n.value().copied()), Some(10));
+        unsafe { drop(Box::from_raw(head.as_ptr())) };
         Ok(())
     }
 
     #[rstest]
-    fn find_last_value(skiplist: Result<Box<Node<u8, MAX_LEVELS>>>) -> Result<()> {
+    fn find_last_value(skiplist: Result<NonNull<Node<u8, MAX_LEVELS>>>) -> Result<()> {
         let head = skiplist?;
-        let mut visitor = OrdVisitor::new(&head, &40_u8, Ord::cmp);
+        // SAFETY: head is a valid heap-allocated node for the duration of this test.
+        let mut visitor = OrdVisitor::new(unsafe { head.as_ref() }, &40_u8, Ord::cmp);
 
         let found = visitor.traverse();
 
         assert!(visitor.found());
         assert_eq!(found.and_then(|n| n.value().copied()), Some(40));
+        unsafe { drop(Box::from_raw(head.as_ptr())) };
         Ok(())
     }
 
     #[rstest]
-    fn value_not_in_list(skiplist: Result<Box<Node<u8, MAX_LEVELS>>>) -> Result<()> {
+    fn value_not_in_list(skiplist: Result<NonNull<Node<u8, MAX_LEVELS>>>) -> Result<()> {
         let head = skiplist?;
-        let mut visitor = OrdVisitor::new(&head, &25_u8, Ord::cmp);
+        // SAFETY: head is a valid heap-allocated node for the duration of this test.
+        let mut visitor = OrdVisitor::new(unsafe { head.as_ref() }, &25_u8, Ord::cmp);
 
         let found = visitor.traverse();
 
         assert!(!visitor.found());
         assert!(found.is_none());
+        unsafe { drop(Box::from_raw(head.as_ptr())) };
         Ok(())
     }
 
     #[rstest]
-    fn value_before_first(skiplist: Result<Box<Node<u8, MAX_LEVELS>>>) -> Result<()> {
+    fn value_before_first(skiplist: Result<NonNull<Node<u8, MAX_LEVELS>>>) -> Result<()> {
         let head = skiplist?;
-        let mut visitor = OrdVisitor::new(&head, &5_u8, Ord::cmp);
+        // SAFETY: head is a valid heap-allocated node for the duration of this test.
+        let mut visitor = OrdVisitor::new(unsafe { head.as_ref() }, &5_u8, Ord::cmp);
 
         let found = visitor.traverse();
 
         assert!(!visitor.found());
         assert!(found.is_none());
+        unsafe { drop(Box::from_raw(head.as_ptr())) };
         Ok(())
     }
 
     #[rstest]
-    fn value_beyond_list(skiplist: Result<Box<Node<u8, MAX_LEVELS>>>) -> Result<()> {
+    fn value_beyond_list(skiplist: Result<NonNull<Node<u8, MAX_LEVELS>>>) -> Result<()> {
         let head = skiplist?;
-        let mut visitor = OrdVisitor::new(&head, &99_u8, Ord::cmp);
+        // SAFETY: head is a valid heap-allocated node for the duration of this test.
+        let mut visitor = OrdVisitor::new(unsafe { head.as_ref() }, &99_u8, Ord::cmp);
 
         let found = visitor.traverse();
 
         assert!(!visitor.found());
         assert!(found.is_none());
+        unsafe { drop(Box::from_raw(head.as_ptr())) };
         Ok(())
     }
 
     /// Calling `step()` again after `found()` returns `true` must immediately
     /// return `FoundTarget` without advancing.
     #[rstest]
-    fn step_after_found(skiplist: Result<Box<Node<u8, MAX_LEVELS>>>) -> Result<()> {
+    fn step_after_found(skiplist: Result<NonNull<Node<u8, MAX_LEVELS>>>) -> Result<()> {
         let head = skiplist?;
-        let mut visitor = OrdVisitor::new(&head, &20_u8, Ord::cmp);
+        // SAFETY: head is a valid heap-allocated node for the duration of this test.
+        let mut visitor = OrdVisitor::new(unsafe { head.as_ref() }, &20_u8, Ord::cmp);
 
         visitor.traverse();
         assert!(visitor.found());
 
         assert!(matches!(visitor.step(), Step::FoundTarget));
+        unsafe { drop(Box::from_raw(head.as_ptr())) };
         Ok(())
     }
 }

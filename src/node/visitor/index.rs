@@ -96,6 +96,8 @@ impl<'a, T, const N: usize> Visitor for IndexVisitor<'a, T, N> {
 )]
 #[cfg(test)]
 mod tests {
+    use core::ptr::NonNull;
+
     use anyhow::Result;
     use pretty_assertions::assert_eq;
     use rstest::rstest;
@@ -109,9 +111,10 @@ mod tests {
 
     /// Test the `IndexVisitor` for finding a node by index.
     #[rstest]
-    fn index_traverser_step(skiplist: Result<Box<Node<u8, MAX_LEVELS>>>) -> Result<()> {
+    fn index_traverser_step(skiplist: Result<NonNull<Node<u8, MAX_LEVELS>>>) -> Result<()> {
         let head = skiplist?;
-        let mut traverser = IndexVisitor::new(&head, 2);
+        // SAFETY: head is a valid heap-allocated node for the duration of this test.
+        let mut traverser = IndexVisitor::new(unsafe { head.as_ref() }, 2);
 
         let mut last_node = None;
         while let Step::Advanced(node) = traverser.step() {
@@ -121,13 +124,15 @@ mod tests {
         assert!(traverser.found());
         assert_eq!(last_node.and_then(|n| n.value()), Some(&20));
 
+        unsafe { drop(Box::from_raw(head.as_ptr())) };
         Ok(())
     }
 
     #[rstest]
-    fn index_traverser_step_none(skiplist: Result<Box<Node<u8, MAX_LEVELS>>>) -> Result<()> {
+    fn index_traverser_step_none(skiplist: Result<NonNull<Node<u8, MAX_LEVELS>>>) -> Result<()> {
         let head = skiplist?;
-        let mut traverser = IndexVisitor::new(&head, 5);
+        // SAFETY: head is a valid heap-allocated node for the duration of this test.
+        let mut traverser = IndexVisitor::new(unsafe { head.as_ref() }, 5);
 
         let mut last_node = None;
         while let Step::Advanced(node) = traverser.step() {
@@ -137,32 +142,37 @@ mod tests {
         assert!(!traverser.found());
         assert_eq!(last_node.and_then(|n| n.value()), Some(&40));
 
+        unsafe { drop(Box::from_raw(head.as_ptr())) };
         Ok(())
     }
 
     #[rstest]
-    fn index_traverser_traverse(skiplist: Result<Box<Node<u8, MAX_LEVELS>>>) -> Result<()> {
+    fn index_traverser_traverse(skiplist: Result<NonNull<Node<u8, MAX_LEVELS>>>) -> Result<()> {
         let head = skiplist?;
-        let mut traverser = IndexVisitor::new(&head, 2);
+        // SAFETY: head is a valid heap-allocated node for the duration of this test.
+        let mut traverser = IndexVisitor::new(unsafe { head.as_ref() }, 2);
 
         let node = traverser.traverse();
         assert!(traverser.found());
         assert_eq!(node.and_then(|n| n.value()), Some(&20));
 
+        unsafe { drop(Box::from_raw(head.as_ptr())) };
         Ok(())
     }
 
     #[rstest]
     fn index_traverser_traverse_not_found(
-        skiplist: Result<Box<Node<u8, MAX_LEVELS>>>,
+        skiplist: Result<NonNull<Node<u8, MAX_LEVELS>>>,
     ) -> Result<()> {
         let head = skiplist?;
-        let mut traverser = IndexVisitor::new(&head, 5);
+        // SAFETY: head is a valid heap-allocated node for the duration of this test.
+        let mut traverser = IndexVisitor::new(unsafe { head.as_ref() }, 5);
 
         let node = traverser.traverse();
         assert!(!traverser.found());
         assert!(node.is_none());
 
+        unsafe { drop(Box::from_raw(head.as_ptr())) };
         Ok(())
     }
 }
