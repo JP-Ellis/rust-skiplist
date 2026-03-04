@@ -1,6 +1,6 @@
 //! Ordered insertion and removal for [`OrderedSkipList`](super::OrderedSkipList).
 
-use core::ptr::NonNull;
+use core::{cmp::Ordering, ptr::NonNull};
 
 use crate::{
     comparator::Comparator,
@@ -316,6 +316,232 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
         self.len = self.len.saturating_add(1);
     }
 
+    /// Removes and returns the first (earliest) element that compares equal to
+    /// `value`, or `None` if no such element exists.
+    ///
+    /// When duplicates are present only the first occurrence is removed; the
+    /// rest remain in the list.
+    ///
+    /// This operation is `$O(\log n)$` on average.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use skiplist::ordered_skip_list::OrderedSkipList;
+    ///
+    /// let mut list = OrderedSkipList::<i32>::new();
+    /// list.insert(1);
+    /// list.insert(2);
+    /// list.insert(2);
+    /// list.insert(3);
+    /// assert_eq!(list.remove_first(&2), Some(2));
+    /// assert_eq!(list.len(), 3);
+    /// assert!(list.contains(&2)); // second 2 is still there
+    /// ```
+    #[expect(
+        clippy::indexing_slicing,
+        reason = "l is bounded by target_height ≤ max_levels = links.len(); \
+                  precursors[0] is valid because max_levels ≥ 1 (guaranteed by the \
+                  LevelGenerator invariant)"
+    )]
+    #[expect(
+        clippy::multiple_unsafe_ops_per_block,
+        reason = "link splicing and node pop touch provably disjoint heap nodes; \
+                  splitting across blocks would require unsafe-crossing raw-pointer variables"
+    )]
+    #[inline]
+    pub fn remove_first(&mut self, value: &T) -> Option<T> {
+        let (target_ptr, found, precursors) = {
+            let head = self.head;
+            let cmp = |v: &T, t: &T| self.comparator.compare(v, t);
+            let mut visitor = OrdMutVisitor::new(head, value, cmp);
+            visitor.traverse();
+            visitor.into_parts()
+        };
+
+        if !found {
+            return None;
+        }
+
+        // SAFETY: `found` is true, so `target_ptr` is a live data node owned by
+        // this list.  `precursors[l]` for l < target_height have their level-l
+        // link pointing to `target_ptr` (skip-list invariant + OrdMutVisitor
+        // semantics for Equal).  No other &mut references to any node exist.
+        let val = unsafe {
+            let target_height = target_ptr.as_ref().level();
+            let target_raw = target_ptr.as_ptr();
+
+            // Splice out target_ptr: for l < target_height, route the
+            // predecessor's level-l link through target's level-l successor.
+            // No distance adjustment (distances are placeholder 1).
+            for (l, pred_nn) in precursors.iter().enumerate().take(target_height) {
+                (*pred_nn.as_ptr()).links_mut()[l] = (*target_raw).links_mut()[l].take();
+            }
+
+            let mut popped = (*target_raw).pop();
+            popped.take_value()
+        };
+
+        if self.tail == Some(target_ptr) {
+            self.tail = if self.len == 1 {
+                None
+            } else {
+                Some(precursors[0])
+            };
+        }
+        self.len = self.len.saturating_sub(1);
+        val
+    }
+
+    /// Removes and returns the last (latest) element that compares equal to
+    /// `value`, or `None` if no such element exists.
+    ///
+    /// When duplicates are present only the last occurrence is removed; the
+    /// rest remain in the list.
+    ///
+    /// This operation is `$O(\log n)$` on average.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use skiplist::ordered_skip_list::OrderedSkipList;
+    ///
+    /// let mut list = OrderedSkipList::<i32>::new();
+    /// list.insert(1);
+    /// list.insert(2);
+    /// list.insert(2);
+    /// list.insert(3);
+    /// assert_eq!(list.remove_last(&2), Some(2));
+    /// assert_eq!(list.len(), 3);
+    /// assert!(list.contains(&2)); // first 2 is still there
+    /// ```
+    #[expect(
+        clippy::indexing_slicing,
+        reason = "l is bounded by target_height ≤ max_levels = links.len(); \
+                  arr[l] and precursors[0] are in-bounds for the same reason; \
+                  precursors[0] from the cmp_past traversal is always initialised \
+                  because max_levels ≥ 1"
+    )]
+    #[expect(
+        clippy::multiple_unsafe_ops_per_block,
+        reason = "pointer-equality scan, link splicing, and node pop all touch \
+                  provably disjoint heap nodes; splitting across blocks would require \
+                  unsafe-crossing raw-pointer variables"
+    )]
+    #[inline]
+    pub fn remove_last(&mut self, value: &T) -> Option<T> {
+        // Use a modified comparator that treats Equal as Less so that the
+        // visitor advances past ALL equal nodes.  After traversal,
+        // `precursors[0]` is the last node whose value compares equal to
+        // `value` — or a node with a smaller value if none exist.
+        let target_ptr: NonNull<Node<T, N>> = {
+            let head = self.head;
+            let cmp_past = |v: &T, t: &T| match self.comparator.compare(v, t) {
+                Ordering::Equal | Ordering::Less => Ordering::Less,
+                Ordering::Greater => Ordering::Greater,
+            };
+            let mut visitor = OrdMutVisitor::new(head, value, cmp_past);
+            visitor.traverse();
+            let (_current, _found, precursors) = visitor.into_parts();
+            precursors[0]
+        };
+
+        // Verify that target_ptr is actually equal to `value`; the head
+        // sentinel has no value, and a node with a smaller value means the
+        // target is absent from the list.
+        // SAFETY: target_ptr comes from OrdMutVisitor's precursors array, which
+        // is pre-filled with `self.head` (always valid) and updated only to
+        // node pointers reachable from head: all live for &mut self's lifetime.
+        let is_equal = unsafe { target_ptr.as_ref() }
+            .value()
+            .is_some_and(|v| self.comparator.compare(v, value) == Ordering::Equal);
+        if !is_equal {
+            return None;
+        }
+
+        // SAFETY: target_ptr is a live, valid data node for the lifetime of
+        // &mut self.  No other &mut reference to it exists.
+        let target_height = unsafe { target_ptr.as_ref() }.level();
+
+        // Find the level-l predecessor of target_ptr at each level using a
+        // pointer-equality forward scan identical to the one in pop_last.
+        let precursors: [NonNull<Node<T, N>>; N] = {
+            let mut arr = [self.head; N];
+            let mut current = self.head;
+
+            for l in (0..target_height).rev() {
+                loop {
+                    // SAFETY: `current` is a valid node in this list, live for
+                    // the duration of &mut self.  No exclusive reference exists.
+                    let maybe_link = unsafe { current.as_ref() }
+                        .links()
+                        .get(l)
+                        .and_then(|lk| lk.as_ref());
+                    match maybe_link {
+                        None => break,
+                        Some(link) if link.node() == target_ptr => break,
+                        Some(link) => current = link.node(),
+                    }
+                }
+                arr[l] = current;
+            }
+            arr
+        };
+
+        // SAFETY: All raw pointers come from NonNull<Node<T, N>> values
+        // captured above.  No safe &mut references to any node exist.
+        let val = unsafe {
+            let target_raw = target_ptr.as_ptr();
+
+            for (l, pred_nn) in precursors.iter().enumerate().take(target_height) {
+                (*pred_nn.as_ptr()).links_mut()[l] = (*target_raw).links_mut()[l].take();
+            }
+
+            let mut popped = (*target_raw).pop();
+            popped.take_value()
+        };
+
+        if self.tail == Some(target_ptr) {
+            self.tail = if self.len == 1 {
+                None
+            } else {
+                Some(precursors[0])
+            };
+        }
+        self.len = self.len.saturating_sub(1);
+        val
+    }
+
+    /// Removes all elements that compare equal to `value` and returns the
+    /// number of elements removed.
+    ///
+    /// This operation is `$O(k \log n)$` where k is the number of occurrences of
+    /// `value`.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use skiplist::ordered_skip_list::OrderedSkipList;
+    ///
+    /// let mut list = OrderedSkipList::<i32>::new();
+    /// list.insert(1);
+    /// list.insert(2);
+    /// list.insert(2);
+    /// list.insert(2);
+    /// list.insert(3);
+    /// assert_eq!(list.remove_all(&2), 3);
+    /// assert_eq!(list.len(), 2);
+    /// assert!(!list.contains(&2));
+    /// ```
+    #[inline]
+    pub fn remove_all(&mut self, value: &T) -> usize {
+        let mut count = 0_usize;
+        while self.remove_first(value).is_some() {
+            count = count.saturating_add(1);
+        }
+        count
+    }
+
 #[cfg(test)]
 mod tests {
     use pretty_assertions::assert_eq;
@@ -626,5 +852,284 @@ mod tests {
         assert_eq!(list.pop_last(), None);
         assert_eq!(list.pop_first(), None);
         assert_eq!(list.len(), 0);
+    }
+
+    // MARK: remove_first
+
+    #[test]
+    fn remove_first_empty() {
+        let mut list = OrderedSkipList::<i32>::new();
+        assert_eq!(list.remove_first(&1), None);
+    }
+
+    #[test]
+    fn remove_first_single_found() {
+        let mut list = OrderedSkipList::<i32>::new();
+        list.insert(42);
+        assert_eq!(list.remove_first(&42), Some(42));
+        assert!(list.is_empty());
+        assert_eq!(list.len(), 0);
+    }
+
+    #[test]
+    fn remove_first_single_not_found() {
+        let mut list = OrderedSkipList::<i32>::new();
+        list.insert(42);
+        assert_eq!(list.remove_first(&99), None);
+        assert_eq!(list.len(), 1);
+    }
+
+    #[test]
+    fn remove_first_from_front() {
+        let g = Geometric::new(1, 0.5).expect("valid parameters");
+        let mut list = OrderedSkipList::<i32, 1>::with_level_generator(g);
+        list.insert(1);
+        list.insert(2);
+        list.insert(3);
+        assert_eq!(list.remove_first(&1), Some(1));
+        assert_eq!(list.len(), 2);
+        assert_eq!(list.first(), Some(&2));
+    }
+
+    #[test]
+    fn remove_first_from_back_updates_tail() {
+        let mut list = OrderedSkipList::<i32>::new();
+        list.insert(1);
+        list.insert(2);
+        list.insert(3);
+        assert_eq!(list.remove_first(&3), Some(3));
+        assert_eq!(list.len(), 2);
+        assert_eq!(list.last(), Some(&2));
+    }
+
+    #[test]
+    fn remove_first_from_middle() {
+        let g = Geometric::new(1, 0.5).expect("valid parameters");
+        let mut list = OrderedSkipList::<i32, 1>::with_level_generator(g);
+        list.insert(1);
+        list.insert(2);
+        list.insert(3);
+        assert_eq!(list.remove_first(&2), Some(2));
+        assert_eq!(list.len(), 2);
+        assert_eq!(list.first(), Some(&1));
+        assert_eq!(list.last(), Some(&3));
+    }
+
+    #[test]
+    fn remove_first_not_found_between_elements() {
+        let mut list = OrderedSkipList::<i32>::new();
+        list.insert(1);
+        list.insert(3);
+        assert_eq!(list.remove_first(&2), None);
+        assert_eq!(list.len(), 2);
+    }
+
+    #[test]
+    fn remove_first_duplicate_removes_first_occurrence() {
+        let g = Geometric::new(1, 0.5).expect("valid parameters");
+        let mut list = OrderedSkipList::<i32, 1>::with_level_generator(g);
+        list.insert(1);
+        list.insert(2);
+        list.insert(2);
+        list.insert(3);
+        assert_eq!(list.remove_first(&2), Some(2));
+        assert_eq!(list.len(), 3);
+        // One copy of 2 remains.
+        assert!(list.contains(&2));
+    }
+
+    #[test]
+    fn remove_first_len_decrements() {
+        let mut list = OrderedSkipList::<usize>::new();
+        for i in 1..=10_usize {
+            list.insert(i);
+        }
+        for i in 1..=10_usize {
+            assert_eq!(list.remove_first(&i), Some(i));
+            assert_eq!(list.len(), 10 - i);
+        }
+        assert_eq!(list.remove_first(&1), None);
+    }
+
+    #[test]
+    fn remove_first_custom_comparator() {
+        // Largest-first ordering: remove_first removes by position, not numeric order.
+        let mut list: OrderedSkipList<i32, 16, _> =
+            OrderedSkipList::with_comparator(FnComparator(|a: &i32, b: &i32| b.cmp(a)));
+        list.insert(3); // stored as [3, 2, 1]
+        list.insert(1);
+        list.insert(2);
+        assert_eq!(list.remove_first(&2), Some(2));
+        assert_eq!(list.len(), 2);
+        assert!(!list.contains(&2));
+    }
+
+    // MARK: remove_last
+
+    #[test]
+    fn remove_last_empty() {
+        let mut list = OrderedSkipList::<i32>::new();
+        assert_eq!(list.remove_last(&1), None);
+    }
+
+    #[test]
+    fn remove_last_single_found() {
+        let mut list = OrderedSkipList::<i32>::new();
+        list.insert(42);
+        assert_eq!(list.remove_last(&42), Some(42));
+        assert!(list.is_empty());
+    }
+
+    #[test]
+    fn remove_last_single_not_found() {
+        let mut list = OrderedSkipList::<i32>::new();
+        list.insert(42);
+        assert_eq!(list.remove_last(&99), None);
+        assert_eq!(list.len(), 1);
+    }
+
+    #[test]
+    fn remove_last_no_duplicates_same_as_remove_first() {
+        let g = Geometric::new(1, 0.5).expect("valid parameters");
+        let mut list = OrderedSkipList::<i32, 1>::with_level_generator(g);
+        list.insert(1);
+        list.insert(2);
+        list.insert(3);
+        assert_eq!(list.remove_last(&2), Some(2));
+        assert_eq!(list.len(), 2);
+        assert!(!list.contains(&2));
+    }
+
+    #[test]
+    fn remove_last_duplicate_removes_last_occurrence() {
+        let g = Geometric::new(1, 0.5).expect("valid parameters");
+        let mut list = OrderedSkipList::<i32, 1>::with_level_generator(g);
+        list.insert(1);
+        list.insert(2);
+        list.insert(2);
+        list.insert(3);
+        assert_eq!(list.remove_last(&2), Some(2));
+        assert_eq!(list.len(), 3);
+        // One copy of 2 still remains.
+        assert!(list.contains(&2));
+    }
+
+    #[test]
+    fn remove_last_all_equal_removes_last() {
+        let g = Geometric::new(1, 0.5).expect("valid parameters");
+        let mut list = OrderedSkipList::<i32, 1>::with_level_generator(g);
+        list.insert(2);
+        list.insert(2);
+        list.insert(2);
+        assert_eq!(list.remove_last(&2), Some(2));
+        assert_eq!(list.len(), 2);
+        assert_eq!(list.remove_last(&2), Some(2));
+        assert_eq!(list.len(), 1);
+        assert_eq!(list.remove_last(&2), Some(2));
+        assert!(list.is_empty());
+        assert_eq!(list.remove_last(&2), None);
+    }
+
+    #[test]
+    fn remove_last_from_back_updates_tail() {
+        let mut list = OrderedSkipList::<i32>::new();
+        list.insert(1);
+        list.insert(2);
+        list.insert(3);
+        assert_eq!(list.remove_last(&3), Some(3));
+        assert_eq!(list.len(), 2);
+        assert_eq!(list.last(), Some(&2));
+    }
+
+    #[test]
+    fn remove_last_not_found() {
+        let mut list = OrderedSkipList::<i32>::new();
+        list.insert(1);
+        list.insert(3);
+        assert_eq!(list.remove_last(&2), None);
+        assert_eq!(list.len(), 2);
+    }
+
+    #[test]
+    fn remove_last_custom_comparator() {
+        // Largest-first ordering.
+        let mut list: OrderedSkipList<i32, 16, _> =
+            OrderedSkipList::with_comparator(FnComparator(|a: &i32, b: &i32| b.cmp(a)));
+        list.insert(3); // stored as [3, 2, 1]
+        list.insert(1);
+        list.insert(2);
+        assert_eq!(list.remove_last(&2), Some(2));
+        assert_eq!(list.len(), 2);
+        assert!(!list.contains(&2));
+    }
+
+    // MARK: remove_all
+
+    #[test]
+    fn remove_all_empty() {
+        let mut list = OrderedSkipList::<i32>::new();
+        assert_eq!(list.remove_all(&1), 0);
+    }
+
+    #[test]
+    fn remove_all_not_found() {
+        let mut list = OrderedSkipList::<i32>::new();
+        list.insert(1);
+        list.insert(3);
+        assert_eq!(list.remove_all(&2), 0);
+        assert_eq!(list.len(), 2);
+    }
+
+    #[test]
+    fn remove_all_single_occurrence() {
+        let mut list = OrderedSkipList::<i32>::new();
+        list.insert(1);
+        list.insert(2);
+        list.insert(3);
+        assert_eq!(list.remove_all(&2), 1);
+        assert_eq!(list.len(), 2);
+        assert!(!list.contains(&2));
+    }
+
+    #[test]
+    fn remove_all_multiple_occurrences() {
+        let g = Geometric::new(1, 0.5).expect("valid parameters");
+        let mut list = OrderedSkipList::<i32, 1>::with_level_generator(g);
+        list.insert(1);
+        list.insert(2);
+        list.insert(2);
+        list.insert(2);
+        list.insert(3);
+        assert_eq!(list.remove_all(&2), 3);
+        assert_eq!(list.len(), 2);
+        assert!(!list.contains(&2));
+        assert!(list.contains(&1));
+        assert!(list.contains(&3));
+    }
+
+    #[test]
+    fn remove_all_entire_list() {
+        let g = Geometric::new(1, 0.5).expect("valid parameters");
+        let mut list = OrderedSkipList::<i32, 1>::with_level_generator(g);
+        list.insert(5);
+        list.insert(5);
+        list.insert(5);
+        assert_eq!(list.remove_all(&5), 3);
+        assert!(list.is_empty());
+        assert_eq!(list.len(), 0);
+    }
+
+    #[test]
+    fn remove_all_custom_comparator() {
+        // Largest-first ordering.
+        let mut list: OrderedSkipList<i32, 16, _> =
+            OrderedSkipList::with_comparator(FnComparator(|a: &i32, b: &i32| b.cmp(a)));
+        list.insert(1);
+        list.insert(2);
+        list.insert(2);
+        list.insert(3);
+        assert_eq!(list.remove_all(&2), 2);
+        assert_eq!(list.len(), 2);
+        assert!(!list.contains(&2));
     }
 }
