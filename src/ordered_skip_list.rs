@@ -31,6 +31,7 @@ use crate::{
 };
 
 mod access;
+mod filter;
 mod insert_remove;
 pub mod iter;
 
