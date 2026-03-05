@@ -10,9 +10,7 @@ use core::{
 };
 
 use crate::{
-    comparator::{Comparator, OrdComparator},
-    level_generator::{LevelGenerator, geometric::Geometric},
-    ordered_skip_list::OrderedSkipList,
+    comparator::Comparator, level_generator::LevelGenerator, ordered_skip_list::OrderedSkipList,
 };
 
 // MARK: Debug
