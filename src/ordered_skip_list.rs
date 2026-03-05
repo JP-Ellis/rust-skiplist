@@ -227,6 +227,9 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
     #[must_use]
     pub fn with_comparator_and_level_generator(comparator: C, generator: G) -> Self {
         let max_levels = generator.total();
+        // `debug_assert` fires in debug builds to catch misconfigured
+        // generators early.  The `.min(N)` below is a defensive release-build
+        // safety net; both are intentional and complement each other.
         debug_assert!(
             max_levels <= N,
             "generator.total() ({max_levels}) exceeds node capacity ({N})"

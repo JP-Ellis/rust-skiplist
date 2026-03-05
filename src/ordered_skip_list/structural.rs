@@ -342,7 +342,6 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
             };
             (*result.head.as_ptr()).set_head_next(first_of_tail);
 
-            self.tail = Some(NonNull::new_unchecked(pivot));
             self.len = at;
 
             self.tail = Node::rebuild(self.head);

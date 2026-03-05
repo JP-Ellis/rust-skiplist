@@ -5,7 +5,7 @@ use core::cmp::Ordering;
 use crate::{
     comparator::Comparator,
     level_generator::LevelGenerator,
-    node::visitor::{IndexVisitor, OrdIndexMutVisitor, OrdVisitor, Visitor},
+    node::visitor::{IndexVisitor, OrdIndexVisitor, OrdVisitor, Visitor},
     ordered_skip_list::OrderedSkipList,
 };
 
@@ -171,13 +171,9 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
         if self.is_empty() {
             return None;
         }
-        // `self.head` is NonNull (Copy) — copying it does not borrow `self`.
-        // The closure borrows only `self.comparator` (shared).
-        // OrdIndexMutVisitor only reads nodes (via `as_ref`), so using it from
-        // `&self` is safe even though the type is designed for mutation.
-        let head = self.head;
+        let head = self.head_ref();
         let cmp = |v: &T, t: &T| self.comparator.compare(v, t);
-        let mut visitor = OrdIndexMutVisitor::new(head, value, cmp);
+        let mut visitor = OrdIndexVisitor::new(head, value, cmp);
         visitor.traverse();
         visitor.found().then(|| visitor.rank())
     }
@@ -215,20 +211,17 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
         if self.is_empty() {
             return 0;
         }
-        // Use OrdIndexMutVisitor (Less-only advancement) to always land on the
-        // *first* occurrence of `value`.  OrdVisitor follows Equal skip links
+        // Use OrdIndexVisitor (Less-only advancement) to always land on the
+        // *first* occurrence of `value`. OrdVisitor follows Equal skip links
         // which can skip earlier duplicates when multiple equal nodes exist.
-        let head = self.head;
+        let head = self.head_ref();
         let cmp = |v: &T, t: &T| self.comparator.compare(v, t);
-        let mut visitor = OrdIndexMutVisitor::new(head, value, cmp);
-        let first_nn = visitor.traverse();
+        let mut visitor = OrdIndexVisitor::new(head, value, cmp);
+        let first = visitor.traverse();
         if !visitor.found() {
             return 0;
         }
-        // SAFETY: `visitor.found()` guarantees `first_nn` is `Some` and points
-        // to a live data node reachable from `self.head`.  We hold `&self` so
-        // no exclusive references to any node exist.
-        let first_node = unsafe { first_nn.expect("found implies Some").as_ref() };
+        let first_node = first.expect("found implies Some");
         let mut count = 1_usize;
         let mut cur = first_node.next_as_ref();
         while let Some(node) = cur {

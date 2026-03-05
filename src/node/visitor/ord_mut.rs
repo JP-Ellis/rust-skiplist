@@ -27,9 +27,10 @@ use crate::node::{
 /// traversal these are the nodes whose links must be rewritten on insert or
 /// remove.
 ///
-/// Unlike `IndexMutVisitor`, no distance information is stored alongside the
-/// precursors because ordered collections do not need to maintain link
-/// distances (they do not support O(1) rank queries).
+/// Unlike `OrdIndexMutVisitor`, no distance information is stored alongside
+/// the precursors. Operations that use this visitor (e.g. `split_off`) only
+/// need to relink nodes; they do not need to update skip-link distances or
+/// answer rank queries, so the extra tracking is omitted.
 ///
 /// # Safety
 ///
