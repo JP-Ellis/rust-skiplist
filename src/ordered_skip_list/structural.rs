@@ -8,7 +8,7 @@ use crate::{
     level_generator::LevelGenerator,
     node::{
         Node,
-        visitor::{OrdMutVisitor, Visitor},
+        visitor::{IndexMutVisitor, OrdMutVisitor, Visitor},
     },
     ordered_skip_list::OrderedSkipList,
 };
@@ -196,6 +196,160 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
         result.len = result_len;
 
         result
+    }
+
+    /// Splits the list at the given 0-based index, returning a new list
+    /// containing all elements from position `at` onwards.
+    ///
+    /// After the call, `self` retains elements at positions `0..at`, and the
+    /// returned list contains elements at positions `at..`.  This operation
+    /// runs in `$O(n)$` time.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `at > self.len()`.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use skiplist::ordered_skip_list::OrderedSkipList;
+    ///
+    /// let mut a = OrderedSkipList::<i32>::new();
+    /// for i in 1..=5 {
+    ///     a.insert(i);
+    /// }
+    ///
+    /// let b = a.split_off_index(2);
+    /// let a_vals: Vec<i32> = a.iter().copied().collect();
+    /// let b_vals: Vec<i32> = b.iter().copied().collect();
+    /// assert_eq!(a_vals, [1, 2]);
+    /// assert_eq!(b_vals, [3, 4, 5]);
+    /// ```
+    #[expect(
+        clippy::expect_used,
+        reason = "the pivot node exists because 0 < at < self.len was checked before the \
+                  traversal; the expect fires only on invariant violations"
+    )]
+    #[expect(
+        clippy::multiple_unsafe_ops_per_block,
+        reason = "set_head_next is an unsafe fn called on a raw-pointer dereference; \
+                  the two operations are on the same freshly allocated, exclusively-owned \
+                  node and are provably disjoint from the take_next_chain and rebuild \
+                  calls above and below"
+    )]
+    #[inline]
+    #[must_use]
+    pub fn split_off_index(&mut self, at: usize) -> Self
+    where
+        C: Clone,
+        G: Clone,
+    {
+        assert!(
+            at <= self.len,
+            "split_off_index index {at} is out of bounds (len = {})",
+            self.len
+        );
+
+        let tail_len = self.len.saturating_sub(at);
+        let max_levels = self.head_ref().level();
+
+        // Edge case: nothing to split off.
+        if tail_len == 0 {
+            // SAFETY: `Box::into_raw` transfers ownership; freed in `Drop`.
+            let head =
+                unsafe { NonNull::new_unchecked(Box::into_raw(Box::new(Node::new(max_levels)))) };
+            return Self {
+                head,
+                tail: None,
+                len: 0,
+                comparator: self.comparator.clone(),
+                generator: self.generator.clone(),
+            };
+        }
+
+        // Edge case: split at position 0, transfer everything.
+        if at == 0 {
+            let old_len = self.len;
+            // SAFETY: `Box::into_raw` transfers ownership; freed in `Drop`.
+            let result_head =
+                unsafe { NonNull::new_unchecked(Box::into_raw(Box::new(Node::new(max_levels)))) };
+            let mut result = Self {
+                head: result_head,
+                tail: None, // set by rebuild below
+                len: old_len,
+                comparator: self.comparator.clone(),
+                generator: self.generator.clone(),
+            };
+
+            // SAFETY: We hold &mut self; no other references to any node exist.
+            unsafe {
+                let head_ptr: *mut Node<T, N> = self.head.as_ptr();
+                if let Some(first_nn) = (*head_ptr).take_next_chain() {
+                    (*result.head.as_ptr()).set_head_next(first_nn);
+                }
+            }
+
+            for link in self.head_mut().links_mut() {
+                *link = None;
+            }
+            self.tail = None;
+            self.len = 0;
+
+            // Rebuild result's skip links.
+            // SAFETY: result.head is exclusively owned; all reachable nodes are live.
+            unsafe {
+                result.tail = Node::rebuild(result.head);
+            }
+
+            return result;
+        }
+
+        // General case: 0 < at < self.len.
+        //
+        // Navigate to the pivot (the last node to keep in self, at 0-based
+        // index `at - 1`, internal rank `at`), detach the tail chain, wire it
+        // to a fresh head, then rebuild skip links for both halves.
+        //
+        // head = internal rank 0, first data node = rank 1, so 0-based index
+        // i corresponds to internal rank i + 1.  The last kept node is at
+        // 0-based index `at - 1` = internal rank `at`.
+        // `IndexMutVisitor::new(head, at).traverse()` returns the node at
+        // internal rank `at` as its `current`.
+        let (pivot_nn, _, _) = {
+            let mut visitor = IndexMutVisitor::new(self.head, at);
+            visitor.traverse();
+            visitor.into_parts()
+        };
+
+        // SAFETY: at > 0 and at < self.len guarantee the pivot exists.
+        // We hold &mut self so exclusive access is guaranteed.
+        unsafe {
+            let pivot: *mut Node<T, N> = pivot_nn.as_ptr();
+
+            let first_of_tail = (*pivot)
+                .take_next_chain()
+                .expect("pivot has a successor because at < self.len");
+
+            // SAFETY: `Box::into_raw` transfers ownership; freed in `Drop`.
+            let result_head =
+                NonNull::new_unchecked(Box::into_raw(Box::new(Node::new(max_levels))));
+            let mut result = Self {
+                head: result_head,
+                tail: None, // set by rebuild below
+                len: tail_len,
+                comparator: self.comparator.clone(),
+                generator: self.generator.clone(),
+            };
+            (*result.head.as_ptr()).set_head_next(first_of_tail);
+
+            self.tail = Some(NonNull::new_unchecked(pivot));
+            self.len = at;
+
+            self.tail = Node::rebuild(self.head);
+            result.tail = Node::rebuild(result.head);
+
+            result
+        }
     }
 }
 
@@ -595,6 +749,168 @@ mod tests {
             a.insert(i); // stored as [5, 4, 3, 2, 1]
         }
         let b = a.split_off(&3);
+        let a_vals: Vec<i32> = a.iter().copied().collect();
+        let b_vals: Vec<i32> = b.iter().copied().collect();
+        assert_eq!(a_vals, [5, 4]);
+        assert_eq!(b_vals, [3, 2, 1]);
+    }
+
+    // MARK: split_off_index
+
+    #[test]
+    #[should_panic(expected = "out of bounds")]
+    fn split_off_index_panics_on_out_of_bounds() {
+        let mut a = OrderedSkipList::<i32>::new();
+        a.insert(1);
+        drop(a.split_off_index(2));
+    }
+
+    #[test]
+    fn split_off_index_empty_list_at_zero() {
+        let mut a = OrderedSkipList::<i32>::new();
+        let b = a.split_off_index(0);
+        assert!(a.is_empty());
+        assert!(b.is_empty());
+    }
+
+    #[test]
+    fn split_off_index_at_len_returns_empty() {
+        let mut a = OrderedSkipList::<i32>::new();
+        for i in 1..=5 {
+            a.insert(i);
+        }
+        let b = a.split_off_index(5);
+        assert_eq!(a.len(), 5);
+        assert!(b.is_empty());
+        let a_vals: Vec<i32> = a.iter().copied().collect();
+        assert_eq!(a_vals, [1, 2, 3, 4, 5]);
+    }
+
+    #[test]
+    fn split_off_index_at_zero_transfers_all() {
+        let mut a = OrderedSkipList::<i32>::new();
+        for i in 1..=5 {
+            a.insert(i);
+        }
+        let b = a.split_off_index(0);
+        assert!(a.is_empty());
+        assert_eq!(b.len(), 5);
+        let b_vals: Vec<i32> = b.iter().copied().collect();
+        assert_eq!(b_vals, [1, 2, 3, 4, 5]);
+    }
+
+    #[test]
+    fn split_off_index_middle() {
+        let mut a = OrderedSkipList::<i32>::new();
+        for i in 1..=5 {
+            a.insert(i);
+        }
+        let b = a.split_off_index(2);
+        let a_vals: Vec<i32> = a.iter().copied().collect();
+        let b_vals: Vec<i32> = b.iter().copied().collect();
+        assert_eq!(a_vals, [1, 2]);
+        assert_eq!(b_vals, [3, 4, 5]);
+    }
+
+    #[test]
+    fn split_off_index_at_one() {
+        let mut a = OrderedSkipList::<i32>::new();
+        for i in 1..=4 {
+            a.insert(i);
+        }
+        let b = a.split_off_index(1);
+        let a_vals: Vec<i32> = a.iter().copied().collect();
+        let b_vals: Vec<i32> = b.iter().copied().collect();
+        assert_eq!(a_vals, [1]);
+        assert_eq!(b_vals, [2, 3, 4]);
+    }
+
+    #[test]
+    fn split_off_index_len_correct() {
+        let mut a = OrderedSkipList::<i32>::new();
+        for i in 0..10 {
+            a.insert(i);
+        }
+        let b = a.split_off_index(4);
+        assert_eq!(a.len(), 4);
+        assert_eq!(b.len(), 6);
+    }
+
+    #[test]
+    fn split_off_index_first_last_correct() {
+        let mut a = OrderedSkipList::<i32>::new();
+        for i in 1..=6 {
+            a.insert(i);
+        }
+        let b = a.split_off_index(3);
+        assert_eq!(a.first(), Some(&1));
+        assert_eq!(a.last(), Some(&3));
+        assert_eq!(b.first(), Some(&4));
+        assert_eq!(b.last(), Some(&6));
+    }
+
+    #[test]
+    fn split_off_index_usable_after_split() {
+        let mut a = OrderedSkipList::<i32>::new();
+        for i in 1..=4 {
+            a.insert(i);
+        }
+        let mut b = a.split_off_index(2);
+        a.insert(99);
+        b.insert(100);
+        let a_vals: Vec<i32> = a.iter().copied().collect();
+        let b_vals: Vec<i32> = b.iter().copied().collect();
+        assert_eq!(a_vals, [1, 2, 99]);
+        assert_eq!(b_vals, [3, 4, 100]);
+    }
+
+    #[test]
+    fn split_off_index_iter_consistent() {
+        let n = 100_usize;
+        let mut a = OrderedSkipList::<usize>::new();
+        for i in 0..n {
+            a.insert(i);
+        }
+        let b = a.split_off_index(50);
+        assert_eq!(a.len(), 50);
+        assert_eq!(b.len(), 50);
+        let a_vals: Vec<usize> = a.iter().copied().collect();
+        let b_vals: Vec<usize> = b.iter().copied().collect();
+        let expected_a: Vec<usize> = (0..50).collect();
+        let expected_b: Vec<usize> = (50..100).collect();
+        assert_eq!(a_vals, expected_a);
+        assert_eq!(b_vals, expected_b);
+    }
+
+    #[test]
+    fn split_off_index_single_element_stays_in_self() {
+        let mut a = OrderedSkipList::<i32>::new();
+        a.insert(42);
+        let b = a.split_off_index(1);
+        assert_eq!(a.len(), 1);
+        assert_eq!(a.first(), Some(&42));
+        assert!(b.is_empty());
+    }
+
+    #[test]
+    fn split_off_index_single_element_moves_to_result() {
+        let mut a = OrderedSkipList::<i32>::new();
+        a.insert(42);
+        let b = a.split_off_index(0);
+        assert!(a.is_empty());
+        assert_eq!(b.len(), 1);
+        assert_eq!(b.first(), Some(&42));
+    }
+
+    #[test]
+    fn split_off_index_custom_comparator() {
+        // Reverse ordering: stored [5, 4, 3, 2, 1].
+        let f: fn(&i32, &i32) -> core::cmp::Ordering = |a, b| b.cmp(a);
+        let mut a: OrderedSkipList<i32, 16, _> = OrderedSkipList::with_comparator(FnComparator(f));
+        for i in 1..=5 {
+            a.insert(i);
+        }
+        let b = a.split_off_index(2);
         let a_vals: Vec<i32> = a.iter().copied().collect();
         let b_vals: Vec<i32> = b.iter().copied().collect();
         assert_eq!(a_vals, [5, 4]);

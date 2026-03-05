@@ -37,10 +37,6 @@ mod ord_mut;
 pub(crate) use index::IndexVisitor;
 pub(crate) use index_mut::IndexMutVisitor;
 pub(crate) use ord::OrdVisitor;
-#[expect(
-    unused_imports,
-    reason = "OrdIndexMutVisitor is unused until step 10 (rank-based access methods)"
-)]
 pub(crate) use ord_index_mut::OrdIndexMutVisitor;
 pub(crate) use ord_mut::OrdMutVisitor;
 

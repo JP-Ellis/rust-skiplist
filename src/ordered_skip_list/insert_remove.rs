@@ -8,7 +8,7 @@ use crate::{
     node::{
         Node,
         link::Link,
-        visitor::{OrdMutVisitor, Visitor},
+        visitor::{OrdIndexMutVisitor, OrdMutVisitor, Visitor},
     },
     ordered_skip_list::OrderedSkipList,
 };
@@ -38,12 +38,15 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
         clippy::missing_panics_doc,
         clippy::unwrap_in_result,
         reason = "head.next is Some because is_empty() was checked first; \
+                  decrement_distance panics only if a distance would underflow to 0, which \
+                  cannot happen because every skip link spanning front has distance >= 2; \
                   all expects fire only on internal invariant violations, not user input"
     )]
     #[expect(
         clippy::indexing_slicing,
-        reason = "l is bounded by front_height ≤ max_levels, which equals the length \
-                  of the links slice on every node, so all accesses are in bounds"
+        reason = "l is bounded by front_height ≤ max_levels and max_levels ≤ max_levels, \
+                  which equals the length of the links slice on every node, so all \
+                  accesses are in bounds"
     )]
     #[expect(
         clippy::multiple_unsafe_ops_per_block,
@@ -56,6 +59,8 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
         if self.is_empty() {
             return None;
         }
+
+        let max_levels = self.head_ref().level();
 
         // SAFETY: All raw pointers originate from heap allocations owned by this
         // OrderedSkipList.  No safe &mut references to any node exist while this
@@ -74,18 +79,21 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
 
             // Splice out front_node: move its skip links back to head.
             //
-            // Unlike SkipList::pop_front, we do NOT adjust distances for levels
-            // l >= front_height.  Distances in OrderedSkipList are all stored as
-            // 1 (intentionally wrong until OrdIndexMutVisitor in Step 11).
-            // Decrementing them would underflow NonZeroUsize.
-            //
-            // For l < front_height: head.links[l] pointed to front_node.
-            //   Replace with front_node.links[l] (the next node at that level).
-            // For l >= front_height: head.links[l] already skips over front_node
-            //   and needs no change (pointer is still correct; distance remains
-            //   its placeholder value of 1).
+            // For l < front_height: head.links[l] pointed to front_node with
+            //   distance 1 (front is always adjacent to head).  The new distance
+            //   is 1 + front.links[l].distance - 1 = front.links[l].distance.
+            //   So copying front_node.links[l] directly is correct.
+            // For l >= front_height: head.links[l] skips over front_node to a
+            //   node at rank r.  After removing front, that node is now at rank
+            //   r - 1, so the distance decreases by 1.
             for l in 0..front_height {
                 (*head_ptr).links_mut()[l] = (*front_ptr).links_mut()[l].take();
+            }
+            for l in front_height..max_levels {
+                if let Some(link) = (*head_ptr).links_mut()[l].as_mut() {
+                    link.decrement_distance()
+                        .expect("skip link spanning front node has distance >= 2");
+                }
             }
 
             let mut popped = (*front_ptr).pop();
@@ -231,15 +239,17 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
     #[expect(
         clippy::expect_used,
         clippy::missing_panics_doc,
-        reason = "Link::new with distance 1 always succeeds (distance >= 1 is satisfied); \
+        reason = "Link::new distances are computed to be >= 1; \
+                  increment_distance overflow requires > usize::MAX nodes; \
                   precursors[0] always exists because max_levels >= 1; \
                   all expects fire only on internal invariant violations, not on user input"
     )]
     #[expect(
         clippy::indexing_slicing,
         reason = "precursors[0] is valid: max_levels >= 1 so precursors.len() >= 1; \
-                  precursors[l].links_mut()[l] is valid: the visitor invariant guarantees \
-                  each precursor node has a link slot at the level it was recorded for"
+                  precursors[l].links_mut()[l] is valid: OrdIndexMutVisitor guarantees \
+                  each precursor node has a link slot at the level it was recorded for; \
+                  new_raw.links_mut()[l] is valid: l < height <= new_raw.level()"
     )]
     #[expect(
         clippy::multiple_unsafe_ops_per_block,
@@ -250,22 +260,26 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
     pub fn insert(&mut self, value: T) {
         let height = self.generator.level().saturating_add(1);
 
-        // Use OrdMutVisitor to locate the insertion point and collect precursors.
+        // Use OrdIndexMutVisitor to locate the insertion point, collect precursors,
+        // and track rank distances for accurate skip-link maintenance.
         //
         // `self.head` is a `NonNull` (a `Copy` type), so copying it does not
         // borrow `self`.  The closure borrows only `self.comparator` (shared),
         // which is a distinct field from `self.head`.  Both borrows coexist
         // safely and are released when `visitor` is dropped via `into_parts()`.
-        let precursors = {
+        let (precursors, precursor_distances) = {
             let head = self.head;
             let cmp = |v: &T, t: &T| self.comparator.compare(v, t);
-            let mut visitor = OrdMutVisitor::new(head, &value, cmp);
+            let mut visitor = OrdIndexMutVisitor::new(head, &value, cmp);
             visitor.traverse();
-            let (_current, _found, precursors) = visitor.into_parts();
-            precursors
+            let (_current, _found, precursors, precursor_distances) = visitor.into_parts();
+            (precursors, precursor_distances)
         };
         // `visitor` and `cmp` are dropped here, releasing the borrow on
         // `self.comparator`.  `value` is no longer borrowed by the visitor.
+
+        // The new node's internal rank (head = rank 0, first data node = rank 1).
+        let new_rank = precursor_distances[0].saturating_add(1);
 
         // SAFETY: All raw pointers originate from `NonNull<Node<T, N>>` values
         // captured during traversal.  They point into heap allocations exclusively
@@ -276,28 +290,44 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
             let new_raw: *mut Node<T, N> =
                 Node::insert_after(precursors[0], Node::with_value(height, value)).as_ptr();
 
-            // Wire skip links for levels 0..height.
+            // Wire skip links with accurate distances.
             //
-            // For each level l < height (the new node's tower reaches this level):
-            //   pred.links[l]     ← Link(new_node, 1)
-            //   new_node.links[l] ← Link(old_target, 1)  (or None if pred had no link)
+            // For l < height (new node's tower reaches this level):
+            //   Before: pred (rank D) --[d]--> X (rank D + d)
+            //   After:  pred (rank D) --[new_rank − D]--> new_node (rank new_rank)
+            //           new_node      --[D + d + 1 − new_rank]--> X (rank D + d + 1)
             //
-            // Levels l >= height are left unchanged: the new node has no tower
-            // slot at those levels, so the existing links already skip over it.
-            //
-            // Note: link distances are stored as 1 for all links because
-            // `OrdMutVisitor` does not track rank distances.  Accurate distance
-            // maintenance for rank queries (`get(index)`, `rank(value)`) is
-            // deferred to Phase 2 step 11, when `OrdIndexMutVisitor` is added.
-            for (l, pred_nn) in precursors.iter().enumerate().take(height) {
+            // For l >= height (new node has no tower slot here):
+            //   pred.links[l] still points to X (now at rank D + d + 1);
+            //   increment its distance by 1.
+            for (l, (pred_nn, pred_rank)) in precursors
+                .iter()
+                .copied()
+                .zip(precursor_distances.iter().copied())
+                .enumerate()
+            {
                 let pred_ptr = pred_nn.as_ptr();
-                let old_link = (*pred_ptr).links_mut()[l].take();
-                (*pred_ptr).links_mut()[l] = Some(
-                    Link::new(NonNull::new_unchecked(new_raw), 1)
-                        .expect("distance 1 is always valid"),
-                );
-                (*new_raw).links_mut()[l] = old_link
-                    .map(|old| Link::new(old.node(), 1).expect("distance 1 is always valid"));
+                if l < height {
+                    let distance = new_rank.saturating_sub(pred_rank);
+                    let old_link = (*pred_ptr).links_mut()[l].take();
+                    (*pred_ptr).links_mut()[l] = Some(
+                        Link::new(NonNull::new_unchecked(new_raw), distance)
+                            .expect("distance >= 1"),
+                    );
+                    (*new_raw).links_mut()[l] = if let Some(old) = old_link {
+                        let new_d = old
+                            .distance()
+                            .get()
+                            .saturating_sub(distance)
+                            .saturating_add(1);
+                        Some(Link::new(old.node(), new_d).expect("new_d >= 1"))
+                    } else {
+                        None
+                    };
+                } else if let Some(link) = (*pred_ptr).links_mut()[l].as_mut() {
+                    link.increment_distance()
+                        .expect("distance overflow requires > usize::MAX nodes");
+                }
             }
 
             NonNull::new_unchecked(new_raw)
@@ -339,10 +369,17 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
     /// assert!(list.contains(&2)); // second 2 is still there
     /// ```
     #[expect(
+        clippy::expect_used,
+        clippy::missing_panics_doc,
+        reason = "Link::new distance is pred_to_target + target_to_succ - 1 >= 1; \
+                  decrement_distance panics only on underflow to 0 which cannot happen \
+                  for valid skip-link distances; all expects are invariant violations"
+    )]
+    #[expect(
         clippy::indexing_slicing,
-        reason = "l is bounded by target_height ≤ max_levels = links.len(); \
-                  precursors[0] is valid because max_levels ≥ 1 (guaranteed by the \
-                  LevelGenerator invariant)"
+        reason = "l iterates 0..max_levels; precursors[l] is valid because \
+                  OrdMutVisitor fills all max_levels entries; \
+                  links_mut()[l] is valid because l < node.level() = max_levels"
     )]
     #[expect(
         clippy::multiple_unsafe_ops_per_block,
@@ -363,19 +400,46 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
             return None;
         }
 
+        let max_levels = self.head_ref().level();
+
         // SAFETY: `found` is true, so `target_ptr` is a live data node owned by
         // this list.  `precursors[l]` for l < target_height have their level-l
         // link pointing to `target_ptr` (skip-list invariant + OrdMutVisitor
-        // semantics for Equal).  No other &mut references to any node exist.
+        // semantics for Equal).  For l >= target_height, `precursors[l]` is the
+        // last node at level l whose link spans past `target_ptr`.
+        // No other &mut references to any node exist.
         let val = unsafe {
             let target_height = target_ptr.as_ref().level();
             let target_raw = target_ptr.as_ptr();
 
-            // Splice out target_ptr: for l < target_height, route the
-            // predecessor's level-l link through target's level-l successor.
-            // No distance adjustment (distances are placeholder 1).
-            for (l, pred_nn) in precursors.iter().enumerate().take(target_height) {
-                (*pred_nn.as_ptr()).links_mut()[l] = (*target_raw).links_mut()[l].take();
+            // Splice out target_ptr with accurate distance maintenance.
+            //
+            // For l < target_height: pred.links[l] → target (dist d1),
+            //   target.links[l] → succ (dist d2) or None.
+            //   New: pred.links[l] → succ (dist d1 + d2 - 1) or None.
+            // For l >= target_height: pred.links[l] spans over target to some
+            //   node at a rank 1 higher than before; decrement the distance.
+            for (l, pred_nn) in precursors.iter().enumerate().take(max_levels) {
+                let pred_ptr = pred_nn.as_ptr();
+                if l < target_height {
+                    let old_link = (*pred_ptr).links_mut()[l].take();
+                    let target_link = (*target_raw).links_mut()[l].take();
+                    (*pred_ptr).links_mut()[l] = match (old_link, target_link) {
+                        (Some(pred_to_target), Some(target_to_succ)) => {
+                            let new_dist = pred_to_target
+                                .distance()
+                                .get()
+                                .saturating_add(target_to_succ.distance().get())
+                                .saturating_sub(1);
+                            Some(Link::new(target_to_succ.node(), new_dist).expect("new_dist >= 1"))
+                        }
+                        (_, None) => None,
+                        (None, tgt) => tgt,
+                    };
+                } else if let Some(link) = (*pred_ptr).links_mut()[l].as_mut() {
+                    link.decrement_distance()
+                        .expect("skip link spanning target has distance >= 2");
+                }
             }
 
             let mut popped = (*target_raw).pop();
@@ -416,11 +480,17 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
     /// assert!(list.contains(&2)); // first 2 is still there
     /// ```
     #[expect(
+        clippy::expect_used,
+        clippy::missing_panics_doc,
+        reason = "Link::new distance is pred_to_target + target_to_succ - 1 >= 1; \
+                  decrement_distance panics only on underflow to 0 which cannot happen \
+                  for valid skip-link distances; all expects are invariant violations"
+    )]
+    #[expect(
         clippy::indexing_slicing,
-        reason = "l is bounded by target_height ≤ max_levels = links.len(); \
-                  arr[l] and precursors[0] are in-bounds for the same reason; \
-                  precursors[0] from the cmp_past traversal is always initialised \
-                  because max_levels ≥ 1"
+        reason = "l iterates 0..target_height or 0..max_levels; arr[l] and \
+                  cmp_past_precursors[l] are in-bounds for the same reason; \
+                  cmp_past_precursors[0] is always initialised because max_levels >= 1"
     )]
     #[expect(
         clippy::multiple_unsafe_ops_per_block,
@@ -432,9 +502,11 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
     pub fn remove_last(&mut self, value: &T) -> Option<T> {
         // Use a modified comparator that treats Equal as Less so that the
         // visitor advances past ALL equal nodes.  After traversal,
-        // `precursors[0]` is the last node whose value compares equal to
-        // `value` — or a node with a smaller value if none exist.
-        let target_ptr: NonNull<Node<T, N>> = {
+        // `cmp_past_precursors[0]` is the last node whose value compares equal
+        // to `value`, or a node with a smaller value if none exist.
+        // For l >= target_height, `cmp_past_precursors[l]` is the node whose
+        // skip-link at level l spans over target and must be decremented.
+        let (target_ptr, cmp_past_precursors) = {
             let head = self.head;
             let cmp_past = |v: &T, t: &T| match self.comparator.compare(v, t) {
                 Ordering::Equal | Ordering::Less => Ordering::Less,
@@ -443,7 +515,8 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
             let mut visitor = OrdMutVisitor::new(head, value, cmp_past);
             visitor.traverse();
             let (_current, _found, precursors) = visitor.into_parts();
-            precursors[0]
+            let target = precursors[0];
+            (target, precursors)
         };
 
         // Verify that target_ptr is actually equal to `value`; the head
@@ -462,10 +535,12 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
         // SAFETY: target_ptr is a live, valid data node for the lifetime of
         // &mut self.  No other &mut reference to it exists.
         let target_height = unsafe { target_ptr.as_ref() }.level();
+        let max_levels = self.head_ref().level();
 
-        // Find the level-l predecessor of target_ptr at each level using a
-        // pointer-equality forward scan identical to the one in pop_last.
-        let precursors: [NonNull<Node<T, N>>; N] = {
+        // Find the direct level-l predecessor of target_ptr for each level
+        // l < target_height via a pointer-equality forward scan.
+        // These are used for the distance-preserving splice and tail update.
+        let scan_precursors: [NonNull<Node<T, N>>; N] = {
             let mut arr = [self.head; N];
             let mut current = self.head;
 
@@ -493,8 +568,31 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
         let val = unsafe {
             let target_raw = target_ptr.as_ptr();
 
-            for (l, pred_nn) in precursors.iter().enumerate().take(target_height) {
-                (*pred_nn.as_ptr()).links_mut()[l] = (*target_raw).links_mut()[l].take();
+            // For l < target_height: distance-preserving splice via scan_precursors.
+            // For l >= target_height: decrement distance of cmp_past_precursors[l].
+            for l in 0..max_levels {
+                if l < target_height {
+                    let pred_ptr = scan_precursors[l].as_ptr();
+                    let old_link = (*pred_ptr).links_mut()[l].take();
+                    let target_link = (*target_raw).links_mut()[l].take();
+                    (*pred_ptr).links_mut()[l] = match (old_link, target_link) {
+                        (Some(pred_to_target), Some(target_to_succ)) => {
+                            let new_dist = pred_to_target
+                                .distance()
+                                .get()
+                                .saturating_add(target_to_succ.distance().get())
+                                .saturating_sub(1);
+                            Some(Link::new(target_to_succ.node(), new_dist).expect("new_dist >= 1"))
+                        }
+                        (_, None) => None,
+                        (None, tgt) => tgt,
+                    };
+                } else if let Some(link) =
+                    (*cmp_past_precursors[l].as_ptr()).links_mut()[l].as_mut()
+                {
+                    link.decrement_distance()
+                        .expect("skip link spanning target has distance >= 2");
+                }
             }
 
             let mut popped = (*target_raw).pop();
@@ -505,7 +603,7 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
             self.tail = if self.len == 1 {
                 None
             } else {
-                Some(precursors[0])
+                Some(scan_precursors[0])
             };
         }
         self.len = self.len.saturating_sub(1);
