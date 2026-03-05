@@ -8,7 +8,7 @@ use crate::{
     node::{
         Node,
         link::Link,
-        visitor::{OrdIndexMutVisitor, OrdMutVisitor, Visitor},
+        visitor::{IndexMutVisitor, OrdIndexMutVisitor, OrdMutVisitor, Visitor},
     },
     ordered_skip_list::OrderedSkipList,
 };
@@ -640,6 +640,119 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
         count
     }
 
+impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, N, C, G> {
+    /// Removes and returns the element at the given index.
+    ///
+    /// The index is 0-based: `0` refers to the first (smallest) element and
+    /// `self.len() - 1` refers to the last (largest) element.
+    ///
+    /// This operation is `$O(\log n)$` on average.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `index >= self.len()`.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use skiplist::ordered_skip_list::OrderedSkipList;
+    ///
+    /// let mut list = OrderedSkipList::<i32>::new();
+    /// list.insert(1);
+    /// list.insert(2);
+    /// list.insert(3);
+    /// assert_eq!(list.remove(1), 2);
+    /// assert_eq!(list.len(), 2);
+    /// ```
+    #[expect(
+        clippy::expect_used,
+        reason = "Link::new distance is pred_to_target + target_to_succ - 1 >= 1; \
+                  decrement_distance panics only on underflow to 0 which cannot happen \
+                  for valid skip-link distances; all expects are invariant violations"
+    )]
+    #[expect(
+        clippy::indexing_slicing,
+        reason = "l iterates 0..max_levels; precursors[l] is valid because \
+                  IndexMutVisitor fills all max_levels entries; \
+                  links_mut()[l] is valid because l < node.level() = max_levels"
+    )]
+    #[expect(
+        clippy::multiple_unsafe_ops_per_block,
+        reason = "link splicing and node pop touch provably disjoint heap nodes; \
+                  splitting across blocks would require unsafe-crossing raw-pointer variables"
+    )]
+    #[inline]
+    pub fn remove(&mut self, index: usize) -> T {
+        assert!(
+            index < self.len,
+            "index out of bounds: the len is {} but the index is {index}",
+            self.len
+        );
+
+        // IndexMutVisitor uses 1-based rank: head = rank 0, first data = rank 1.
+        // To target 0-based `index` we pass `index + 1`.
+        let (target_ptr, precursors) = {
+            let head = self.head;
+            let mut visitor = IndexMutVisitor::new(head, index.saturating_add(1));
+            visitor.traverse();
+            debug_assert!(
+                visitor.found(),
+                "index {index} was asserted < len but visitor did not find it"
+            );
+            let (current, precursors, _precursor_distances) = visitor.into_parts();
+            (current, precursors)
+        };
+
+        let max_levels = self.head_ref().level();
+
+        // SAFETY: `target_ptr` is a live data node owned by this list.
+        // `index < self.len` was asserted above so the visitor found it.
+        // `precursors[l]` for l < target_height have their level-l link
+        // pointing to `target_ptr`.  For l >= target_height, `precursors[l]`
+        // is the last node whose level-l link spans past `target_ptr`.
+        // No other &mut references to any node exist while this block runs.
+        let val = unsafe {
+            let target_height = target_ptr.as_ref().level();
+            let target_raw = target_ptr.as_ptr();
+
+            for (l, pred_nn) in precursors.iter().enumerate().take(max_levels) {
+                let pred_ptr = pred_nn.as_ptr();
+                if l < target_height {
+                    let old_link = (*pred_ptr).links_mut()[l].take();
+                    let target_link = (*target_raw).links_mut()[l].take();
+                    (*pred_ptr).links_mut()[l] = match (old_link, target_link) {
+                        (Some(pred_to_target), Some(target_to_succ)) => {
+                            let new_dist = pred_to_target
+                                .distance()
+                                .get()
+                                .saturating_add(target_to_succ.distance().get())
+                                .saturating_sub(1);
+                            Some(Link::new(target_to_succ.node(), new_dist).expect("new_dist >= 1"))
+                        }
+                        (_, None) => None,
+                        (None, tgt) => tgt,
+                    };
+                } else if let Some(link) = (*pred_ptr).links_mut()[l].as_mut() {
+                    link.decrement_distance()
+                        .expect("skip link spanning target has distance >= 2");
+                }
+            }
+
+            let mut popped = (*target_raw).pop();
+            popped.take_value()
+        };
+
+        if self.tail == Some(target_ptr) {
+            self.tail = if self.len == 1 {
+                None
+            } else {
+                Some(precursors[0])
+            };
+        }
+        self.len = self.len.saturating_sub(1);
+        val.expect("removed node has a value")
+    }
+
 #[cfg(test)]
 mod tests {
     use pretty_assertions::assert_eq;
@@ -1229,5 +1342,145 @@ mod tests {
         assert_eq!(list.remove_all(&2), 2);
         assert_eq!(list.len(), 2);
         assert!(!list.contains(&2));
+    }
+
+    // MARK: remove (by index)
+
+    #[test]
+    #[should_panic(expected = "index out of bounds")]
+    fn remove_empty_panics() {
+        let mut list = OrderedSkipList::<i32>::new();
+        list.remove(0);
+    }
+
+    #[test]
+    #[should_panic(expected = "index out of bounds")]
+    fn remove_out_of_bounds_panics() {
+        let mut list = OrderedSkipList::<i32>::new();
+        list.insert(1);
+        list.insert(2);
+        list.remove(2); // len is 2; index 2 is out of bounds
+    }
+
+    #[test]
+    fn remove_single_element() {
+        let mut list = OrderedSkipList::<i32>::new();
+        list.insert(42);
+        assert_eq!(list.remove(0), 42);
+        assert!(list.is_empty());
+        assert_eq!(list.len(), 0);
+        assert_eq!(list.first(), None);
+        assert_eq!(list.last(), None);
+    }
+
+    #[test]
+    fn remove_first_element() {
+        let mut list = OrderedSkipList::<i32>::new();
+        for i in [1, 2, 3] {
+            list.insert(i);
+        }
+        assert_eq!(list.remove(0), 1);
+        assert_eq!(list.len(), 2);
+        let got: Vec<i32> = list.iter().copied().collect();
+        assert_eq!(got, [2, 3]);
+    }
+
+    #[test]
+    fn remove_last_element() {
+        let mut list = OrderedSkipList::<i32>::new();
+        for i in [1, 2, 3] {
+            list.insert(i);
+        }
+        assert_eq!(list.remove(2), 3);
+        assert_eq!(list.len(), 2);
+        assert_eq!(list.last(), Some(&2));
+        let got: Vec<i32> = list.iter().copied().collect();
+        assert_eq!(got, [1, 2]);
+    }
+
+    #[test]
+    fn remove_middle_element() {
+        let mut list = OrderedSkipList::<i32>::new();
+        for i in [1, 2, 3, 4, 5] {
+            list.insert(i);
+        }
+        assert_eq!(list.remove(2), 3);
+        assert_eq!(list.len(), 4);
+        let got: Vec<i32> = list.iter().copied().collect();
+        assert_eq!(got, [1, 2, 4, 5]);
+    }
+
+    #[test]
+    fn remove_decrements_len() {
+        let mut list = OrderedSkipList::<i32>::new();
+        for i in 0..10 {
+            list.insert(i);
+        }
+        for expected_len in (0..10).rev() {
+            list.remove(0);
+            assert_eq!(list.len(), expected_len);
+        }
+    }
+
+    #[test]
+    fn remove_tail_pointer_correct() {
+        let mut list = OrderedSkipList::<i32>::new();
+        for i in [1, 2, 3, 4, 5] {
+            list.insert(i);
+        }
+        // Remove the tail: index 4 (value 5)
+        list.remove(4);
+        assert_eq!(list.last(), Some(&4));
+        assert_eq!(list.len(), 4);
+    }
+
+    #[test]
+    fn remove_links_consistent() {
+        let mut list = OrderedSkipList::<i32>::new();
+        for i in 0..20 {
+            list.insert(i);
+        }
+        // Remove all even-indexed elements (values 0, 2, 4, …, 18).
+        for offset in 0..10 {
+            list.remove(offset); // after each removal the indices shift
+        }
+        // Should have values 1, 3, 5, …, 19 remaining.
+        let got: Vec<i32> = list.iter().copied().collect();
+        let expected: Vec<i32> = (0..20).step_by(2).map(|x| x + 1).collect();
+        assert_eq!(got, expected);
+        // Verify rank-based access is also consistent.
+        for (i, &v) in expected.iter().enumerate() {
+            assert_eq!(list.get(i), Some(&v));
+        }
+    }
+
+    #[test]
+    fn remove_custom_comparator() {
+        // Largest-first ordering: list is [3, 2, 1].
+        let mut list: OrderedSkipList<i32, 16, _> =
+            OrderedSkipList::with_comparator(FnComparator(|a: &i32, b: &i32| b.cmp(a)));
+        list.insert(1);
+        list.insert(2);
+        list.insert(3);
+        // Index 0 is 3 (largest first), index 1 is 2, index 2 is 1.
+        assert_eq!(list.remove(1), 2);
+        assert_eq!(list.len(), 2);
+        let got: Vec<i32> = list.iter().copied().collect();
+        assert_eq!(got, [3, 1]);
+    }
+
+    #[test]
+    fn remove_with_duplicates() {
+        let g = Geometric::new(1, 0.5).expect("valid parameters");
+        let mut list = OrderedSkipList::<i32, 1>::with_level_generator(g);
+        for _ in 0..3 {
+            list.insert(1);
+            list.insert(2);
+        }
+        // List: [1, 1, 1, 2, 2, 2].  Remove index 2 (third 1).
+        assert_eq!(list.remove(2), 1);
+        assert_eq!(list.len(), 5);
+        let got: Vec<i32> = list.iter().copied().collect();
+        assert_eq!(got, [1, 1, 2, 2, 2]);
     }
 }
