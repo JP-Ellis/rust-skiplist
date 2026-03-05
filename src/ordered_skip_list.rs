@@ -34,6 +34,7 @@ mod access;
 mod filter;
 mod insert_remove;
 pub mod iter;
+mod structural;
 
 /// An ordered skip list parameterised by a comparator.
 ///

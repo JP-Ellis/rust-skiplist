@@ -119,6 +119,7 @@ impl<T: Ord> Comparator<T> for OrdComparator {
 /// assert_eq!(cmp.compare(&3, &1), Ordering::Less);
 /// assert_eq!(cmp.compare(&1, &3), Ordering::Greater);
 /// ```
+#[derive(Clone, Copy)]
 #[expect(
     clippy::exhaustive_structs,
     reason = "`FnComparator<F>(pub F)` must remain a tuple struct so callers can \
