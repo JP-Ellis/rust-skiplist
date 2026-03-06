@@ -7,10 +7,12 @@ use core::{
     cmp::Ordering,
     fmt,
     hash::{Hash, Hasher},
+    ptr::NonNull,
 };
 
 use crate::{
-    comparator::Comparator, level_generator::LevelGenerator, ordered_skip_list::OrderedSkipList,
+    comparator::Comparator, level_generator::LevelGenerator, node::Node,
+    ordered_skip_list::OrderedSkipList,
 };
 
 // MARK: Debug
@@ -46,22 +48,81 @@ impl<T: Clone, C: Comparator<T> + Clone, G: LevelGenerator + Clone, const N: usi
 {
     /// Returns a deep clone of the list.
     ///
-    /// The cloned list has the same elements in the same sorted order.  The
-    /// comparator and level generator are both cloned, so the clone shares the
-    /// same ordering and probability distribution for future insertions (but
-    /// has its own independent RNG state).
+    /// The cloned list contains the same elements in the same sorted order.
+    /// The comparator and level generator are both cloned, so the new list
+    /// behaves identically to the original.
     ///
-    /// This operation is O(n log n) — each element is inserted via
-    /// [`insert`](OrderedSkipList::insert), which is O(log n).
+    /// # Examples
+    ///
+    /// ```rust
+    /// use skiplist::ordered_skip_list::OrderedSkipList;
+    ///
+    /// let mut list = OrderedSkipList::<i32>::new();
+    /// list.insert(3);
+    /// list.insert(1);
+    /// list.insert(2);
+    ///
+    /// let cloned = list.clone();
+    /// assert_eq!(list, cloned);
+    ///
+    /// // The two lists are independent.
+    /// list.insert(4);
+    /// assert_ne!(list, cloned);
+    /// ```
+    #[expect(
+        clippy::expect_used,
+        reason = "`value()` returns None only for the head sentinel, which is never visited \
+                  in the data-node walk; the expect fires only on invariant violations"
+    )]
+    #[expect(
+        clippy::multiple_unsafe_ops_per_block,
+        reason = "insert_after and rebuild touch provably disjoint heap nodes; \
+                  splitting across blocks would require unsafe-crossing raw-pointer variables"
+    )]
     #[inline]
     fn clone(&self) -> Self {
-        let mut new_list = Self::with_comparator_and_level_generator(
-            self.comparator.clone(),
-            self.generator.clone(),
-        );
-        for item in self {
-            new_list.insert(item.clone());
+        let max_levels = self.head_ref().level();
+
+        // SAFETY: Box::into_raw transfers ownership; freed in Drop.
+        let new_head =
+            unsafe { NonNull::new_unchecked(Box::into_raw(Box::new(Node::new(max_levels)))) };
+        let mut new_list = Self {
+            head: new_head,
+            tail: None,
+            len: self.len,
+            comparator: self.comparator.clone(),
+            generator: self.generator.clone(),
+        };
+
+        if self.is_empty() {
+            return new_list;
         }
+
+        // Walk self's sequential next chain, cloning each node at the same
+        // tower height.  insert_after wires the prev/next chain; rebuild()
+        // will wire all skip links in a single subsequent pass.
+        //
+        // SAFETY: self.head is a valid, live head sentinel.  Every src_nn is a
+        // live data node owned by self.  new_head / prev_nn are exclusively
+        // owned by new_list and have no other live references.
+        let tail = unsafe {
+            let mut prev_nn = new_head;
+            let mut src_opt = self.head.as_ref().next();
+
+            while let Some(src_nn) = src_opt {
+                let src_node = src_nn.as_ref();
+                let height = src_node.level();
+                let val = src_node.value().expect("data node has a value").clone();
+                // insert_after requires the inserted node to be detached; Node::with_value
+                // creates a detached node (prev=None, next=None, all links=None).
+                prev_nn = Node::insert_after(prev_nn, Node::with_value(height, val));
+                src_opt = src_node.next();
+            }
+
+            Node::rebuild(new_head)
+        };
+        new_list.tail = tail;
+
         new_list
     }
 }
@@ -242,29 +303,68 @@ impl<'a, T: Copy + 'a, C: Comparator<T>, G: LevelGenerator, const N: usize> Exte
 
 // MARK: FromIterator / From
 
-impl<T: Ord> FromIterator<T> for OrderedSkipList<T> {
+impl<T, C: Comparator<T> + Default, G: LevelGenerator + Default, const N: usize> FromIterator<T>
+    for OrderedSkipList<T, N, C, G>
+{
     /// Creates a sorted list from an iterator.
     ///
     /// Elements are inserted in sorted order regardless of the iteration order
-    /// of the source.
+    /// of the source.  The list uses the default comparator and level generator
+    /// for the type parameters `C` and `G`.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use skiplist::ordered_skip_list::OrderedSkipList;
+    ///
+    /// // Default OrdComparator ordering.
+    /// let list: OrderedSkipList<i32> = [3, 1, 2].into_iter().collect();
+    /// assert_eq!(list.iter().copied().collect::<Vec<_>>(), [1, 2, 3]);
+    /// ```
     #[inline]
     fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
-        let mut list = Self::new();
+        let mut list = Self::with_comparator_and_level_generator(C::default(), G::default());
         list.extend(iter);
         list
     }
 }
 
-impl<T: Ord, const M: usize> From<[T; M]> for OrderedSkipList<T> {
+impl<T, C: Comparator<T> + Default, G: LevelGenerator + Default, const N: usize, const M: usize>
+    From<[T; M]> for OrderedSkipList<T, N, C, G>
+{
     /// Creates a sorted list from a fixed-size array.
+    ///
+    /// Uses the default comparator and level generator for `C` and `G`.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use skiplist::ordered_skip_list::OrderedSkipList;
+    ///
+    /// let list = OrderedSkipList::<i32>::from([30, 10, 20]);
+    /// assert_eq!(list.iter().copied().collect::<Vec<_>>(), [10, 20, 30]);
+    /// ```
     #[inline]
     fn from(arr: [T; M]) -> Self {
         arr.into_iter().collect()
     }
 }
 
-impl<T: Ord> From<Vec<T>> for OrderedSkipList<T> {
+impl<T, C: Comparator<T> + Default, G: LevelGenerator + Default, const N: usize> From<Vec<T>>
+    for OrderedSkipList<T, N, C, G>
+{
     /// Creates a sorted list from a `Vec`, consuming it.
+    ///
+    /// Uses the default comparator and level generator for `C` and `G`.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use skiplist::ordered_skip_list::OrderedSkipList;
+    ///
+    /// let list = OrderedSkipList::<i32>::from(vec![9, 7, 8]);
+    /// assert_eq!(list.iter().copied().collect::<Vec<_>>(), [7, 8, 9]);
+    /// ```
     #[inline]
     fn from(vec: Vec<T>) -> Self {
         vec.into_iter().collect()
@@ -577,5 +677,28 @@ mod tests {
     fn from_vec_empty() {
         let list = OrderedSkipList::<i32>::from(Vec::<i32>::new());
         assert!(list.is_empty());
+    }
+
+    #[test]
+    fn from_iterator_works_with_default_comparator() {
+        // The blanket FromIterator impl covers any C: Comparator<T> + Default.
+        // OrdComparator satisfies this bound; verify collect() still works.
+        let list: OrderedSkipList<i32> = [3, 1, 2].into_iter().collect();
+        assert_eq!(list.iter().copied().collect::<Vec<_>>(), [1, 2, 3]);
+    }
+
+    #[test]
+    fn from_array_blanket_via_collect() {
+        // From<[T; M]> delegates to collect(), so it also goes through the
+        // blanket FromIterator impl.
+        let list: OrderedSkipList<i32> = [5, 3, 4].into();
+        assert_eq!(list.iter().copied().collect::<Vec<_>>(), [3, 4, 5]);
+    }
+
+    #[test]
+    fn from_vec_blanket_via_collect() {
+        // Same for From<Vec<T>>.
+        let list: OrderedSkipList<i32> = vec![9, 7, 8].into();
+        assert_eq!(list.iter().copied().collect::<Vec<_>>(), [7, 8, 9]);
     }
 }
