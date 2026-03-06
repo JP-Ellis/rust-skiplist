@@ -1,4 +1,4 @@
-//! Entry API for [`SkipSet`](super::SkipSet).
+//! Entry API for [`SkipSet`].
 //!
 //! [`Entry`] is the return type of [`SkipSet::entry`] and represents either an
 //! [`OccupiedEntry`] (an element that compares equal to the probe is already

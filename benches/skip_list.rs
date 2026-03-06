@@ -122,16 +122,18 @@ fn build_linked_list(n: usize) -> LinkedList<usize> {
 ///
 /// | Container    | Per-call complexity |
 /// |:-------------|:--------------------|
-/// | `SkipList`   | O(log n)            |
-/// | `Vec`        | O(n) — full shift   |
-/// | `VecDeque`   | O(1) amortised      |
-/// | `LinkedList` | O(1)                |
+/// | `SkipList`   | `$O(\log n)$`       |
+/// | `Vec`        | `$O(n)$`            |
+/// | `VecDeque`   | `$O(1)$`            |
+/// | `LinkedList` | `$O(1)$`            |
 fn bench_push_front(c: &mut Criterion) {
     let mut group = c.benchmark_group("push_front");
     group.plot_config(PlotConfiguration::default().summary_scale(AxisScale::Logarithmic));
-    group.throughput(Throughput::Elements(1));
 
     for &n in SIZES {
+        group.throughput(Throughput::Elements(
+            u64::try_from(n).expect("bench size fits in u64"),
+        ));
         group.bench_with_input(BenchmarkId::new("SkipList", n), &n, |b, &n| {
             b.iter_batched(
                 || build_skip_list(n),
@@ -193,9 +195,11 @@ fn bench_push_front(c: &mut Criterion) {
 fn bench_push_back(c: &mut Criterion) {
     let mut group = c.benchmark_group("push_back");
     group.plot_config(PlotConfiguration::default().summary_scale(AxisScale::Logarithmic));
-    group.throughput(Throughput::Elements(1));
 
     for &n in SIZES {
+        group.throughput(Throughput::Elements(
+            u64::try_from(n).expect("bench size fits in u64"),
+        ));
         group.bench_with_input(BenchmarkId::new("SkipList", n), &n, |b, &n| {
             b.iter_batched(
                 || build_skip_list(n),
@@ -250,16 +254,18 @@ fn bench_push_back(c: &mut Criterion) {
 ///
 /// | Container    | Per-call complexity |
 /// |:-------------|:--------------------|
-/// | `SkipList`   | O(log n)            |
-/// | `Vec`        | O(n) — full shift   |
-/// | `VecDeque`   | O(1) amortised      |
-/// | `LinkedList` | O(1)                |
+/// | `SkipList`   | `$O(\log n)$`            |
+/// | `Vec`        | `$O(n)$` full shift   |
+/// | `VecDeque`   | `$O(1)$` amortised      |
+/// | `LinkedList` | `$O(1)$`                |
 fn bench_pop_front(c: &mut Criterion) {
     let mut group = c.benchmark_group("pop_front");
     group.plot_config(PlotConfiguration::default().summary_scale(AxisScale::Logarithmic));
-    group.throughput(Throughput::Elements(1));
 
     for &n in SIZES {
+        group.throughput(Throughput::Elements(
+            u64::try_from(n).expect("bench size fits in u64"),
+        ));
         group.bench_with_input(BenchmarkId::new("SkipList", n), &n, |b, &n| {
             b.iter_batched(
                 || build_skip_list(n),
@@ -314,16 +320,18 @@ fn bench_pop_front(c: &mut Criterion) {
 ///
 /// | Container    | Per-call complexity |
 /// |:-------------|:--------------------|
-/// | `SkipList`   | O(log n)            |
-/// | `Vec`        | O(1) amortised      |
-/// | `VecDeque`   | O(1) amortised      |
-/// | `LinkedList` | O(1)                |
+/// | `SkipList`   | `$O(\log n)$`            |
+/// | `Vec`        | `$O(1)$` amortised      |
+/// | `VecDeque`   | `$O(1)$` amortised      |
+/// | `LinkedList` | `$O(1)$`                |
 fn bench_pop_back(c: &mut Criterion) {
     let mut group = c.benchmark_group("pop_back");
     group.plot_config(PlotConfiguration::default().summary_scale(AxisScale::Logarithmic));
-    group.throughput(Throughput::Elements(1));
 
     for &n in SIZES {
+        group.throughput(Throughput::Elements(
+            u64::try_from(n).expect("bench size fits in u64"),
+        ));
         group.bench_with_input(BenchmarkId::new("SkipList", n), &n, |b, &n| {
             b.iter_batched(
                 || build_skip_list(n),
@@ -391,9 +399,11 @@ fn bench_pop_back(c: &mut Criterion) {
 fn bench_insert_random(c: &mut Criterion) {
     let mut group = c.benchmark_group("insert_random");
     group.plot_config(PlotConfiguration::default().summary_scale(AxisScale::Logarithmic));
-    group.throughput(Throughput::Elements(1));
 
     for &n in SIZES {
+        group.throughput(Throughput::Elements(
+            u64::try_from(n).expect("bench size fits in u64"),
+        ));
         let indices: Vec<usize> = {
             let mut rng = SmallRng::seed_from_u64(42);
             iter::repeat_with(|| rng.random_range(0..=n))
@@ -486,9 +496,11 @@ fn bench_insert_random(c: &mut Criterion) {
 fn bench_remove_random(c: &mut Criterion) {
     let mut group = c.benchmark_group("remove_random");
     group.plot_config(PlotConfiguration::default().summary_scale(AxisScale::Logarithmic));
-    group.throughput(Throughput::Elements(1));
 
     for &n in SIZES {
+        group.throughput(Throughput::Elements(
+            u64::try_from(n).expect("bench size fits in u64"),
+        ));
         let indices: Vec<usize> = {
             let mut rng = SmallRng::seed_from_u64(42);
             iter::repeat_with(|| rng.random_range(0..n))
@@ -581,9 +593,11 @@ fn bench_remove_random(c: &mut Criterion) {
 fn bench_get_random(c: &mut Criterion) {
     let mut group = c.benchmark_group("get_random");
     group.plot_config(PlotConfiguration::default().summary_scale(AxisScale::Logarithmic));
-    group.throughput(Throughput::Elements(1));
 
     for &n in SIZES {
+        group.throughput(Throughput::Elements(
+            u64::try_from(n).expect("bench size fits in u64"),
+        ));
         let indices: Vec<usize> = {
             let mut rng = SmallRng::seed_from_u64(42);
             std::iter::repeat_with(|| rng.random_range(0..n))
@@ -805,13 +819,15 @@ fn bench_retain(c: &mut Criterion) {
 /// Single `split_off(n/2)` on a pre-built container of `n` elements.
 ///
 /// Both halves are returned so their drop time is excluded.
-/// Throughput is 1 (one split per iteration).
+/// Throughput is `n` elements (container size).
 fn bench_split_off(c: &mut Criterion) {
     let mut group = c.benchmark_group("split_off");
     group.plot_config(PlotConfiguration::default().summary_scale(AxisScale::Logarithmic));
-    group.throughput(Throughput::Elements(1));
 
     for &n in SIZES {
+        group.throughput(Throughput::Elements(
+            u64::try_from(n).expect("bench size fits in u64"),
+        ));
         group.bench_with_input(BenchmarkId::new("SkipList", n), &n, |b, &n| {
             b.iter_batched(
                 || build_skip_list(n),

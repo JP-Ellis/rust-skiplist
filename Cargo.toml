@@ -31,6 +31,18 @@ categories = ["data-structures"]
 harness = false
 name = "skip_list"
 
+[[bench]]
+harness = false
+name = "ordered_skip_list"
+
+[[bench]]
+harness = false
+name = "skip_set"
+
+[[bench]]
+harness = false
+name = "skip_map"
+
 [dependencies]
 arrayvec = { version = "0.7", default-features = false }
 rand = "0.10"

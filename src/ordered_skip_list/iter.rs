@@ -1,6 +1,5 @@
-//! Iteration support for [`OrderedSkipList`](super::OrderedSkipList): `iter`,
-//! `range`, `drain`, `extract_if`, all iterator types, and
-//! [`IntoIterator`] implementations.
+//! Iteration support for [`OrderedSkipList`]: `iter`, `range`, `drain`,
+//! `extract_if`, all iterator types, and [`IntoIterator`] implementations.
 //!
 //! Note: `IterMut` is intentionally absent.  Mutating an element in place
 //! could violate the sort-order invariant, so only shared (`&T`) iteration is
@@ -345,8 +344,7 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
     /// # Panics
     ///
     /// Panics if the lower bound is greater than the upper bound according to
-    /// the list's comparator (mirrors [`BTreeMap::drain_filter`] and
-    /// [`range`](OrderedSkipList::range)).
+    /// the list's comparator (mirrors [`range`](OrderedSkipList::range)).
     ///
     /// # Examples
     ///

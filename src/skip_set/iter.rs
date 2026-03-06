@@ -1,6 +1,5 @@
-//! Iteration support for [`SkipSet`](super::SkipSet): `iter`, `into_iter`,
-//! `range`, `drain`, `extract_if`, all iterator types, and [`IntoIterator`]
-//! implementations.
+//! Iteration support for [`SkipSet`]: `iter`, `into_iter`, `range`, `drain`,
+//! `extract_if`, all iterator types, and [`IntoIterator`] implementations.
 //!
 //! Note: `IterMut` is intentionally absent.  Mutating an element in place
 //! could violate the sort-order / uniqueness invariants, so only shared
