@@ -87,6 +87,41 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> SkipSet<T, N, C, G>
         }
     }
 
+    /// Splits the set at `index`, returning a new set containing all elements
+    /// at positions `>= index` in sorted order.
+    ///
+    /// After the call, `self` retains the first `index` elements and the
+    /// returned set contains the rest.  If `index >= self.len()`, `self` is
+    /// unchanged and the returned set is empty.
+    ///
+    /// This operation is `$O(n)$` overall.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use skiplist::skip_set::SkipSet;
+    ///
+    /// let mut set = SkipSet::<i32>::new();
+    /// for v in 1..=5 { set.insert(v); }
+    ///
+    /// let right = set.split_off_index(2);
+    /// let left_vals: Vec<i32> = set.iter().copied().collect();
+    /// let right_vals: Vec<i32> = right.iter().copied().collect();
+    /// assert_eq!(left_vals, [1, 2]);
+    /// assert_eq!(right_vals, [3, 4, 5]);
+    /// ```
+    #[inline]
+    #[must_use]
+    pub fn split_off_index(&mut self, index: usize) -> Self
+    where
+        C: Clone,
+        G: Clone,
+    {
+        Self {
+            inner: self.inner.split_off_index(index.min(self.len())),
+        }
+    }
+
     /// Splits the set at `value`, returning a new set containing all elements
     /// with value `>= value`.
     ///
@@ -408,5 +443,68 @@ mod tests {
         let b_vals: Vec<i32> = b.iter().copied().collect();
         assert_eq!(a_vals, [5, 4]);
         assert_eq!(b_vals, [3, 2, 1]);
+    }
+
+    // MARK: split_off_index
+
+    #[test]
+    fn split_off_index_zero_returns_full_set() {
+        let mut set = make_set(&[1, 2, 3, 4, 5]);
+        let right = set.split_off_index(0);
+        assert!(set.is_empty());
+        assert_eq!(to_vec(&right), [1, 2, 3, 4, 5]);
+    }
+
+    #[test]
+    fn split_off_index_at_end_returns_empty() {
+        let mut set = make_set(&[1, 2, 3]);
+        let right = set.split_off_index(3);
+        assert_eq!(to_vec(&set), [1, 2, 3]);
+        assert!(right.is_empty());
+    }
+
+    #[test]
+    fn split_off_index_middle() {
+        let mut set = make_set(&[1, 2, 3, 4, 5]);
+        let right = set.split_off_index(2);
+        assert_eq!(to_vec(&set), [1, 2]);
+        assert_eq!(to_vec(&right), [3, 4, 5]);
+    }
+
+    #[test]
+    fn split_off_index_out_of_bounds_returns_empty() {
+        let mut set = make_set(&[1, 2, 3]);
+        let right = set.split_off_index(10);
+        assert_eq!(to_vec(&set), [1, 2, 3]);
+        assert!(right.is_empty());
+    }
+
+    #[test]
+    fn split_off_index_single_element() {
+        let mut set = make_set(&[42]);
+        let right = set.split_off_index(0);
+        assert!(set.is_empty());
+        assert_eq!(to_vec(&right), [42]);
+    }
+
+    #[test]
+    fn split_off_index_custom_comparator() {
+        use core::cmp::Ordering;
+        #[expect(
+            clippy::trivially_copy_pass_by_ref,
+            reason = "must match Comparator<T> signature"
+        )]
+        fn rev(x: &i32, y: &i32) -> Ordering {
+            y.cmp(x)
+        }
+        let fnptr: fn(&i32, &i32) -> Ordering = rev;
+        let mut set: SkipSet<i32, 16, _> = SkipSet::with_comparator(FnComparator(fnptr));
+        for v in [5, 4, 3, 2, 1] {
+            set.insert(v);
+        }
+        // Descending order: [5, 4, 3, 2, 1]. Split at index 2 → left=[5,4], right=[3,2,1].
+        let right = set.split_off_index(2);
+        assert_eq!(set.iter().copied().collect::<Vec<_>>(), [5, 4]);
+        assert_eq!(right.iter().copied().collect::<Vec<_>>(), [3, 2, 1]);
     }
 }
