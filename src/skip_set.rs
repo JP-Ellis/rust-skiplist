@@ -26,9 +26,12 @@ use crate::{
 };
 
 mod access;
+pub mod entry;
 mod insert_remove;
 
-/// An ordered set backed by a skip list.
+pub use entry::{Entry, OccupiedEntry, VacantEntry};
+
+/// An ordered set that stores each element at most once.
 ///
 /// `SkipSet<T, N, C, G>` keeps its elements sorted according to the total
 /// order defined by `C: Comparator<T>` and rejects duplicates (elements
