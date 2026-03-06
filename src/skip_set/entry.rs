@@ -33,7 +33,7 @@ use crate::{
 /// }
 /// match set.entry(2) {
 ///     Entry::Occupied(_) => panic!("expected vacant"),
-///     Entry::Vacant(e) => { e.insert(2); }
+///     Entry::Vacant(e) => { e.insert(); }
 /// }
 /// assert_eq!(set.len(), 2);
 /// ```
@@ -251,12 +251,7 @@ impl<'a, T, C: Comparator<T>, G: LevelGenerator, const N: usize> VacantEntry<'a,
         self.value
     }
 
-    /// Inserts `value` into the set and returns a shared reference to it.
-    ///
-    /// The caller is responsible for ensuring that `value` compares equal to
-    /// the probe key under the set's comparator; otherwise the set's ordering
-    /// invariant may be violated.  In the common case, pass the same value that
-    /// was used to call [`SkipSet::entry`].
+    /// Inserts the probe key into the set and returns a shared reference to it.
     ///
     /// This operation is `$O(\log n)$` on average.
     ///
@@ -267,13 +262,13 @@ impl<'a, T, C: Comparator<T>, G: LevelGenerator, const N: usize> VacantEntry<'a,
     ///
     /// let mut set = SkipSet::<i32>::new();
     /// if let Entry::Vacant(e) = set.entry(5) {
-    ///     assert_eq!(e.insert(5), &5);
+    ///     assert_eq!(e.insert(), &5);
     /// }
     /// assert!(set.contains(&5));
     /// ```
     #[inline]
-    pub fn insert(self, value: T) -> &'a T {
-        self.set.inner.get_or_insert(value)
+    pub fn insert(self) -> &'a T {
+        self.set.inner.get_or_insert(self.value)
     }
 }
 
@@ -628,7 +623,7 @@ mod tests {
     fn vacant_entry_insert() {
         let mut set = SkipSet::<i32>::new();
         if let Entry::Vacant(e) = set.entry(5) {
-            assert_eq!(e.insert(5), &5);
+            assert_eq!(e.insert(), &5);
         } else {
             panic!("expected vacant");
         }
@@ -640,7 +635,7 @@ mod tests {
     fn vacant_entry_insert_at_front() {
         let mut set = make_set(&[5, 10]);
         if let Entry::Vacant(e) = set.entry(1) {
-            e.insert(1);
+            e.insert();
         } else {
             panic!("expected vacant");
         }
@@ -651,7 +646,7 @@ mod tests {
     fn vacant_entry_insert_at_back() {
         let mut set = make_set(&[1, 5]);
         if let Entry::Vacant(e) = set.entry(10) {
-            e.insert(10);
+            e.insert();
         } else {
             panic!("expected vacant");
         }
@@ -665,7 +660,7 @@ mod tests {
         set.insert(3);
         set.insert(1);
         if let Entry::Vacant(e) = set.entry(2) {
-            assert_eq!(e.insert(2), &2);
+            assert_eq!(e.insert(), &2);
         } else {
             panic!("expected vacant");
         }
