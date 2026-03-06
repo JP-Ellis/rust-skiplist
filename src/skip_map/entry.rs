@@ -457,6 +457,54 @@ impl<'a, K, V, const N: usize, C: Comparator<K>, G: LevelGenerator> VacantEntry<
     #[expect(
         clippy::expect_used,
         clippy::missing_panics_doc,
+        reason = "value_mut on the freshly-created data node returned by \
+                  insert_raw always returns Some; this expect fires only on \
+                  internal invariant violations"
+    )]
+    #[inline]
+    pub fn insert(self, value: V) -> &'a mut V {
+        let (node, _, _map) = self.insert_raw(value);
+        // SAFETY: node is a valid, heap-allocated data node owned by `map`.
+        // `map` was exclusively borrowed for `'a`, so no other mutable
+        // reference to this value exists for `'a`.
+        unsafe { &mut (*node.as_ptr()).value_mut().expect("data node").1 }
+    }
+
+    /// Inserts a value and returns an [`OccupiedEntry`] for the newly
+    /// inserted entry.
+    ///
+    /// Unlike [`insert`](VacantEntry::insert), this gives you the
+    /// [`OccupiedEntry`] so you can inspect or modify the entry further
+    /// without a second map lookup.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use skiplist::skip_map::{Entry, SkipMap};
+    ///
+    /// let mut map = SkipMap::<i32, &str>::new();
+    /// if let Entry::Vacant(e) = map.entry(1) {
+    ///     let occupied = e.insert_entry("hello");
+    ///     assert_eq!(occupied.key(), &1);
+    ///     assert_eq!(occupied.get(), &"hello");
+    /// }
+    /// ```
+    #[inline]
+    pub fn insert_entry(self, value: V) -> OccupiedEntry<'a, K, V, N, C, G> {
+        let (node, precursors, map) = self.insert_raw(value);
+        OccupiedEntry {
+            node,
+            precursors,
+            map,
+        }
+    }
+
+    /// Performs the actual insertion and returns the new node pointer, the
+    /// precursor array (updated so each level now points to the inserted
+    /// node), and the map borrow.  Both `insert` and `insert_entry`
+    /// delegate here.
+    #[expect(
+        clippy::expect_used,
         reason = "Link::new distances are >= 1 by construction; increment_distance \
                   overflow requires > usize::MAX nodes; precursors[0] always exists \
                   because max_levels >= 1; value_mut on a freshly-created data node \
@@ -474,8 +522,19 @@ impl<'a, K, V, const N: usize, C: Comparator<K>, G: LevelGenerator> VacantEntry<
                   splitting across blocks would require unsafe-crossing raw-pointer \
                   variables"
     )]
-    #[inline]
-    pub fn insert(self, value: V) -> &'a mut V {
+    #[expect(
+        clippy::type_complexity,
+        reason = "return type is a private implementation detail; \
+                  a type alias here would add noise without clarity"
+    )]
+    fn insert_raw(
+        self,
+        value: V,
+    ) -> (
+        NonNull<Node<(K, V), N>>,
+        ArrayVec<NonNull<Node<(K, V), N>>, N>,
+        &'a mut SkipMap<K, V, N, C, G>,
+    ) {
         let Self {
             key,
             precursors,
@@ -536,15 +595,7 @@ impl<'a, K, V, const N: usize, C: Comparator<K>, G: LevelGenerator> VacantEntry<
         }
         map.len = map.len.saturating_add(1);
 
-        // SAFETY: new_node_nonnull is a valid, heap-allocated data node owned
-        // by `map`. `map` was exclusively borrowed for `'a`, so no other
-        // mutable reference to this value exists for `'a`.
-        unsafe {
-            &mut (*new_node_nonnull.as_ptr())
-                .value_mut()
-                .expect("data node")
-                .1
-        }
+        (new_node_nonnull, precursors, map)
     }
 }
 
@@ -1219,6 +1270,19 @@ mod tests {
         assert_eq!(map.len(), 1);
         assert_eq!(map.first_key_value(), Some((&5, &50)));
         assert_eq!(map.last_key_value(), Some((&5, &50)));
+    }
+
+    #[test]
+    fn vacant_insert_entry_returns_occupied() {
+        let mut map = SkipMap::<i32, &str>::new();
+        if let Entry::Vacant(e) = map.entry(7) {
+            let occupied = e.insert_entry("hello");
+            assert_eq!(occupied.key(), &7);
+            assert_eq!(occupied.get(), &"hello");
+        } else {
+            panic!("expected Vacant");
+        }
+        assert_eq!(map.get(&7), Some(&"hello"));
     }
 
     #[test]
