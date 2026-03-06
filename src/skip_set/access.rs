@@ -81,7 +81,7 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> SkipSet<T, N, C, G>
     #[inline]
     #[must_use]
     pub fn get(&self, value: &T) -> Option<&T> {
-        self.inner.get_by_value(value)
+        self.inner.get_fast(value)
     }
 
     /// Returns a shared reference to the element at the given 0-based `index`
@@ -105,7 +105,7 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> SkipSet<T, N, C, G>
     #[inline]
     #[must_use]
     pub fn get_by_index(&self, index: usize) -> Option<&T> {
-        self.inner.get(index)
+        self.inner.get_by_index(index)
     }
 
     /// Returns the 0-based rank (sorted position) of `value` in the set, or

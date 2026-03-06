@@ -321,7 +321,7 @@ impl<'a, T, C: Comparator<T>, G: LevelGenerator, const N: usize> OccupiedEntry<'
     pub fn get(&self) -> &T {
         self.set
             .inner
-            .get_by_value(&self.value)
+            .get_fast(&self.value)
             .expect("OccupiedEntry invariant: element is present in set")
     }
 
@@ -348,7 +348,7 @@ impl<'a, T, C: Comparator<T>, G: LevelGenerator, const N: usize> OccupiedEntry<'
     pub fn into_ref(self) -> &'a T {
         let Self { set, value } = self;
         set.inner
-            .get_by_value(&value)
+            .get_fast(&value)
             .expect("OccupiedEntry invariant: element is present in set")
     }
 
@@ -374,7 +374,7 @@ impl<'a, T, C: Comparator<T>, G: LevelGenerator, const N: usize> OccupiedEntry<'
     pub fn remove(self) -> T {
         self.set
             .inner
-            .remove_first(&self.value)
+            .take_first(&self.value)
             .expect("OccupiedEntry invariant: element is present in set")
     }
 }

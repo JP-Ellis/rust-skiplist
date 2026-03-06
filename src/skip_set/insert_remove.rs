@@ -48,7 +48,7 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> SkipSet<T, N, C, G>
     /// ```
     #[inline]
     pub fn replace(&mut self, value: T) -> Option<T> {
-        let old = self.inner.remove_first(&value);
+        let old = self.inner.take_first(&value);
         self.inner.insert(value);
         old
     }
@@ -68,7 +68,7 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> SkipSet<T, N, C, G>
     /// ```
     #[inline]
     pub fn take(&mut self, value: &T) -> Option<T> {
-        self.inner.remove_first(value)
+        self.inner.take_first(value)
     }
 
     /// Removes the element equal to `value` from the set.
@@ -88,7 +88,7 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> SkipSet<T, N, C, G>
     /// ```
     #[inline]
     pub fn remove(&mut self, value: &T) -> bool {
-        self.inner.remove_first(value).is_some()
+        self.inner.take_first(value).is_some()
     }
 
     /// Returns a shared reference to the element equal to `value`, inserting
