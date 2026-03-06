@@ -25,6 +25,8 @@ use crate::{
     ordered_skip_list::OrderedSkipList,
 };
 
+mod access;
+
 /// An ordered set backed by a skip list.
 ///
 /// `SkipSet<T, N, C, G>` keeps its elements sorted according to the total
