@@ -25,6 +25,7 @@
 //! [`Comparator<K>`]: crate::comparator::Comparator
 
 mod access;
+mod insert_remove;
 
 use core::ptr::NonNull;
 
