@@ -33,6 +33,7 @@ pub mod iter;
 mod ops;
 mod set_ops;
 mod structural;
+mod traits;
 
 pub use entry::{Entry, OccupiedEntry, VacantEntry};
 pub use iter::{Drain, ExtractIf, IntoIter, Iter};
