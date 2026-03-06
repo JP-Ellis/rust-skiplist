@@ -1,5 +1,7 @@
 //! Value-based read access for [`SkipSet`](super::SkipSet).
 
+use core::ops::Index;
+
 use crate::{comparator::Comparator, level_generator::LevelGenerator, skip_set::SkipSet};
 
 impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> SkipSet<T, N, C, G> {
@@ -80,6 +82,90 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> SkipSet<T, N, C, G>
     #[must_use]
     pub fn get(&self, value: &T) -> Option<&T> {
         self.inner.get_by_value(value)
+    }
+
+    /// Returns a shared reference to the element at the given 0-based `index`
+    /// in sorted order, or `None` if `index` is out of bounds.
+    ///
+    /// This operation is `$O(\log n)$` on average.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use skiplist::skip_set::SkipSet;
+    ///
+    /// let mut set = SkipSet::<i32>::new();
+    /// for v in [3, 1, 2] { set.insert(v); }
+    ///
+    /// assert_eq!(set.get_by_index(0), Some(&1));
+    /// assert_eq!(set.get_by_index(1), Some(&2));
+    /// assert_eq!(set.get_by_index(2), Some(&3));
+    /// assert_eq!(set.get_by_index(3), None);
+    /// ```
+    #[inline]
+    #[must_use]
+    pub fn get_by_index(&self, index: usize) -> Option<&T> {
+        self.inner.get(index)
+    }
+
+    /// Returns the 0-based rank (sorted position) of `value` in the set, or
+    /// `None` if `value` is not present.
+    ///
+    /// Because `SkipSet` forbids duplicates, the rank of a present element is
+    /// unambiguous.
+    ///
+    /// This operation is `$O(\log n)$` on average.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use skiplist::skip_set::SkipSet;
+    ///
+    /// let mut set = SkipSet::<i32>::new();
+    /// for v in [10, 20, 30] { set.insert(v); }
+    ///
+    /// assert_eq!(set.rank(&10), Some(0));
+    /// assert_eq!(set.rank(&20), Some(1));
+    /// assert_eq!(set.rank(&30), Some(2));
+    /// assert_eq!(set.rank(&99), None);
+    /// ```
+    #[inline]
+    #[must_use]
+    pub fn rank(&self, value: &T) -> Option<usize> {
+        self.inner.rank(value)
+    }
+}
+
+// MARK: Index
+
+impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> Index<usize> for SkipSet<T, N, C, G> {
+    type Output = T;
+
+    /// Returns a shared reference to the element at `index` in sorted order.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `index >= self.len()`.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use skiplist::skip_set::SkipSet;
+    ///
+    /// let mut set = SkipSet::<i32>::new();
+    /// for v in [3, 1, 2] { set.insert(v); }
+    ///
+    /// assert_eq!(set[0], 1);
+    /// assert_eq!(set[1], 2);
+    /// assert_eq!(set[2], 3);
+    /// ```
+    #[inline]
+    #[expect(
+        clippy::indexing_slicing,
+        reason = "delegates to OrderedSkipList::index which panics with a clear message on OOB"
+    )]
+    fn index(&self, index: usize) -> &T {
+        &self.inner[index]
     }
 }
 
@@ -263,5 +349,164 @@ mod tests {
         let set: SkipSet<i32, 16, _> = SkipSet { inner: list };
         assert_eq!(set.get(&2), Some(&2));
         assert_eq!(set.get(&4), None);
+    }
+
+    // MARK: get_by_index
+
+    #[test]
+    fn get_by_index_empty() {
+        let set = SkipSet::<i32>::new();
+        assert_eq!(set.get_by_index(0), None);
+    }
+
+    #[test]
+    fn get_by_index_in_bounds() {
+        let set = make_set(&[3, 1, 2]);
+        assert_eq!(set.get_by_index(0), Some(&1));
+        assert_eq!(set.get_by_index(1), Some(&2));
+        assert_eq!(set.get_by_index(2), Some(&3));
+    }
+
+    #[test]
+    fn get_by_index_out_of_bounds() {
+        let set = make_set(&[1, 2, 3]);
+        assert_eq!(set.get_by_index(3), None);
+        assert_eq!(set.get_by_index(99), None);
+    }
+
+    #[test]
+    fn get_by_index_single_element() {
+        let set = make_set(&[42]);
+        assert_eq!(set.get_by_index(0), Some(&42));
+        assert_eq!(set.get_by_index(1), None);
+    }
+
+    #[test]
+    fn get_by_index_large() {
+        let values: Vec<i32> = (0..100).collect();
+        let set = make_set(&values);
+        for i in 0..100_usize {
+            let expected = i32::try_from(i).expect("i < 100");
+            assert_eq!(set.get_by_index(i), Some(&expected));
+        }
+        assert_eq!(set.get_by_index(100), None);
+    }
+
+    #[test]
+    fn get_by_index_custom_comparator() {
+        // Reverse ordering: stored [3, 2, 1].
+        let mut list: OrderedSkipList<i32, 16, _> =
+            OrderedSkipList::with_comparator(FnComparator(|a: &i32, b: &i32| b.cmp(a)));
+        for v in [1, 2, 3] {
+            list.insert(v);
+        }
+        let set: SkipSet<i32, 16, _> = SkipSet { inner: list };
+        assert_eq!(set.get_by_index(0), Some(&3));
+        assert_eq!(set.get_by_index(1), Some(&2));
+        assert_eq!(set.get_by_index(2), Some(&1));
+        assert_eq!(set.get_by_index(3), None);
+    }
+
+    // MARK: rank
+
+    #[test]
+    fn rank_empty() {
+        let set = SkipSet::<i32>::new();
+        assert_eq!(set.rank(&1), None);
+    }
+
+    #[test]
+    fn rank_not_found() {
+        let set = make_set(&[1, 3, 5]);
+        assert_eq!(set.rank(&2), None);
+        assert_eq!(set.rank(&99), None);
+    }
+
+    #[test]
+    fn rank_single() {
+        let set = make_set(&[42]);
+        assert_eq!(set.rank(&42), Some(0));
+    }
+
+    #[test]
+    fn rank_first() {
+        let set = make_set(&[10, 20, 30]);
+        assert_eq!(set.rank(&10), Some(0));
+    }
+
+    #[test]
+    fn rank_last() {
+        let set = make_set(&[10, 20, 30]);
+        assert_eq!(set.rank(&30), Some(2));
+    }
+
+    #[test]
+    fn rank_middle() {
+        let set = make_set(&[3, 1, 4, 2]);
+        assert_eq!(set.rank(&1), Some(0));
+        assert_eq!(set.rank(&2), Some(1));
+        assert_eq!(set.rank(&3), Some(2));
+        assert_eq!(set.rank(&4), Some(3));
+    }
+
+    #[test]
+    fn rank_large() {
+        let values: Vec<i32> = (0..50).collect();
+        let set = make_set(&values);
+        for i in 0..50_i32 {
+            let expected = usize::try_from(i).expect("non-negative");
+            assert_eq!(set.rank(&i), Some(expected));
+        }
+    }
+
+    #[test]
+    fn rank_custom_comparator() {
+        // Reverse ordering: stored [3, 2, 1].
+        let mut list: OrderedSkipList<i32, 16, _> =
+            OrderedSkipList::with_comparator(FnComparator(|a: &i32, b: &i32| b.cmp(a)));
+        for v in [1, 2, 3] {
+            list.insert(v);
+        }
+        let set: SkipSet<i32, 16, _> = SkipSet { inner: list };
+        assert_eq!(set.rank(&3), Some(0));
+        assert_eq!(set.rank(&2), Some(1));
+        assert_eq!(set.rank(&1), Some(2));
+        assert_eq!(set.rank(&99), None);
+    }
+
+    // MARK: Index
+
+    #[test]
+    #[expect(
+        clippy::indexing_slicing,
+        reason = "testing valid indexing with known in-bounds indices"
+    )]
+    fn index_in_bounds() {
+        let set = make_set(&[3, 1, 2]);
+        assert_eq!(set[0], 1);
+        assert_eq!(set[1], 2);
+        assert_eq!(set[2], 3);
+    }
+
+    #[test]
+    #[expect(
+        clippy::indexing_slicing,
+        reason = "testing out-of-bounds indexing panics"
+    )]
+    #[should_panic(expected = "index out of bounds")]
+    fn index_out_of_bounds_panics() {
+        let set = make_set(&[1, 2, 3]);
+        let _: i32 = set[3];
+    }
+
+    #[test]
+    #[expect(
+        clippy::indexing_slicing,
+        reason = "testing out-of-bounds indexing panics on empty set"
+    )]
+    #[should_panic(expected = "index out of bounds")]
+    fn index_empty_panics() {
+        let set = SkipSet::<i32>::new();
+        let _: i32 = set[0];
     }
 }
