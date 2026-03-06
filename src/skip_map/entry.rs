@@ -195,6 +195,10 @@ impl<'a, K, V, const N: usize, C: Comparator<K>, G: LevelGenerator>
 
     /// Sets the value of the entry, returning the old value.
     ///
+    /// Unlike [`remove`](OccupiedEntry::remove), the entry remains usable
+    /// after this call; you can call `insert` again or access the new value
+    /// via [`get`](OccupiedEntry::get).
+    ///
     /// # Examples
     ///
     /// ```rust
@@ -202,8 +206,9 @@ impl<'a, K, V, const N: usize, C: Comparator<K>, G: LevelGenerator>
     ///
     /// let mut map = SkipMap::<i32, &str>::new();
     /// map.insert(1, "a");
-    /// if let Entry::Occupied(e) = map.entry(1) {
+    /// if let Entry::Occupied(mut e) = map.entry(1) {
     ///     assert_eq!(e.insert("b"), "a");
+    ///     assert_eq!(e.get(), &"b"); // entry still usable after insert
     /// }
     /// assert_eq!(map.get(&1), Some(&"b"));
     /// ```
@@ -214,13 +219,13 @@ impl<'a, K, V, const N: usize, C: Comparator<K>, G: LevelGenerator>
                   is never exposed as an OccupiedEntry"
     )]
     #[inline]
-    pub fn insert(self, value: V) -> V {
-        let mut node = self.node;
-        // SAFETY: self.node is a valid data node. Replacing the value in
-        // place preserves all structural invariants — the key is never
-        // touched, so the ordering invariant holds.
+    pub fn insert(&mut self, value: V) -> V {
+        // SAFETY: self.node is a valid data node. &mut self guarantees
+        // exclusive access. Replacing the value in place preserves all
+        // structural invariants: the key is never touched, so the
+        // ordering invariant holds.
         unsafe {
-            let pair = node.as_mut().value_mut().expect("data node");
+            let pair = self.node.as_mut().value_mut().expect("data node");
             mem::replace(&mut pair.1, value)
         }
     }
@@ -1082,12 +1087,27 @@ mod tests {
     fn occupied_entry_insert_returns_old_value() {
         let mut map = SkipMap::<i32, &str>::new();
         map.insert(1, "a");
-        if let Entry::Occupied(e) = map.entry(1) {
+        if let Entry::Occupied(mut e) = map.entry(1) {
             assert_eq!(e.insert("b"), "a");
         } else {
             panic!("expected Occupied");
         }
         assert_eq!(map.get(&1), Some(&"b"));
+    }
+
+    #[test]
+    fn occupied_insert_mut() {
+        let mut map = SkipMap::<i32, &str>::new();
+        map.insert(1, "a");
+        if let Entry::Occupied(mut e) = map.entry(1) {
+            assert_eq!(e.insert("b"), "a");
+            // Entry is still usable after first insert.
+            assert_eq!(e.insert("c"), "b");
+            assert_eq!(e.get(), &"c");
+        } else {
+            panic!("expected Occupied");
+        }
+        assert_eq!(map.get(&1), Some(&"c"));
     }
 
     // MARK: OccupiedEntry::remove / remove_entry
