@@ -1,9 +1,9 @@
 //! Standard trait implementations for [`SkipSet`](super::SkipSet):
-//! `Debug`, `Clone`, `PartialEq`, `Eq`, `Hash`, `Extend`, `FromIterator`.
-//!
-//! `IntoIterator` is in `iter.rs`; `Default` is in the root `skip_set.rs`.
+//! `Debug`, `Clone`, `PartialEq`, `Eq`, `PartialOrd`, `Ord`, `Hash`,
+//! `Extend`, `FromIterator`.
 
 use core::{
+    cmp::Ordering,
     fmt,
     hash::{Hash, Hasher},
 };
@@ -97,6 +97,51 @@ impl<
 }
 
 impl<T: Eq, C: Comparator<T>, G: LevelGenerator, const N: usize> Eq for SkipSet<T, N, C, G> {}
+
+// MARK: PartialOrd / Ord
+
+impl<T: PartialOrd, C: Comparator<T>, G: LevelGenerator, const N: usize> PartialOrd
+    for SkipSet<T, N, C, G>
+{
+    /// Compares two sets lexicographically by element value.
+    ///
+    /// Returns `None` if any pair of corresponding elements returns `None`
+    /// from their own `partial_cmp`.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use skiplist::skip_set::SkipSet;
+    /// use core::cmp::Ordering;
+    ///
+    /// let a: SkipSet<i32> = [1, 2].into();
+    /// let b: SkipSet<i32> = [1, 3].into();
+    /// assert_eq!(a.partial_cmp(&b), Some(Ordering::Less));
+    /// ```
+    #[inline]
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        self.iter().partial_cmp(other.iter())
+    }
+}
+
+impl<T: Ord, C: Comparator<T>, G: LevelGenerator, const N: usize> Ord for SkipSet<T, N, C, G> {
+    /// Compares two sets lexicographically by element value.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use skiplist::skip_set::SkipSet;
+    /// use core::cmp::Ordering;
+    ///
+    /// let a: SkipSet<i32> = [1, 2].into();
+    /// let b: SkipSet<i32> = [1, 3].into();
+    /// assert_eq!(a.cmp(&b), Ordering::Less);
+    /// ```
+    #[inline]
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.iter().cmp(other.iter())
+    }
+}
 
 // MARK: Hash
 
@@ -384,6 +429,67 @@ mod tests {
     fn eq_reflexive() {
         let a = make_set(&[1, 2, 3]);
         assert_eq!(a, a);
+    }
+
+    // MARK: PartialOrd / Ord
+
+    #[test]
+    fn partial_ord_equal_sets() {
+        let a = make_set(&[1, 2, 3]);
+        let b = make_set(&[1, 2, 3]);
+        assert_eq!(a.partial_cmp(&b), Some(core::cmp::Ordering::Equal));
+    }
+
+    #[test]
+    fn partial_ord_less() {
+        let a = make_set(&[1, 2]);
+        let b = make_set(&[1, 3]);
+        assert_eq!(a.partial_cmp(&b), Some(core::cmp::Ordering::Less));
+    }
+
+    #[test]
+    fn partial_ord_greater() {
+        let a = make_set(&[1, 3]);
+        let b = make_set(&[1, 2]);
+        assert_eq!(a.partial_cmp(&b), Some(core::cmp::Ordering::Greater));
+    }
+
+    #[test]
+    fn partial_ord_shorter_less() {
+        let a = make_set(&[1, 2]);
+        let b = make_set(&[1, 2, 3]);
+        assert_eq!(a.partial_cmp(&b), Some(core::cmp::Ordering::Less));
+    }
+
+    #[test]
+    fn partial_ord_empty_less_than_nonempty() {
+        let a = make_set(&[]);
+        let b = make_set(&[1]);
+        assert_eq!(a.partial_cmp(&b), Some(core::cmp::Ordering::Less));
+    }
+
+    #[test]
+    fn ord_cmp_equal() {
+        let a = make_set(&[1, 2, 3]);
+        let b = make_set(&[1, 2, 3]);
+        assert_eq!(a.cmp(&b), core::cmp::Ordering::Equal);
+    }
+
+    #[test]
+    fn ord_cmp_less() {
+        let a = make_set(&[1, 2]);
+        let b = make_set(&[1, 3]);
+        assert_eq!(a.cmp(&b), core::cmp::Ordering::Less);
+    }
+
+    #[test]
+    fn ord_sort_vec_of_sets() {
+        let mut sets = [make_set(&[3]), make_set(&[1]), make_set(&[2])];
+        sets.sort();
+        assert_eq!(
+            sets.iter().map(to_vec).collect::<Vec<_>>(),
+            [vec![1], vec![2], vec![3]]
+        );
     }
 
     // MARK: Hash

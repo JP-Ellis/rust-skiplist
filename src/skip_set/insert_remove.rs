@@ -23,11 +23,9 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> SkipSet<T, N, C, G>
     /// ```
     #[inline]
     pub fn insert(&mut self, value: T) -> bool {
-        if self.inner.contains(&value) {
-            return false;
-        }
-        self.inner.insert(value);
-        true
+        let old_len = self.inner.len();
+        self.inner.get_or_insert(value);
+        self.inner.len() > old_len
     }
 
     /// Removes the element equal to `value`, inserts `value` in its place,
