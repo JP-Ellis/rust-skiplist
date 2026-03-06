@@ -28,6 +28,7 @@ use crate::{
 mod access;
 pub mod entry;
 mod insert_remove;
+mod ops;
 mod set_ops;
 
 pub use entry::{Entry, OccupiedEntry, VacantEntry};
