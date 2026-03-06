@@ -789,6 +789,39 @@ impl<'a, K, V, const N: usize, C: Comparator<K>, G: LevelGenerator> Entry<'a, K,
             Self::Vacant(e) => e.insert(V::default()),
         }
     }
+
+    /// Inserts `value` and returns an [`OccupiedEntry`] for the entry.
+    ///
+    /// If the entry is vacant the value is inserted and the resulting
+    /// [`OccupiedEntry`] is returned.  If it is already occupied the
+    /// existing value is replaced with `value` and the entry is returned.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use skiplist::skip_map::SkipMap;
+    ///
+    /// let mut map = SkipMap::<i32, &str>::new();
+    ///
+    /// // Vacant: inserts and returns the entry.
+    /// let e = map.entry(1).insert_entry("a");
+    /// assert_eq!(e.get(), &"a");
+    ///
+    /// // Occupied: replaces the value and still returns the entry.
+    /// let e = map.entry(1).insert_entry("b");
+    /// assert_eq!(e.get(), &"b");
+    /// assert_eq!(map.get(&1), Some(&"b"));
+    /// ```
+    #[inline]
+    pub fn insert_entry(self, value: V) -> OccupiedEntry<'a, K, V, N, C, G> {
+        match self {
+            Self::Occupied(mut e) => {
+                e.insert(value);
+                e
+            }
+            Self::Vacant(e) => e.insert_entry(value),
+        }
+    }
 }
 
 // MARK: OccupiedError
@@ -1386,6 +1419,27 @@ mod tests {
     fn entry_key_vacant() {
         let mut map = SkipMap::<i32, &str>::new();
         assert_eq!(map.entry(99).key(), &99);
+    }
+
+    // MARK: Entry::insert_entry
+
+    #[test]
+    fn entry_insert_entry_vacant() {
+        let mut map = SkipMap::<i32, &str>::new();
+        let e = map.entry(1).insert_entry("a");
+        assert_eq!(e.key(), &1);
+        assert_eq!(e.get(), &"a");
+        assert_eq!(map.get(&1), Some(&"a"));
+    }
+
+    #[test]
+    fn entry_insert_entry_occupied() {
+        let mut map = SkipMap::<i32, &str>::new();
+        map.insert(1, "a");
+        let e = map.entry(1).insert_entry("b");
+        assert_eq!(e.key(), &1);
+        assert_eq!(e.get(), &"b");
+        assert_eq!(map.get(&1), Some(&"b"));
     }
 
     // MARK: try_insert
