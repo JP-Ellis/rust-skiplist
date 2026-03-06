@@ -2,9 +2,8 @@
 
 use core::ops::Index;
 
-use crate::{comparator::Comparator, level_generator::LevelGenerator};
-
 use super::SkipMap;
+use crate::{comparator::Comparator, level_generator::LevelGenerator};
 
 // MARK: Index<&K>
 

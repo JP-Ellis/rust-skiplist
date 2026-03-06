@@ -177,4 +177,20 @@ pub mod skip_set;
 #[cfg(feature = "partial-ord")]
 pub use comparator::PartialOrdComparator;
 pub use comparator::{Comparator, FnComparator, OrdComparator};
+pub use ordered_skip_list::OrderedSkipList;
+pub use skip_list::SkipList;
 pub use skip_map::SkipMap;
+pub use skip_set::SkipSet;
+
+/// Convenience re-exports for glob import.
+///
+/// ```rust
+/// use skiplist::prelude::*;
+/// ```
+pub mod prelude {
+    #[cfg(feature = "partial-ord")]
+    pub use crate::PartialOrdComparator;
+    pub use crate::{
+        Comparator, FnComparator, OrdComparator, OrderedSkipList, SkipList, SkipMap, SkipSet,
+    };
+}

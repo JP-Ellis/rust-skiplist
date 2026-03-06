@@ -33,7 +33,8 @@ use crate::{
 mod access;
 mod filter;
 mod insert_remove;
-pub mod iter;
+mod iter;
+pub use iter::{Drain, ExtractIf, IntoIter, Iter};
 mod structural;
 mod traits;
 

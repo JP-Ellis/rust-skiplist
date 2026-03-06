@@ -11,6 +11,7 @@ use core::{
     ptr::NonNull,
 };
 
+use super::SkipMap;
 use crate::{
     comparator::{Comparator, OrdComparator},
     level_generator::{LevelGenerator, geometric::Geometric},
@@ -19,8 +20,6 @@ use crate::{
         visitor::{OrdVisitor, Visitor},
     },
 };
-
-use super::SkipMap;
 
 // MARK: Private helpers
 

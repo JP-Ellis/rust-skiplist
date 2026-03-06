@@ -7,6 +7,7 @@ use core::{fmt, iter, mem, ptr::NonNull};
 
 use arrayvec::ArrayVec;
 
+use super::SkipMap;
 use crate::{
     comparator::{Comparator, OrdComparator},
     level_generator::{LevelGenerator, geometric::Geometric},
@@ -16,8 +17,6 @@ use crate::{
         visitor::{OrdIndexMutVisitor, Visitor},
     },
 };
-
-use super::SkipMap;
 
 // MARK: OccupiedEntry
 

@@ -26,10 +26,10 @@ use crate::{
 };
 
 mod access;
-pub mod entry;
+mod entry;
 mod filter;
 mod insert_remove;
-pub mod iter;
+mod iter;
 mod ops;
 mod set_ops;
 mod structural;

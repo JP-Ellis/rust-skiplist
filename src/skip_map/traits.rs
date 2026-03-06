@@ -7,9 +7,8 @@ use core::{
     ptr::NonNull,
 };
 
-use crate::{comparator::Comparator, level_generator::LevelGenerator, node::Node};
-
 use super::SkipMap;
+use crate::{comparator::Comparator, level_generator::LevelGenerator, node::Node};
 
 // MARK: Debug
 

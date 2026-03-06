@@ -15,17 +15,16 @@ use core::{
     ptr::NonNull,
 };
 
+// Re-export the read-only iterator types from `ordered_skip_list::iter`.
+// They carry no `C` or `G` type parameter and are identical for any set.
+pub use crate::ordered_skip_list::{Drain, Iter};
 use crate::{
     comparator::{Comparator, OrdComparator},
     level_generator::{LevelGenerator, geometric::Geometric},
     node::Node,
-    ordered_skip_list::iter::IntoIter as OslIntoIter,
+    ordered_skip_list::IntoIter as OslIntoIter,
     skip_set::SkipSet,
 };
-
-// Re-export the read-only iterator types from `ordered_skip_list::iter`.
-// They carry no `C` or `G` type parameter and are identical for any set.
-pub use crate::ordered_skip_list::iter::{Drain, Iter};
 
 // MARK: IntoIter
 

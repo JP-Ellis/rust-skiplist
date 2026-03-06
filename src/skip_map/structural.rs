@@ -3,6 +3,7 @@
 
 use core::{cmp::Ordering, ptr::NonNull};
 
+use super::SkipMap;
 use crate::{
     comparator::Comparator,
     level_generator::LevelGenerator,
@@ -11,8 +12,6 @@ use crate::{
         visitor::{OrdMutVisitor, Visitor},
     },
 };
-
-use super::SkipMap;
 
 impl<K, V, const N: usize, C: Comparator<K>, G: LevelGenerator> SkipMap<K, V, N, C, G> {
     /// Removes all entries from the map.

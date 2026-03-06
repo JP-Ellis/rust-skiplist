@@ -1,8 +1,7 @@
 //! Predicate-based filtering for [`SkipMap`](super::SkipMap): `retain`.
 
-use crate::{comparator::Comparator, level_generator::LevelGenerator, node::Node};
-
 use super::SkipMap;
+use crate::{comparator::Comparator, level_generator::LevelGenerator, node::Node};
 
 impl<K, V, const N: usize, C: Comparator<K>, G: LevelGenerator> SkipMap<K, V, N, C, G> {
     /// Retains only the key-value pairs for which the predicate returns `true`.

@@ -301,8 +301,10 @@ impl<T, C: Comparator<T> + Default, G: LevelGenerator + Default, const N: usize>
 
 #[cfg(test)]
 mod tests {
-    use std::collections::hash_map::DefaultHasher;
-    use std::hash::{Hash, Hasher};
+    use std::{
+        collections::hash_map::DefaultHasher,
+        hash::{Hash, Hasher},
+    };
 
     use pretty_assertions::assert_eq;
 

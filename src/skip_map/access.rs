@@ -1,12 +1,11 @@
 //! Key-based read and limited mutable access for [`SkipMap`](super::SkipMap).
 
+use super::SkipMap;
 use crate::{
     comparator::Comparator,
     level_generator::LevelGenerator,
     node::visitor::{IndexVisitor, OrdIndexVisitor, OrdMutVisitor, OrdVisitor, Visitor},
 };
-
-use super::SkipMap;
 
 impl<K, V, const N: usize, C: Comparator<K>, G: LevelGenerator> SkipMap<K, V, N, C, G> {
     /// Returns references to the first (smallest-key) key-value pair, or

@@ -17,7 +17,7 @@ use core::{cmp::Ordering, fmt, iter::FusedIterator};
 use crate::{
     comparator::{Comparator, OrdComparator},
     level_generator::LevelGenerator,
-    ordered_skip_list::iter::Iter,
+    ordered_skip_list::Iter,
     skip_set::SkipSet,
 };
 

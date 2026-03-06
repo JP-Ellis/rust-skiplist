@@ -35,12 +35,12 @@ mod ops;
 mod structural;
 mod traits;
 
+use core::ptr::NonNull;
+
 pub use entry::{Entry, OccupiedEntry, OccupiedError, VacantEntry};
 pub use iter::{
     Drain, ExtractIf, IntoIter, IntoKeys, IntoValues, Iter, IterMut, Keys, Values, ValuesMut,
 };
-
-use core::ptr::NonNull;
 
 use crate::{
     comparator::{Comparator, OrdComparator},
