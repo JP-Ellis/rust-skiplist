@@ -1,7 +1,7 @@
 //! List-restructuring methods for [`OrderedSkipList`](super::OrderedSkipList):
-//! `clear`, `append`, and `split_off`.
+//! `clear`, `append`, `split_off`, and `truncate`.
 
-use core::ptr::NonNull;
+use core::{cmp::Ordering, ptr::NonNull};
 
 use crate::{
     comparator::Comparator,
@@ -56,13 +56,14 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
 
     /// Moves all elements from `other` into `self`, leaving `other` empty.
     ///
-    /// Elements from `other` are inserted into `self` at their sorted
-    /// positions according to `self`'s comparator.  After the call `self`
-    /// contains all elements from both lists in sorted order and `other` is
-    /// empty.
+    /// Elements from `other` are merged into `self` at their sorted positions
+    /// according to `self`'s comparator.  After the call `self` contains all
+    /// elements from both lists in sorted order and `other` is empty.
     ///
-    /// This operation is O(m log(n+m)) where n = `self.len()` and
-    /// m = `other.len()`.
+    /// When every element of `other` is greater than or equal to every element
+    /// of `self` (i.e. the two sorted ranges are non-overlapping), this
+    /// operation runs in `$O(n+m)$` time.  When the ranges overlap, each element
+    /// of `other` is inserted individually in `$O(m \log(n+m))$` time.
     ///
     /// # Examples
     ///
@@ -82,10 +83,76 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
     /// let collected: Vec<i32> = a.iter().copied().collect();
     /// assert_eq!(collected, [1, 2, 3, 4]);
     /// ```
+    #[expect(
+        clippy::expect_used,
+        clippy::missing_panics_doc,
+        reason = "tail/head nodes always have a value; expects fire only on invariant violations"
+    )]
+    #[expect(
+        clippy::multiple_unsafe_ops_per_block,
+        reason = "take_next_chain, set_head_next, and filter_rebuild touch provably disjoint \
+                  heap nodes; splitting across blocks would require unsafe-crossing raw-pointer \
+                  variables"
+    )]
     #[inline]
     pub fn append(&mut self, other: &mut Self) {
-        while let Some(v) = other.pop_first() {
-            self.insert(v);
+        if other.is_empty() {
+            return;
+        }
+
+        // Fast path: when self is empty, or every element of other is ≥ every
+        // element of self (checked via self.last ≤ other.first), we can splice
+        // the raw node chains and rebuild skip links in one O(n+m) pass.
+        let can_concat = self.is_empty()
+            || self.tail.is_some_and(|tail_nn| {
+                // SAFETY: tail_nn is a live data node; other.head is a valid sentinel.
+                let self_last: &T = unsafe { tail_nn.as_ref() }
+                    .value()
+                    .expect("tail node has a value");
+                // SAFETY: `other.head` is the sentinel node allocated for
+                // `other` and is valid for the entire lifetime of `other`;
+                // `other` is a shared reference so no mutation can alias.
+                let other_first: &T = unsafe { other.head.as_ref() }
+                    .next_as_ref()
+                    .and_then(|n| n.value())
+                    .expect("other is non-empty so its first data node has a value");
+                self.comparator.compare(self_last, other_first) != Ordering::Greater
+            });
+
+        if can_concat {
+            // Detach other's entire node chain from its head sentinel.
+            //
+            // SAFETY: other.head is a valid head sentinel; we hold &mut other.
+            let first_of_other = unsafe { (*other.head.as_ptr()).take_next_chain() };
+
+            // Clear other.head's skip links: after take_next_chain they may
+            // still point to nodes now belonging to self's chain.
+            for link in other.head_mut().links_mut() {
+                *link = None;
+            }
+            other.tail = None;
+            other.len = 0;
+
+            if let Some(first_nn) = first_of_other {
+                // Attach other's chain after self's tail (or self's head when empty).
+                let attach = self.tail.unwrap_or(self.head);
+                // SAFETY: The attachment point (self.tail or self.head) has
+                // next == None.  first_nn.prev was set to None by take_next_chain.
+                unsafe { (*attach.as_ptr()).set_head_next(first_nn) };
+
+                // Rebuild all skip links in one O(n+m) pass.
+                //
+                // SAFETY: self.head is exclusively owned; all reachable nodes
+                // are live heap allocations with no other live references.
+                let (new_len, new_tail) =
+                    unsafe { Node::filter_rebuild(self.head, |_| true, |_| {}) };
+                self.tail = new_tail;
+                self.len = new_len;
+            }
+        } else {
+            while let Some(v) = other.pop_first() {
+                self.insert(v);
+            }
         }
     }
 
@@ -349,6 +416,108 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
 
             result
         }
+    }
+
+    /// Shortens the list, keeping only the first `len` elements and dropping
+    /// the rest.
+    ///
+    /// If `len >= self.len()`, this is a no-op.
+    ///
+    /// This operation is `$O(\log n + k)$` where k is the number of elements
+    /// removed.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use skiplist::ordered_skip_list::OrderedSkipList;
+    ///
+    /// let mut list = OrderedSkipList::<i32>::new();
+    /// for i in 1..=5 {
+    ///     list.insert(i);
+    /// }
+    /// list.truncate(3);
+    /// assert_eq!(list.len(), 3);
+    /// assert_eq!(list.get(0), Some(&1));
+    /// assert_eq!(list.get(1), Some(&2));
+    /// assert_eq!(list.get(2), Some(&3));
+    /// assert_eq!(list.get(3), None);
+    /// ```
+    #[expect(
+        clippy::expect_used,
+        clippy::missing_panics_doc,
+        reason = "the node at rank `len` exists because 0 < len < self.len was checked before \
+                  the traversal; the expect fires only on invariant violations"
+    )]
+    #[expect(
+        clippy::indexing_slicing,
+        reason = "l < max_levels = head.links.len(); every node in precursors[] was reached \
+                  via a level-l link so its links.len() > l; all accesses are in bounds; \
+                  l is used for both precursors[l] and links_mut()[l] so a plain index loop is \
+                  the clearest expression"
+    )]
+    #[expect(
+        clippy::multiple_unsafe_ops_per_block,
+        reason = "link clearing and truncate_next touch provably disjoint heap nodes; \
+                  splitting across blocks would require unsafe-crossing raw-pointer variables"
+    )]
+    #[inline]
+    pub fn truncate(&mut self, len: usize) {
+        if len >= self.len {
+            return;
+        }
+        if len == 0 {
+            self.clear();
+            return;
+        }
+
+        let max_levels = self.head_ref().level();
+
+        // IndexMutVisitor with target = len records, for each level l, the last
+        // node at level l with rank < len.  precursors[0].links[0] points to the
+        // new tail at rank len.  into_parts() releases the &mut borrow.
+        let (_, precursors, _) = {
+            let mut visitor = IndexMutVisitor::new(self.head, len);
+            visitor.traverse();
+            visitor.into_parts()
+        };
+
+        // SAFETY: All raw pointers come from NonNull<Node<T, N>> captured during
+        // traversal.  They originate from heap allocations owned by this
+        // OrderedSkipList.  No safe references to any node exist while this block
+        // runs.
+        let new_tail_ptr: *mut Node<T, N> = unsafe {
+            // The new tail is the level-0 successor of precursors[0].
+            // It exists because 0 < len < self.len.
+            let new_tail_ptr: *mut Node<T, N> = (*precursors[0].as_ptr()).links()[0]
+                .as_ref()
+                .expect("the node at rank `len` exists because len < self.len")
+                .node()
+                .as_ptr();
+
+            let new_tail_height = (*new_tail_ptr).level();
+
+            // Clear the new tail's own forward skip links: they point to
+            // nodes that are about to be freed.
+            for link in (*new_tail_ptr).links_mut() {
+                *link = None;
+            }
+
+            // For levels at or above the new tail's height, the predecessor at
+            // each such level may have a skip link that spans past the cut;
+            // clear it.
+            for l in new_tail_height..max_levels {
+                (*precursors[l].as_ptr()).links_mut()[l] = None;
+            }
+
+            (*new_tail_ptr).truncate_next();
+
+            new_tail_ptr
+        };
+
+        // SAFETY: new_tail_ptr is a live, heap-allocated node owned by this
+        // OrderedSkipList; it will not be freed until the list itself is dropped.
+        self.tail = Some(unsafe { NonNull::new_unchecked(new_tail_ptr) });
+        self.len = len;
     }
 }
 
@@ -914,5 +1083,184 @@ mod tests {
         let b_vals: Vec<i32> = b.iter().copied().collect();
         assert_eq!(a_vals, [5, 4]);
         assert_eq!(b_vals, [3, 2, 1]);
+    }
+
+    // MARK: truncate
+
+    #[test]
+    fn truncate_noop_when_len_equals_current() {
+        let mut list = OrderedSkipList::<i32>::new();
+        for i in 1..=3 {
+            list.insert(i);
+        }
+        list.truncate(3);
+        assert_eq!(list.len(), 3);
+        assert_eq!(list.first(), Some(&1));
+        assert_eq!(list.last(), Some(&3));
+    }
+
+    #[test]
+    fn truncate_noop_when_len_greater() {
+        let mut list = OrderedSkipList::<i32>::new();
+        list.insert(1);
+        list.insert(2);
+        list.truncate(5);
+        assert_eq!(list.len(), 2);
+    }
+
+    #[test]
+    fn truncate_to_zero_clears_list() {
+        let mut list = OrderedSkipList::<i32>::new();
+        for i in 1..=3 {
+            list.insert(i);
+        }
+        list.truncate(0);
+        assert!(list.is_empty());
+        assert_eq!(list.len(), 0);
+        assert_eq!(list.first(), None);
+        assert_eq!(list.last(), None);
+    }
+
+    #[test]
+    fn truncate_to_one() {
+        let mut list = OrderedSkipList::<i32>::new();
+        for i in 1..=3 {
+            list.insert(i);
+        }
+        list.truncate(1);
+        assert_eq!(list.len(), 1);
+        assert_eq!(list.first(), Some(&1));
+        assert_eq!(list.last(), Some(&1));
+        assert!(
+            list.head_ref()
+                .next_as_ref()
+                .and_then(|n| n.next_as_ref())
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn truncate_keeps_correct_elements() {
+        let mut list = OrderedSkipList::<i32>::new();
+        for i in 1..=5 {
+            list.insert(i);
+        }
+        list.truncate(3);
+        assert_eq!(list.len(), 3);
+        assert_eq!(list.get(0), Some(&1));
+        assert_eq!(list.get(1), Some(&2));
+        assert_eq!(list.get(2), Some(&3));
+        assert_eq!(list.get(3), None);
+    }
+
+    #[test]
+    fn truncate_tail_pointer_updated() {
+        let mut list = OrderedSkipList::<i32>::new();
+        for i in 1..=5 {
+            list.insert(i);
+        }
+        list.truncate(3);
+        assert_eq!(list.last(), Some(&3));
+    }
+
+    #[test]
+    fn truncate_first_unchanged() {
+        let mut list = OrderedSkipList::<i32>::new();
+        for i in 1..=5 {
+            list.insert(i);
+        }
+        list.truncate(3);
+        assert_eq!(list.first(), Some(&1));
+    }
+
+    #[test]
+    fn truncate_empty_list() {
+        let mut list = OrderedSkipList::<i32>::new();
+        list.truncate(0);
+        assert!(list.is_empty());
+        list.truncate(5);
+        assert!(list.is_empty());
+    }
+
+    #[test]
+    fn truncate_usable_after_truncate() {
+        let mut list = OrderedSkipList::<i32>::new();
+        for i in 1..=5 {
+            list.insert(i);
+        }
+        list.truncate(2); // [1, 2]
+        list.insert(99); // [1, 2, 99]
+        assert_eq!(list.len(), 3);
+        assert_eq!(list.get(0), Some(&1));
+        assert_eq!(list.get(1), Some(&2));
+        assert_eq!(list.get(2), Some(&99));
+        assert_eq!(list.last(), Some(&99));
+    }
+
+    #[test]
+    fn truncate_then_truncate_more() {
+        let mut list = OrderedSkipList::<i32>::new();
+        for i in 1..=10 {
+            list.insert(i);
+        }
+        list.truncate(7); // [1..=7]
+        list.truncate(4); // [1..=4]
+        assert_eq!(list.len(), 4);
+        assert_eq!(list.last(), Some(&4));
+        assert_eq!(list.get(0), Some(&1));
+        assert_eq!(list.get(1), Some(&2));
+        assert_eq!(list.get(2), Some(&3));
+        assert_eq!(list.get(3), Some(&4));
+    }
+
+    #[test]
+    fn truncate_large_list() {
+        const N: usize = 1_000;
+        const HALF: usize = 500;
+        let mut list = OrderedSkipList::<usize>::new();
+        for i in 0..N {
+            list.insert(i);
+        }
+        list.truncate(HALF);
+        assert_eq!(list.len(), HALF);
+        for i in 0..HALF {
+            assert_eq!(list.get(i), Some(&i));
+        }
+        assert_eq!(list.last(), Some(&(HALF - 1)));
+    }
+
+    #[test]
+    fn truncate_with_duplicates() {
+        let mut list = OrderedSkipList::<i32>::new();
+        for _ in 0..3 {
+            list.insert(1);
+            list.insert(2);
+        }
+        // list: [1, 1, 1, 2, 2, 2]
+        list.truncate(4); // keep [1, 1, 1, 2]
+        assert_eq!(list.len(), 4);
+        let got: Vec<i32> = list.iter().copied().collect();
+        assert_eq!(got, [1, 1, 1, 2]);
+        assert_eq!(list.last(), Some(&2));
+    }
+
+    #[test]
+    fn truncate_single_element_kept() {
+        let mut list = OrderedSkipList::<i32>::new();
+        list.insert(42);
+        list.truncate(1);
+        assert_eq!(list.len(), 1);
+        assert_eq!(list.first(), Some(&42));
+        assert_eq!(list.last(), Some(&42));
+    }
+
+    #[test]
+    fn truncate_single_element_dropped() {
+        let mut list = OrderedSkipList::<i32>::new();
+        list.insert(42);
+        list.truncate(0);
+        assert!(list.is_empty());
+        assert_eq!(list.first(), None);
+        assert_eq!(list.last(), None);
     }
 }
