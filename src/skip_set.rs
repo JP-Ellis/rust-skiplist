@@ -28,10 +28,12 @@ use crate::{
 mod access;
 pub mod entry;
 mod insert_remove;
+pub mod iter;
 mod ops;
 mod set_ops;
 
 pub use entry::{Entry, OccupiedEntry, VacantEntry};
+pub use iter::{Drain, ExtractIf, IntoIter, Iter};
 pub use set_ops::{Difference, Intersection, SymmetricDifference, Union};
 
 /// An ordered set that stores each element at most once.

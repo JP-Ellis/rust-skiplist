@@ -315,6 +315,70 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
     pub fn is_empty(&self) -> bool {
         self.len == 0
     }
+
+    // MARK: Crate-internal helpers (used by `SkipSet::ExtractIf`)
+
+    /// Returns the head sentinel pointer.
+    ///
+    /// Used by [`SkipSet::extract_if`][crate::skip_set::SkipSet::extract_if] to
+    /// position the `ExtractIf` cursor at the first data node.
+    #[inline]
+    pub(crate) fn head_ptr(&self) -> NonNull<Node<T, N>> {
+        self.head
+    }
+
+    /// Decrements the element count by 1 (saturating).
+    ///
+    /// Used by `SkipSet::ExtractIf::next` after popping a node.
+    #[inline]
+    pub(crate) fn decrement_len(&mut self) {
+        self.len = self.len.saturating_sub(1);
+    }
+
+    /// If `about_to_pop` is the current tail, updates `self.tail` to the
+    /// previous data node (or `None` when the list becomes empty).
+    ///
+    /// Must be called *before* `Node::pop(about_to_pop)`, while the node's
+    /// `prev` pointer still points to its predecessor.
+    ///
+    /// Used by `SkipSet::ExtractIf::next`.
+    ///
+    /// # Safety
+    ///
+    /// `about_to_pop` must be a valid, live pointer to a node in this list.
+    #[inline]
+    pub(crate) unsafe fn update_tail_before_pop(&mut self, about_to_pop: NonNull<Node<T, N>>) {
+        if self.tail == Some(about_to_pop) {
+            // SAFETY: about_to_pop is a live node; prev() is valid.
+            // The filter checks whether the predecessor has a value, i.e. is
+            // not the head sentinel; making it the new tail, or None if empty.
+            self.tail = unsafe { about_to_pop.as_ref() }
+                .prev()
+                // SAFETY: `p` is the `prev` pointer of `about_to_pop`, a live
+                // node in this list; its predecessor is therefore also a live
+                // node in this list, making `p` a valid, non-dangling,
+                // properly-aligned pointer for the lifetime of `&self`.
+                .filter(|&p| unsafe { p.as_ref() }.value().is_some());
+        }
+    }
+
+    /// Rebuilds all skip-link arrays after one or more `Node::pop` calls.
+    ///
+    /// Delegates to `Node::filter_rebuild` with a keep-all predicate and
+    /// updates `self.tail` to match.
+    ///
+    /// Used by `SkipSet::ExtractIf::drop`.
+    ///
+    /// # Safety
+    ///
+    /// All nodes in the `head -> ...` chain must be valid heap allocations owned
+    /// by this list.
+    #[inline]
+    pub(crate) unsafe fn rebuild_skip_links(&mut self) {
+        // SAFETY: caller guarantees all nodes are valid.
+        let (_, new_tail) = unsafe { Node::filter_rebuild(self.head, |_| true, |_| {}) };
+        self.tail = new_tail;
+    }
 }
 
 // MARK: Default
