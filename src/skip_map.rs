@@ -26,6 +26,7 @@
 
 mod access;
 mod entry;
+mod filter;
 mod insert_remove;
 mod iter;
 
