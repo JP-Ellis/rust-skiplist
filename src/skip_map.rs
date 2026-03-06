@@ -24,6 +24,8 @@
 //! [`SkipList`]: crate::skip_list::SkipList
 //! [`Comparator<K>`]: crate::comparator::Comparator
 
+mod access;
+
 use core::ptr::NonNull;
 
 use crate::{
