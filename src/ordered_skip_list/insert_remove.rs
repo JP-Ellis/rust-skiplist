@@ -1009,6 +1009,161 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
         val.expect("removed node has a value")
     }
 
+    /// Returns a shared reference to the first element that compares equal to
+    /// `value`, inserting `value` at its sorted position if no such element
+    /// exists.
+    ///
+    /// When duplicates are present the reference points to the **first**
+    /// (earliest) occurrence.
+    ///
+    /// This operation is `$O(\log n)$` on average.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use skiplist::ordered_skip_list::OrderedSkipList;
+    ///
+    /// let mut list = OrderedSkipList::<i32>::new();
+    /// list.insert(1);
+    /// list.insert(3);
+    /// assert_eq!(list.get_or_insert(2), &2); // absent → inserted
+    /// assert_eq!(list.get_or_insert(2), &2); // present → existing
+    /// assert_eq!(list.len(), 3);
+    /// ```
+    #[inline]
+    pub fn get_or_insert(&mut self, value: T) -> &T {
+        self.get_or_insert_with(value, |v| v)
+    }
+
+    /// Returns a shared reference to the first element that compares equal to
+    /// `value`, or calls `f(value)` to produce the inserted element when
+    /// `value` is absent.
+    ///
+    /// `f` is only called when no matching element is present.  The value
+    /// returned by `f` **must** compare equal to `value` under the list's
+    /// comparator; violating this contract may produce an incorrectly ordered
+    /// list.
+    ///
+    /// This operation is `$O(\log n)$` on average.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use skiplist::ordered_skip_list::OrderedSkipList;
+    ///
+    /// let mut list = OrderedSkipList::<i32>::new();
+    /// list.insert(10);
+    /// // 5 is absent; f is called and returns 5.
+    /// assert_eq!(list.get_or_insert_with(5, |v| v), &5);
+    /// // 10 is present; f is NOT called.
+    /// assert_eq!(list.get_or_insert_with(10, |_| panic!("should not call f")), &10);
+    /// assert_eq!(list.len(), 2);
+    /// ```
+    #[expect(
+        clippy::expect_used,
+        clippy::missing_panics_doc,
+        reason = "Link::new distances are computed to be >= 1; \
+                  increment_distance overflow requires > usize::MAX nodes; \
+                  precursors[0] always exists because max_levels >= 1; \
+                  current / new node are data nodes so value() is Some; \
+                  all expects fire only on internal invariant violations, not on user input"
+    )]
+    #[expect(
+        clippy::indexing_slicing,
+        reason = "precursors[0] is valid: max_levels >= 1 so precursors.len() >= 1; \
+                  precursors[l].links_mut()[l] is valid: OrdIndexMutVisitor guarantees \
+                  each precursor node has a link slot at the level it was recorded for; \
+                  new_raw.links_mut()[l] is valid: l < height <= new_raw.level()"
+    )]
+    #[expect(
+        clippy::multiple_unsafe_ops_per_block,
+        reason = "insertion and link wiring touch provably disjoint heap nodes; \
+                  splitting across blocks would require unsafe-crossing raw-pointer variables"
+    )]
+    #[inline]
+    pub fn get_or_insert_with<F>(&mut self, value: T, f: F) -> &T
+    where
+        F: FnOnce(T) -> T,
+    {
+        // Single traversal: find the first equal element or the insertion point.
+        let (current, found, precursors, precursor_distances) = {
+            let head = self.head;
+            let cmp = |v: &T, t: &T| self.comparator.compare(v, t);
+            let mut visitor = OrdIndexMutVisitor::new(head, &value, cmp);
+            visitor.traverse();
+            visitor.into_parts()
+        };
+        // `cmp` / `visitor` dropped; borrows on `self.comparator` and `value` end.
+
+        if found {
+            // `value` is not consumed; it is dropped via the early return.
+            // SAFETY: `current` is a valid data node for the lifetime of &mut self.
+            return unsafe { current.as_ref() }
+                .value()
+                .expect("data node has value");
+        }
+
+        // Generate height only when we actually need to insert so the RNG is
+        // not advanced on the "already present" fast path.
+        let height = self.generator.level().saturating_add(1);
+        let insert_value = f(value);
+        let new_rank = precursor_distances[0].saturating_add(1);
+
+        // SAFETY: All raw pointers originate from `NonNull<Node<T, N>>` values
+        // captured during traversal.  They point into heap allocations exclusively
+        // owned by this `OrderedSkipList`.  No safe `&mut` references to any node
+        // exist while this block runs.  The pointer `new_raw` is distinct from
+        // every precursor: it is freshly allocated by `Node::insert_after`.
+        let new_node: NonNull<Node<T, N>> = unsafe {
+            let new_raw: *mut Node<T, N> =
+                Node::insert_after(precursors[0], Node::with_value(height, insert_value)).as_ptr();
+
+            for (l, (pred_nn, pred_rank)) in precursors
+                .iter()
+                .copied()
+                .zip(precursor_distances.iter().copied())
+                .enumerate()
+            {
+                let pred_ptr = pred_nn.as_ptr();
+                if l < height {
+                    let distance = new_rank.saturating_sub(pred_rank);
+                    let old_link = (*pred_ptr).links_mut()[l].take();
+                    (*pred_ptr).links_mut()[l] = Some(
+                        Link::new(NonNull::new_unchecked(new_raw), distance)
+                            .expect("distance >= 1"),
+                    );
+                    (*new_raw).links_mut()[l] = if let Some(old) = old_link {
+                        let new_d = old
+                            .distance()
+                            .get()
+                            .saturating_sub(distance)
+                            .saturating_add(1);
+                        Some(Link::new(old.node(), new_d).expect("new_d >= 1"))
+                    } else {
+                        None
+                    };
+                } else if let Some(link) = (*pred_ptr).links_mut()[l].as_mut() {
+                    link.increment_distance()
+                        .expect("distance overflow requires > usize::MAX nodes");
+                }
+            }
+
+            NonNull::new_unchecked(new_raw)
+        };
+
+        let is_new_tail = self.tail.is_none_or(|tail| precursors[0] == tail);
+        if is_new_tail {
+            self.tail = Some(new_node);
+        }
+        self.len = self.len.saturating_add(1);
+
+        // SAFETY: `new_node` is a valid data node for the lifetime of &mut self.
+        unsafe { new_node.as_ref() }
+            .value()
+            .expect("new node has value")
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use pretty_assertions::assert_eq;
@@ -1859,5 +2014,108 @@ mod tests {
         assert_eq!(list.len(), 5);
         let got: Vec<i32> = list.iter().copied().collect();
         assert_eq!(got, [1, 1, 2, 2, 2]);
+    }
+
+    // MARK: get_or_insert / get_or_insert_with
+
+    #[test]
+    fn get_or_insert_empty_list() {
+        let mut list = OrderedSkipList::<i32>::new();
+        assert_eq!(list.get_or_insert(42), &42);
+        assert_eq!(list.len(), 1);
+    }
+
+    #[test]
+    fn get_or_insert_not_present() {
+        let mut list = OrderedSkipList::<i32>::new();
+        list.insert(1);
+        list.insert(3);
+        assert_eq!(list.get_or_insert(2), &2);
+        assert_eq!(list.len(), 3);
+        let got: Vec<i32> = list.iter().copied().collect();
+        assert_eq!(got, [1, 2, 3]);
+    }
+
+    #[test]
+    fn get_or_insert_already_present() {
+        let mut list = OrderedSkipList::<i32>::new();
+        list.insert(1);
+        list.insert(2);
+        list.insert(3);
+        assert_eq!(list.get_or_insert(2), &2);
+        assert_eq!(list.len(), 3); // no new element
+    }
+
+    #[test]
+    fn get_or_insert_first_element() {
+        let mut list = OrderedSkipList::<i32>::new();
+        list.insert(5);
+        list.insert(10);
+        assert_eq!(list.get_or_insert(1), &1); // insert at front
+        assert_eq!(list.len(), 3);
+        assert_eq!(list.first(), Some(&1));
+    }
+
+    #[test]
+    fn get_or_insert_last_element() {
+        let mut list = OrderedSkipList::<i32>::new();
+        list.insert(1);
+        list.insert(5);
+        assert_eq!(list.get_or_insert(10), &10); // insert at back
+        assert_eq!(list.len(), 3);
+        assert_eq!(list.last(), Some(&10));
+    }
+
+    #[test]
+    fn get_or_insert_custom_comparator() {
+        // Largest-first ordering.
+        let mut list: OrderedSkipList<i32, 16, _> =
+            OrderedSkipList::with_comparator(FnComparator(|a: &i32, b: &i32| b.cmp(a)));
+        list.insert(3);
+        list.insert(1);
+        assert_eq!(list.get_or_insert(2), &2);
+        assert_eq!(list.get_or_insert(3), &3); // already present
+        assert_eq!(list.len(), 3);
+        let got: Vec<i32> = list.iter().copied().collect();
+        assert_eq!(got, [3, 2, 1]);
+    }
+
+    #[test]
+    fn get_or_insert_with_calls_f_when_absent() {
+        let mut list = OrderedSkipList::<i32>::new();
+        list.insert(1);
+        let mut f_called = false;
+        let v = list.get_or_insert_with(2, |x| {
+            f_called = true;
+            x
+        });
+        assert_eq!(v, &2);
+        assert!(f_called);
+        assert_eq!(list.len(), 2);
+    }
+
+    #[test]
+    fn get_or_insert_with_does_not_call_f_when_present() {
+        let mut list = OrderedSkipList::<i32>::new();
+        list.insert(1);
+        list.insert(2);
+        let v = list.get_or_insert_with(2, |_| panic!("f should not be called"));
+        assert_eq!(v, &2);
+        assert_eq!(list.len(), 2);
+    }
+
+    #[test]
+    fn get_or_insert_with_custom_comparator() {
+        let mut list: OrderedSkipList<i32, 16, _> =
+            OrderedSkipList::with_comparator(FnComparator(|a: &i32, b: &i32| b.cmp(a)));
+        list.insert(3);
+        list.insert(1);
+        assert_eq!(list.get_or_insert_with(2, |v| v), &2);
+        assert_eq!(
+            list.get_or_insert_with(3, |_| panic!("should not call")),
+            &3
+        );
+        let got: Vec<i32> = list.iter().copied().collect();
+        assert_eq!(got, [3, 2, 1]);
     }
 }

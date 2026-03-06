@@ -26,6 +26,7 @@ use crate::{
 };
 
 mod access;
+mod insert_remove;
 
 /// An ordered set backed by a skip list.
 ///
