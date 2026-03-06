@@ -437,10 +437,10 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
     /// }
     /// list.truncate(3);
     /// assert_eq!(list.len(), 3);
-    /// assert_eq!(list.get(0), Some(&1));
-    /// assert_eq!(list.get(1), Some(&2));
-    /// assert_eq!(list.get(2), Some(&3));
-    /// assert_eq!(list.get(3), None);
+    /// assert_eq!(list.get_by_index(0), Some(&1));
+    /// assert_eq!(list.get_by_index(1), Some(&2));
+    /// assert_eq!(list.get_by_index(2), Some(&3));
+    /// assert_eq!(list.get_by_index(3), None);
     /// ```
     #[expect(
         clippy::expect_used,
@@ -1147,10 +1147,10 @@ mod tests {
         }
         list.truncate(3);
         assert_eq!(list.len(), 3);
-        assert_eq!(list.get(0), Some(&1));
-        assert_eq!(list.get(1), Some(&2));
-        assert_eq!(list.get(2), Some(&3));
-        assert_eq!(list.get(3), None);
+        assert_eq!(list.get_by_index(0), Some(&1));
+        assert_eq!(list.get_by_index(1), Some(&2));
+        assert_eq!(list.get_by_index(2), Some(&3));
+        assert_eq!(list.get_by_index(3), None);
     }
 
     #[test]
@@ -1191,9 +1191,9 @@ mod tests {
         list.truncate(2); // [1, 2]
         list.insert(99); // [1, 2, 99]
         assert_eq!(list.len(), 3);
-        assert_eq!(list.get(0), Some(&1));
-        assert_eq!(list.get(1), Some(&2));
-        assert_eq!(list.get(2), Some(&99));
+        assert_eq!(list.get_by_index(0), Some(&1));
+        assert_eq!(list.get_by_index(1), Some(&2));
+        assert_eq!(list.get_by_index(2), Some(&99));
         assert_eq!(list.last(), Some(&99));
     }
 
@@ -1207,10 +1207,10 @@ mod tests {
         list.truncate(4); // [1..=4]
         assert_eq!(list.len(), 4);
         assert_eq!(list.last(), Some(&4));
-        assert_eq!(list.get(0), Some(&1));
-        assert_eq!(list.get(1), Some(&2));
-        assert_eq!(list.get(2), Some(&3));
-        assert_eq!(list.get(3), Some(&4));
+        assert_eq!(list.get_by_index(0), Some(&1));
+        assert_eq!(list.get_by_index(1), Some(&2));
+        assert_eq!(list.get_by_index(2), Some(&3));
+        assert_eq!(list.get_by_index(3), Some(&4));
     }
 
     #[test]
@@ -1224,7 +1224,7 @@ mod tests {
         list.truncate(HALF);
         assert_eq!(list.len(), HALF);
         for i in 0..HALF {
-            assert_eq!(list.get(i), Some(&i));
+            assert_eq!(list.get_by_index(i), Some(&i));
         }
         assert_eq!(list.last(), Some(&(HALF - 1)));
     }

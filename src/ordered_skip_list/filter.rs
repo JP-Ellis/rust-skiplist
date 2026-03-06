@@ -460,9 +460,9 @@ mod tests {
         let via_iter: Vec<i32> = list.iter().copied().collect();
         assert_eq!(via_iter, expected);
         for (i, &v) in expected.iter().enumerate() {
-            assert_eq!(list.get(i), Some(&v));
+            assert_eq!(list.get_by_index(i), Some(&v));
         }
-        assert_eq!(list.get(expected.len()), None);
+        assert_eq!(list.get_by_index(expected.len()), None);
     }
 
     #[test]

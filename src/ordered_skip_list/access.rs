@@ -86,14 +86,14 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
     /// Returns a shared reference to an element that compares equal to
     /// `value`, or `None` if no such element is present.
     ///
-    /// When duplicates exist this may return any one of the equal occurrences.
-    /// Use [`get_first_by_value`] or [`get_last_by_value`] when the specific
-    /// occurrence matters.
+    /// This is an alias for [`get_fast`](OrderedSkipList::get_fast).
+    /// When duplicates exist this may return any one of the equal occurrences;
+    /// use [`get_first`] or [`get_last`] when the specific occurrence matters.
     ///
     /// This operation is `$O(\log n)$` on average.
     ///
-    /// [`get_first_by_value`]: OrderedSkipList::get_first_by_value
-    /// [`get_last_by_value`]: OrderedSkipList::get_last_by_value
+    /// [`get_first`]: OrderedSkipList::get_first
+    /// [`get_last`]: OrderedSkipList::get_last
     ///
     /// # Examples
     ///
@@ -105,12 +105,42 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
     /// list.insert(2);
     /// list.insert(3);
     ///
-    /// assert_eq!(list.get_by_value(&2), Some(&2));
-    /// assert_eq!(list.get_by_value(&4), None);
+    /// assert_eq!(list.get(&2), Some(&2));
+    /// assert_eq!(list.get(&4), None);
     /// ```
     #[inline]
     #[must_use]
-    pub fn get_by_value(&self, value: &T) -> Option<&T> {
+    pub fn get(&self, value: &T) -> Option<&T> {
+        self.get_fast(value)
+    }
+
+    /// Returns a shared reference to an element that compares equal to
+    /// `value`, or `None` if no such element is present.
+    ///
+    /// When duplicates exist this may return any one of the equal occurrences;
+    /// use [`get_first`] or [`get_last`] when the specific occurrence matters.
+    ///
+    /// This operation is `$O(\log n)$` on average.
+    ///
+    /// [`get_first`]: OrderedSkipList::get_first
+    /// [`get_last`]: OrderedSkipList::get_last
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use skiplist::ordered_skip_list::OrderedSkipList;
+    ///
+    /// let mut list = OrderedSkipList::<i32>::new();
+    /// list.insert(1);
+    /// list.insert(2);
+    /// list.insert(3);
+    ///
+    /// assert_eq!(list.get_fast(&2), Some(&2));
+    /// assert_eq!(list.get_fast(&4), None);
+    /// ```
+    #[inline]
+    #[must_use]
+    pub fn get_fast(&self, value: &T) -> Option<&T> {
         let head = self.head_ref();
         let cmp = |v: &T, t: &T| self.comparator.compare(v, t);
         OrdVisitor::new(head, value, cmp).traverse()?.value()
@@ -138,13 +168,13 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
     /// list.insert(2);
     /// list.insert(3);
     ///
-    /// // get_first_by_value returns rank 1 (the first 2).
-    /// assert_eq!(list.get_first_by_value(&2), Some(&2));
+    /// // get_first returns rank 1 (the first 2).
+    /// assert_eq!(list.get_first(&2), Some(&2));
     /// assert_eq!(list.rank(&2), Some(1));
     /// ```
     #[inline]
     #[must_use]
-    pub fn get_first_by_value(&self, value: &T) -> Option<&T> {
+    pub fn get_first(&self, value: &T) -> Option<&T> {
         let head = self.head_ref();
         let cmp = |v: &T, t: &T| self.comparator.compare(v, t);
         // OrdIndexVisitor advances only on strict Less, guaranteeing that
@@ -172,13 +202,13 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
     /// list.insert(2);
     /// list.insert(3);
     ///
-    /// // get_last_by_value returns rank 2 (the second 2).
-    /// assert_eq!(list.get_last_by_value(&2), Some(&2));
+    /// // get_last returns rank 2 (the second 2).
+    /// assert_eq!(list.get_last(&2), Some(&2));
     /// assert_eq!(list.rank(&2), Some(1)); // first is still at rank 1
     /// ```
     #[inline]
     #[must_use]
-    pub fn get_last_by_value(&self, value: &T) -> Option<&T> {
+    pub fn get_last(&self, value: &T) -> Option<&T> {
         let head = self.head_ref();
         // Treat Equal as Less so that traversal advances through *all* equal
         // nodes. After exhaustion, current() is the last equal node (or a
@@ -212,14 +242,14 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
     /// list.insert(1);
     /// list.insert(2);
     ///
-    /// assert_eq!(list.get(0), Some(&1));
-    /// assert_eq!(list.get(1), Some(&2));
-    /// assert_eq!(list.get(2), Some(&3));
-    /// assert_eq!(list.get(3), None);
+    /// assert_eq!(list.get_by_index(0), Some(&1));
+    /// assert_eq!(list.get_by_index(1), Some(&2));
+    /// assert_eq!(list.get_by_index(2), Some(&3));
+    /// assert_eq!(list.get_by_index(3), None);
     /// ```
     #[inline]
     #[must_use]
-    pub fn get(&self, index: usize) -> Option<&T> {
+    pub fn get_by_index(&self, index: usize) -> Option<&T> {
         if index >= self.len {
             return None;
         }
@@ -360,7 +390,7 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> Index<usize>
             "index out of bounds: the len is {} but the index is {index}",
             self.len
         );
-        self.get(index).unwrap()
+        self.get_by_index(index).unwrap()
     }
 }
 
@@ -476,99 +506,110 @@ mod tests {
         assert!(!list.contains(&4));
     }
 
-    // MARK: get_by_value
+    // MARK: get / get_fast
 
     #[test]
-    fn get_by_value_empty() {
+    fn get_fast_empty() {
         let list = OrderedSkipList::<i32>::new();
-        assert_eq!(list.get_by_value(&1), None);
+        assert_eq!(list.get_fast(&1), None);
     }
 
     #[test]
-    fn get_by_value_found() {
+    fn get_fast_found() {
         let mut list = OrderedSkipList::<i32>::new();
         list.insert(1);
         list.insert(2);
         list.insert(3);
-        assert_eq!(list.get_by_value(&2), Some(&2));
+        assert_eq!(list.get_fast(&2), Some(&2));
     }
 
     #[test]
-    fn get_by_value_not_found() {
+    fn get_fast_not_found() {
         let mut list = OrderedSkipList::<i32>::new();
         list.insert(1);
         list.insert(3);
-        assert_eq!(list.get_by_value(&2), None);
+        assert_eq!(list.get_fast(&2), None);
     }
 
     #[test]
-    fn get_by_value_first() {
-        let mut list = OrderedSkipList::<i32>::new();
-        list.insert(1);
-        list.insert(2);
-        list.insert(3);
-        assert_eq!(list.get_by_value(&1), Some(&1));
-    }
-
-    #[test]
-    fn get_by_value_last() {
+    fn get_fast_first() {
         let mut list = OrderedSkipList::<i32>::new();
         list.insert(1);
         list.insert(2);
         list.insert(3);
-        assert_eq!(list.get_by_value(&3), Some(&3));
+        assert_eq!(list.get_fast(&1), Some(&1));
     }
 
     #[test]
-    fn get_by_value_duplicate_returns_some_match() {
+    fn get_fast_last() {
+        let mut list = OrderedSkipList::<i32>::new();
+        list.insert(1);
+        list.insert(2);
+        list.insert(3);
+        assert_eq!(list.get_fast(&3), Some(&3));
+    }
+
+    #[test]
+    fn get_fast_duplicate_returns_some_match() {
         let g = Geometric::new(1, 0.5).expect("valid parameters");
         let mut list = OrderedSkipList::<i32, 1>::with_level_generator(g);
         list.insert(1);
         list.insert(2);
         list.insert(2);
         list.insert(3);
-        assert_eq!(list.get_by_value(&2), Some(&2));
+        assert_eq!(list.get_fast(&2), Some(&2));
     }
 
     #[test]
-    fn get_by_value_custom_comparator() {
+    fn get_fast_custom_comparator() {
         // Largest-first ordering.
         let mut list: OrderedSkipList<i32, 16, _> =
             OrderedSkipList::with_comparator(FnComparator(|a: &i32, b: &i32| b.cmp(a)));
         list.insert(3);
         list.insert(1);
         list.insert(2);
-        assert_eq!(list.get_by_value(&2), Some(&2));
-        assert_eq!(list.get_by_value(&4), None);
-    }
-
-    // MARK: get_first_by_value
-
-    #[test]
-    fn get_first_by_value_empty() {
-        let list = OrderedSkipList::<i32>::new();
-        assert_eq!(list.get_first_by_value(&1), None);
+        assert_eq!(list.get_fast(&2), Some(&2));
+        assert_eq!(list.get_fast(&4), None);
     }
 
     #[test]
-    fn get_first_by_value_not_found() {
-        let mut list = OrderedSkipList::<i32>::new();
-        list.insert(1);
-        list.insert(3);
-        assert_eq!(list.get_first_by_value(&2), None);
-    }
-
-    #[test]
-    fn get_first_by_value_no_duplicates() {
+    fn get_delegates_to_get_fast() {
         let mut list = OrderedSkipList::<i32>::new();
         list.insert(1);
         list.insert(2);
         list.insert(3);
-        assert_eq!(list.get_first_by_value(&2), Some(&2));
+        for v in [1, 2, 3, 4] {
+            assert_eq!(list.get(&v), list.get_fast(&v));
+        }
+    }
+
+    // MARK: get_first
+
+    #[test]
+    fn get_first_value_empty() {
+        let list = OrderedSkipList::<i32>::new();
+        assert_eq!(list.get_first(&1), None);
     }
 
     #[test]
-    fn get_first_by_value_returns_first_occurrence() {
+    fn get_first_value_not_found() {
+        let mut list = OrderedSkipList::<i32>::new();
+        list.insert(1);
+        list.insert(3);
+        assert_eq!(list.get_first(&2), None);
+    }
+
+    #[test]
+    fn get_first_value_no_duplicates() {
+        let mut list = OrderedSkipList::<i32>::new();
+        list.insert(1);
+        list.insert(2);
+        list.insert(3);
+        assert_eq!(list.get_first(&2), Some(&2));
+    }
+
+    #[test]
+    fn get_first_value_returns_first_occurrence() {
         // Use a multi-level list so skip links actually span duplicates.
         let mut list = OrderedSkipList::<i32>::new();
         for _ in 0..50 {
@@ -577,52 +618,51 @@ mod tests {
         list.insert(1);
         list.insert(3);
         // rank(&2) is 1 (the first 2 is at index 1 after the leading 1).
-        let found = list.get_first_by_value(&2);
+        let found = list.get_first(&2);
         assert_eq!(found, Some(&2));
         // Verify it is genuinely the first: rank of that pointer == rank(&2).
         let rank_first = list.rank(&2).expect("present");
-        assert_eq!(list.get(rank_first), found);
+        assert_eq!(list.get_by_index(rank_first), found);
     }
 
     #[test]
-    fn get_first_by_value_custom_comparator() {
+    fn get_first_value_custom_comparator() {
         let mut list: OrderedSkipList<i32, 16, _> =
             OrderedSkipList::with_comparator(FnComparator(|a: &i32, b: &i32| b.cmp(a)));
         list.insert(3);
         list.insert(1);
         list.insert(2);
-        assert_eq!(list.get_first_by_value(&2), Some(&2));
-        assert_eq!(list.get_first_by_value(&4), None);
+        assert_eq!(list.get_first(&2), Some(&2));
+        assert_eq!(list.get_first(&4), None);
     }
 
-    // MARK: get_last_by_value
+    // MARK: get_last
 
     #[test]
-    fn get_last_by_value_empty() {
+    fn get_last_value_empty() {
         let list = OrderedSkipList::<i32>::new();
-        assert_eq!(list.get_last_by_value(&1), None);
+        assert_eq!(list.get_last(&1), None);
     }
 
     #[test]
-    fn get_last_by_value_not_found() {
+    fn get_last_value_not_found() {
         let mut list = OrderedSkipList::<i32>::new();
         list.insert(1);
         list.insert(3);
-        assert_eq!(list.get_last_by_value(&2), None);
+        assert_eq!(list.get_last(&2), None);
     }
 
     #[test]
-    fn get_last_by_value_no_duplicates() {
+    fn get_last_value_no_duplicates() {
         let mut list = OrderedSkipList::<i32>::new();
         list.insert(1);
         list.insert(2);
         list.insert(3);
-        assert_eq!(list.get_last_by_value(&2), Some(&2));
+        assert_eq!(list.get_last(&2), Some(&2));
     }
 
     #[test]
-    fn get_last_by_value_returns_last_occurrence() {
-        // Verify that with duplicates the last occurrence is returned.
+    fn get_last_value_returns_last_occurrence() {
         let g = Geometric::new(1, 0.5).expect("valid parameters");
         let mut list = OrderedSkipList::<i32, 1>::with_level_generator(g);
         list.insert(1);
@@ -632,120 +672,120 @@ mod tests {
         list.insert(3);
         // count(&2) == 3; last occurrence is at rank count + rank_first - 1 == 3.
         let last_rank = list.rank(&2).expect("present") + list.count(&2) - 1;
-        let found = list.get_last_by_value(&2);
+        let found = list.get_last(&2);
         assert_eq!(found, Some(&2));
-        assert_eq!(list.get(last_rank), found);
+        assert_eq!(list.get_by_index(last_rank), found);
     }
 
     #[test]
-    fn get_last_by_value_all_equal() {
+    fn get_last_value_all_equal() {
         let g = Geometric::new(1, 0.5).expect("valid parameters");
         let mut list = OrderedSkipList::<i32, 1>::with_level_generator(g);
         list.insert(5);
         list.insert(5);
         list.insert(5);
-        let found = list.get_last_by_value(&5);
+        let found = list.get_last(&5);
         assert_eq!(found, Some(&5));
-        assert_eq!(list.get(list.len() - 1), found);
+        assert_eq!(list.get_by_index(list.len() - 1), found);
     }
 
     #[test]
-    fn get_last_by_value_custom_comparator() {
+    fn get_last_value_custom_comparator() {
         let mut list: OrderedSkipList<i32, 16, _> =
             OrderedSkipList::with_comparator(FnComparator(|a: &i32, b: &i32| b.cmp(a)));
         list.insert(3);
         list.insert(1);
         list.insert(2);
-        assert_eq!(list.get_last_by_value(&2), Some(&2));
-        assert_eq!(list.get_last_by_value(&4), None);
+        assert_eq!(list.get_last(&2), Some(&2));
+        assert_eq!(list.get_last(&4), None);
     }
 
-    // MARK: get
+    // MARK: get_by_index
 
     #[test]
-    fn get_empty() {
+    fn get_by_index_empty() {
         let list = OrderedSkipList::<i32>::new();
-        assert_eq!(list.get(0), None);
+        assert_eq!(list.get_by_index(0), None);
     }
 
     #[test]
-    fn get_in_bounds() {
+    fn get_by_index_in_bounds() {
         let mut list = OrderedSkipList::<i32>::new();
         for i in [3, 1, 2] {
             list.insert(i);
         }
-        assert_eq!(list.get(0), Some(&1));
-        assert_eq!(list.get(1), Some(&2));
-        assert_eq!(list.get(2), Some(&3));
+        assert_eq!(list.get_by_index(0), Some(&1));
+        assert_eq!(list.get_by_index(1), Some(&2));
+        assert_eq!(list.get_by_index(2), Some(&3));
     }
 
     #[test]
-    fn get_out_of_bounds() {
+    fn get_by_index_out_of_bounds() {
         let mut list = OrderedSkipList::<i32>::new();
         list.insert(1);
-        assert_eq!(list.get(1), None);
-        assert_eq!(list.get(99), None);
+        assert_eq!(list.get_by_index(1), None);
+        assert_eq!(list.get_by_index(99), None);
     }
 
     #[test]
-    fn get_single_element() {
+    fn get_by_index_single_element() {
         let mut list = OrderedSkipList::<i32>::new();
         list.insert(42);
-        assert_eq!(list.get(0), Some(&42));
-        assert_eq!(list.get(1), None);
+        assert_eq!(list.get_by_index(0), Some(&42));
+        assert_eq!(list.get_by_index(1), None);
     }
 
     #[test]
-    fn get_large_list() {
+    fn get_by_index_large_list() {
         let mut list = OrderedSkipList::<usize>::new();
         for i in 0..100_usize {
             list.insert(i);
         }
         for i in 0..100_usize {
-            assert_eq!(list.get(i), Some(&i));
+            assert_eq!(list.get_by_index(i), Some(&i));
         }
-        assert_eq!(list.get(100), None);
+        assert_eq!(list.get_by_index(100), None);
     }
 
     #[test]
-    fn get_with_duplicates() {
+    fn get_by_index_with_duplicates() {
         let g = Geometric::new(1, 0.5).expect("valid parameters");
         let mut list = OrderedSkipList::<i32, 1>::with_level_generator(g);
         list.insert(1);
         list.insert(2);
         list.insert(2);
         list.insert(3);
-        assert_eq!(list.get(0), Some(&1));
-        assert_eq!(list.get(1), Some(&2));
-        assert_eq!(list.get(2), Some(&2));
-        assert_eq!(list.get(3), Some(&3));
+        assert_eq!(list.get_by_index(0), Some(&1));
+        assert_eq!(list.get_by_index(1), Some(&2));
+        assert_eq!(list.get_by_index(2), Some(&2));
+        assert_eq!(list.get_by_index(3), Some(&3));
     }
 
     #[test]
-    fn get_after_removals() {
+    fn get_by_index_after_removals() {
         let mut list = OrderedSkipList::<i32>::new();
         for i in 1..=5 {
             list.insert(i);
         }
-        list.remove_first(&3);
-        assert_eq!(list.get(0), Some(&1));
-        assert_eq!(list.get(1), Some(&2));
-        assert_eq!(list.get(2), Some(&4));
-        assert_eq!(list.get(3), Some(&5));
-        assert_eq!(list.get(4), None);
+        list.take_first(&3);
+        assert_eq!(list.get_by_index(0), Some(&1));
+        assert_eq!(list.get_by_index(1), Some(&2));
+        assert_eq!(list.get_by_index(2), Some(&4));
+        assert_eq!(list.get_by_index(3), Some(&5));
+        assert_eq!(list.get_by_index(4), None);
     }
 
     #[test]
-    fn get_custom_comparator() {
+    fn get_by_index_custom_comparator() {
         let mut list: OrderedSkipList<i32, 16, _> =
             OrderedSkipList::with_comparator(FnComparator(|a: &i32, b: &i32| b.cmp(a)));
         list.insert(1);
         list.insert(2);
         list.insert(3);
         // Stored as [3, 2, 1] with reverse ordering.
-        assert_eq!(list.get(0), Some(&3));
-        assert_eq!(list.get(1), Some(&2));
-        assert_eq!(list.get(2), Some(&1));
+        assert_eq!(list.get_by_index(0), Some(&3));
+        assert_eq!(list.get_by_index(1), Some(&2));
+        assert_eq!(list.get_by_index(2), Some(&1));
     }
 
     // MARK: rank

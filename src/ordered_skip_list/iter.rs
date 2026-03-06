@@ -1608,7 +1608,7 @@ mod tests {
         let expected: Vec<i32> = (0..5).chain(15..20).collect();
         assert_eq!(got, expected);
         for (i, &v) in expected.iter().enumerate() {
-            assert_eq!(list.get(i), Some(&v));
+            assert_eq!(list.get_by_index(i), Some(&v));
         }
     }
 
