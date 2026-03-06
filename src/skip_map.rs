@@ -27,8 +27,12 @@
 mod access;
 mod entry;
 mod insert_remove;
+mod iter;
 
 pub use entry::{Entry, OccupiedEntry, OccupiedError, VacantEntry};
+pub use iter::{
+    Drain, ExtractIf, IntoIter, IntoKeys, IntoValues, Iter, IterMut, Keys, Values, ValuesMut,
+};
 
 use core::ptr::NonNull;
 
