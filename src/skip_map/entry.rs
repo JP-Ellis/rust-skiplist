@@ -943,10 +943,11 @@ impl<K, V, const N: usize, C: Comparator<K>, G: LevelGenerator> SkipMap<K, V, N,
     /// ```
     #[expect(
         clippy::indexing_slicing,
-        reason = "l is in 0..tail_height; precursors has max_levels entries all \
-                  initialised to head; max_levels >= tail_height because the head \
-                  sentinel always has the maximum level count, so precursors[l] \
-                  is always in bounds"
+        reason = "l is in 0..max_levels; precursors[l] is always in bounds (len == \
+                  max_levels); links_mut()[l] is safe because the precursor at level l \
+                  is always a node with height > l: every node advanced to via a level-l \
+                  link has height >= l+1, and head (the fallback when no advance occurs) \
+                  has height max_levels > any valid l"
     )]
     #[inline]
     pub fn last_entry(&mut self) -> Option<OccupiedEntry<'_, K, V, N, C, G>> {
@@ -956,17 +957,28 @@ impl<K, V, const N: usize, C: Comparator<K>, G: LevelGenerator> SkipMap<K, V, N,
         // SAFETY: self.head is valid for &mut self's lifetime.
         let max_levels = unsafe { self.head.as_ref() }.level();
 
-        // Initialise all precursor entries to head.  For levels l < tail_height
-        // the actual predecessor will be filled in via the traversal below.
-        // For levels l >= tail_height, no link can point to the tail (it has
-        // no tower slots there), so the decrement-distance branch in
-        // remove_entry becomes a no-op (the link from head at those levels
-        // does not span over the tail, which is the last node).
+        // Initialise all precursor entries to head; the single traversal
+        // below overwrites them all.
         let mut precursors: ArrayVec<NonNull<Node<(K, V), N>>, N> =
             iter::repeat_n(self.head, max_levels).collect();
         let mut current = self.head;
 
-        for l in (0..tail_height).rev() {
+        // Traverse all levels from the highest to the lowest, advancing
+        // `current` forward at each level until we can go no further.
+        //
+        // * For l >= tail_height: the tail has no tower slot at those levels,
+        //   so no link can point to it.  We advance to the end of the level-l
+        //   chain (link is None) and record the last node there.  Its link[l]
+        //   is None, so remove_entry's distance-decrement branch is skipped.
+        //
+        // * For l < tail_height: we stop when the level-l link points
+        //   directly to the tail.  This node is the correct level-l precursor
+        //   for the bridging step in remove_entry.
+        //
+        // Invariant: at the start of each outer-loop iteration, current.level()
+        // > l, so links.get(l) is always in bounds and links_mut()[l] in
+        // remove_entry is always safe.
+        for l in (0..max_levels).rev() {
             loop {
                 // SAFETY: current is a valid node in this list, live for
                 // the duration of &mut self.  No exclusive reference exists.
@@ -976,7 +988,7 @@ impl<K, V, const N: usize, C: Comparator<K>, G: LevelGenerator> SkipMap<K, V, N,
                     .and_then(|lk| lk.as_ref());
                 match maybe_link {
                     None => break,
-                    Some(link) if link.node() == tail_ptr => break,
+                    Some(link) if l < tail_height && link.node() == tail_ptr => break,
                     Some(link) => current = link.node(),
                 }
             }
