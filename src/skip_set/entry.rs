@@ -453,7 +453,7 @@ impl<T: fmt::Debug, C: Comparator<T>, G: LevelGenerator, const N: usize> fmt::De
 mod tests {
     use pretty_assertions::assert_eq;
 
-    use super::{Entry, OccupiedEntry, VacantEntry};
+    use super::Entry;
     use crate::{comparator::FnComparator, skip_set::SkipSet};
 
     fn make_set(values: &[i32]) -> SkipSet<i32> {

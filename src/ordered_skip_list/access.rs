@@ -10,6 +10,23 @@ use crate::{
 };
 
 impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, N, C, G> {
+    /// Returns a shared reference to the comparator used by this list.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use skiplist::ordered_skip_list::OrderedSkipList;
+    /// use skiplist::comparator::OrdComparator;
+    ///
+    /// let list = OrderedSkipList::<i32>::new();
+    /// let _cmp: &OrdComparator = list.comparator();
+    /// ```
+    #[inline]
+    #[must_use]
+    pub fn comparator(&self) -> &C {
+        &self.comparator
+    }
+
     /// Returns a shared reference to the first (smallest) element, or `None`
     /// if the list is empty.
     ///
