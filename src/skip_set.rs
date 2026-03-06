@@ -32,6 +32,7 @@ mod insert_remove;
 pub mod iter;
 mod ops;
 mod set_ops;
+mod structural;
 
 pub use entry::{Entry, OccupiedEntry, VacantEntry};
 pub use iter::{Drain, ExtractIf, IntoIter, Iter};
