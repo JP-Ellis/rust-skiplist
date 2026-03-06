@@ -25,7 +25,10 @@
 //! [`Comparator<K>`]: crate::comparator::Comparator
 
 mod access;
+mod entry;
 mod insert_remove;
+
+pub use entry::{Entry, OccupiedEntry, OccupiedError, VacantEntry};
 
 use core::ptr::NonNull;
 
