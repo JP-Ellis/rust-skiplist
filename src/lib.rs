@@ -54,8 +54,10 @@ pub mod level_generator;
 mod node;
 pub mod ordered_skip_list;
 pub mod skip_list;
+pub mod skip_map;
 pub mod skip_set;
 
 #[cfg(feature = "partial-ord")]
 pub use comparator::PartialOrdComparator;
 pub use comparator::{Comparator, FnComparator, OrdComparator};
+pub use skip_map::SkipMap;
