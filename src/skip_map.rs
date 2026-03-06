@@ -29,6 +29,7 @@ mod entry;
 mod filter;
 mod insert_remove;
 mod iter;
+mod ops;
 mod structural;
 
 pub use entry::{Entry, OccupiedEntry, OccupiedError, VacantEntry};
