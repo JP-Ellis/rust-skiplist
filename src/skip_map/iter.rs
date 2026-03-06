@@ -573,7 +573,7 @@ impl<K, V, const N: usize, C: Comparator<K>, G: LevelGenerator> SkipMap<K, V, N,
     ///     map.insert(k, v);
     /// }
     ///
-    /// let extracted: Vec<_> = map.extract_if(|_k, v| *v % 20 == 0).collect();
+    /// let extracted: Vec<_> = map.extract_if(|_k, v| matches!(*v, 20 | 40)).collect();
     /// assert_eq!(extracted, [(2, 20), (4, 40)]);
     ///
     /// let remaining: Vec<_> = map.iter().map(|(k, v)| (*k, *v)).collect();
@@ -1454,6 +1454,8 @@ impl<K, V> DoubleEndedIterator for Drain<'_, K, V> {
     }
 }
 
+impl<K, V> ExactSizeIterator for Drain<'_, K, V> {}
+
 impl<K, V> FusedIterator for Drain<'_, K, V> {}
 
 // MARK: ExtractIf
@@ -1776,7 +1778,7 @@ mod tests {
     #[test]
     fn iter_mut_mutate_values() {
         let mut map = imap_from([(1, 10), (2, 20), (3, 30)]);
-        for (_k, v) in map.iter_mut() {
+        for (_k, v) in &mut map {
             *v *= 2;
         }
         let pairs: Vec<_> = map.iter().map(|(&k, &v)| (k, v)).collect();
@@ -1969,14 +1971,16 @@ mod tests {
     #[should_panic(expected = "range start is after range end")]
     fn range_panics_lo_gt_hi() {
         let map = imap_from([(1, 10), (2, 20), (3, 30)]);
-        let _ = map.range(3..1);
+        let lo = 3_i32;
+        let hi = 1_i32;
+        drop(map.range(lo..hi));
     }
 
     #[test]
     #[should_panic(expected = "range start is after range end")]
     fn range_panics_excluded_equal() {
         let map = imap_from([(1, 10)]);
-        let _ = map.range((Bound::Excluded(1), Bound::Included(1)));
+        drop(map.range((Bound::Excluded(1), Bound::Included(1))));
     }
 
     // MARK: range_mut
@@ -2009,7 +2013,9 @@ mod tests {
     #[should_panic(expected = "range start is after range end")]
     fn range_mut_panics_lo_gt_hi() {
         let mut map = imap_from([(1, 10), (3, 30)]);
-        let _ = map.range_mut(3..1);
+        let lo = 3_i32;
+        let hi = 1_i32;
+        drop(map.range_mut(lo..hi));
     }
 
     // MARK: into_iter
@@ -2154,7 +2160,7 @@ mod tests {
     #[test]
     fn extract_if_by_value() {
         let mut map = imap_from([(1, 10), (2, 20), (3, 30), (4, 40), (5, 50)]);
-        let extracted: Vec<_> = map.extract_if(|_k, v| *v % 20 == 0).collect();
+        let extracted: Vec<_> = map.extract_if(|_k, v| matches!(*v, 20 | 40)).collect();
         assert_eq!(extracted, [(2, 20), (4, 40)]);
         let remaining: Vec<_> = map.iter().map(|(&k, &v)| (k, v)).collect();
         assert_eq!(remaining, [(1, 10), (3, 30), (5, 50)]);
@@ -2163,7 +2169,7 @@ mod tests {
     #[test]
     fn extract_if_by_key() {
         let mut map = imap_from([(1, 10), (2, 20), (3, 30), (4, 40)]);
-        let extracted: Vec<_> = map.extract_if(|k, _v| k % 2 == 0).collect();
+        let extracted: Vec<_> = map.extract_if(|k, _v| k & 1 == 0).collect();
         assert_eq!(extracted, [(2, 20), (4, 40)]);
         let remaining: Vec<_> = map.iter().map(|(&k, &v)| (k, v)).collect();
         assert_eq!(remaining, [(1, 10), (3, 30)]);
@@ -2208,7 +2214,7 @@ mod tests {
         map.insert(2, 20);
         map.insert(3, 30);
         // Stored as [3, 2, 1] (reverse order)
-        let extracted: Vec<_> = map.extract_if(|k, _v| k % 2 != 0).collect();
+        let extracted: Vec<_> = map.extract_if(|k, _v| k & 1 != 0).collect();
         // Odd keys in traversal order (3 then 1)
         assert_eq!(extracted, [(3, 30), (1, 10)]);
         let remaining: Vec<_> = map.iter().map(|(&k, &v)| (k, v)).collect();

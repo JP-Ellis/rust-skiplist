@@ -172,6 +172,7 @@ impl<'a, K, V, const N: usize, C: Comparator<K>, G: LevelGenerator>
     /// let v = match map.entry(1) {
     ///     Entry::Occupied(e) => e.into_mut(),
     ///     Entry::Vacant(e) => e.insert(0),
+    ///     _ => unreachable!(),
     /// };
     /// *v += 5;
     /// assert_eq!(map.get(&1), Some(&15));

@@ -2,8 +2,9 @@
 //!
 //! This module provides [`SkipMap`], a skip list that maps keys to values,
 //! maintaining key-value pairs in sorted key order according to a
-//! [`Comparator<K>`].  Insert, lookup, and remove are O(log n) on average.
-//! Duplicate keys are allowed (behaves like a multimap).
+//! [`Comparator<K>`]. Insert, lookup, and remove are O(log n) on average.
+//! Each key maps to exactly one value; inserting a duplicate key replaces the
+//! existing value (identical to [`BTreeMap`] semantics).
 //!
 //! Unlike [`SkipList`], which stores elements in insertion order, a
 //! `SkipMap` imposes a total order on its keys and always keeps pairs
@@ -23,6 +24,7 @@
 //!
 //! [`SkipList`]: crate::skip_list::SkipList
 //! [`Comparator<K>`]: crate::comparator::Comparator
+//! [`BTreeMap`]: std::collections::BTreeMap
 
 mod access;
 mod entry;
@@ -48,9 +50,10 @@ use crate::{
 
 /// A key-value ordered skip map parameterised by a comparator.
 ///
-/// `SkipMap<K, V, N, C, G>` maintains all key-value pairs in the total order
-/// defined by `C: Comparator<K>`.  Duplicate keys are permitted and appear
-/// adjacent to one another in the iteration order.
+/// `SkipMap<K, V, N, C, G>` maintains unique key-value pairs in the total
+/// order defined by `C: Comparator<K>`. Each key maps to exactly one value;
+/// inserting a key that is already present replaces the existing value and
+/// returns the old one.
 ///
 /// The const generic `N` (default `16`) sets the maximum number of skip-link
 /// levels per node; increase it when you expect more than `$\sim 2^N$` elements. `G`

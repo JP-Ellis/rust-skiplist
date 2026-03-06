@@ -367,8 +367,11 @@ mod tests {
         for i in 0..20 {
             map.insert(i, i * 10);
         }
-        for i in 0..20_i32 {
-            assert_eq!(map.get_by_index(i as usize), Some((&i, &(i * 10))));
+        for (i, expected_key) in (0..20_usize).zip(0..20_i32) {
+            assert_eq!(
+                map.get_by_index(i),
+                Some((&expected_key, &(expected_key * 10)))
+            );
         }
         assert_eq!(map.get_by_index(20), None);
     }

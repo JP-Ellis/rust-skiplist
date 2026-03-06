@@ -30,9 +30,7 @@ impl<K: fmt::Debug, V: fmt::Debug, C: Comparator<K>, G: LevelGenerator, const N:
     /// ```
     #[inline]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_map()
-            .entries(self.iter().map(|(k, v)| (k, v)))
-            .finish()
+        f.debug_map().entries(self.iter()).finish()
     }
 }
 
@@ -63,7 +61,6 @@ impl<K: Clone, V: Clone, C: Comparator<K> + Clone, G: LevelGenerator + Clone, co
     /// ```
     #[expect(
         clippy::expect_used,
-        clippy::missing_panics_doc,
         reason = "`value()` returns None only for the head sentinel, which is never visited \
                   in the data-node walk; the expect fires only on invariant violations"
     )]

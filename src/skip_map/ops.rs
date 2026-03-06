@@ -32,8 +32,12 @@ impl<K, V, C: Comparator<K>, G: LevelGenerator, const N: usize> Index<&K>
     /// assert_eq!(map[&2], "b");
     /// ```
     #[expect(
-        clippy::unwrap_used,
-        reason = "None means the key is absent; panicking is the documented behaviour of Index"
+        clippy::panic,
+        reason = "panicking on absent key is the documented behaviour of Index"
+    )]
+    #[expect(
+        clippy::renamed_function_params,
+        reason = "using `key` instead of `index` for the parameter name is clearer in context"
     )]
     #[inline]
     fn index(&self, key: &K) -> &V {
@@ -51,6 +55,10 @@ mod tests {
     // MARK: Index<&K>
 
     #[test]
+    #[expect(
+        clippy::indexing_slicing,
+        reason = "explicitly testing Index panics on present keys"
+    )]
     fn index_present_key() {
         let mut map = SkipMap::<i32, &str>::new();
         map.insert(1, "a");
@@ -61,12 +69,20 @@ mod tests {
 
     #[test]
     #[should_panic(expected = "key not found")]
+    #[expect(
+        clippy::indexing_slicing,
+        reason = "testing that Index panics on absent keys"
+    )]
     fn index_absent_key_panics() {
         let map = SkipMap::<i32, &str>::new();
-        let _ = map[&99];
+        let _: &str = map[&99];
     }
 
     #[test]
+    #[expect(
+        clippy::indexing_slicing,
+        reason = "explicitly testing Index on present keys"
+    )]
     fn index_returns_correct_value() {
         let mut map = SkipMap::<&str, i32>::new();
         map.insert("one", 1);

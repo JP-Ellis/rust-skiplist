@@ -58,15 +58,15 @@ impl<K, V, const N: usize, C: Comparator<K>, G: LevelGenerator> SkipMap<K, V, N,
     ///
     /// Entries from `other` are merged into `self` at their sorted key positions
     /// according to `self`'s comparator.  After the call `self` contains all
-    /// entries from both maps in sorted order and `other` is empty.
+    /// entries from both maps in sorted order and `other` is empty.  If a key
+    /// from `other` already exists in `self`, the value from `other` overwrites
+    /// the value in `self`.
     ///
-    /// **Fast path** — O(n+m): when every key of `other` is ≥ every key of
-    /// `self` (the two sorted ranges are disjoint with `self.last_key ≤
-    /// other.first_key`), the node chains are spliced in O(1) and skip links
-    /// are rebuilt in a single O(n+m) pass.
-    ///
-    /// **Slow path** — O(m log(n+m)): when the key ranges overlap, each entry
-    /// of `other` is inserted individually using [`insert`](SkipMap::insert).
+    /// When every key of `other` is strictly greater than every key of `self`
+    /// (the two sorted ranges are disjoint), this runs in `$O(n+m)$` time.
+    /// Otherwise, when the key ranges overlap (including when
+    /// `self.last_key == other.first_key`), each entry of `other` is inserted
+    /// individually in `$O(m \log(n+m))$` time.
     ///
     /// # Examples
     ///
@@ -104,22 +104,30 @@ impl<K, V, const N: usize, C: Comparator<K>, G: LevelGenerator> SkipMap<K, V, N,
             return;
         }
 
-        // Fast path: when self is empty, or every key of other is ≥ every key
-        // of self, splice the raw node chains and rebuild skip links in one
-        // O(n+m) pass.
+        // Fast path: when self is empty, or every key of other is strictly
+        // greater than every key of self, splice the raw node chains and
+        // rebuild skip links in one O(n+m) pass.
+        //
+        // The condition is strictly `Less` (not `!= Greater`) so that when the
+        // last key of self equals the first key of other, we fall through to
+        // the slow path.  The slow path calls `insert`, which replaces the
+        // existing value, matching the BTreeMap::append contract.
         let can_concat = self.is_empty()
             || self.tail.is_some_and(|tail_nn| {
-                // SAFETY: tail_nn is a live data node; other.head is a valid sentinel.
+                // SAFETY: tail_nn is a live data node owned by self; the
+                // borrow ends before any mutation below.
                 let self_last_key: &K = &unsafe { tail_nn.as_ref() }
                     .value()
                     .expect("tail node has a value")
                     .0;
+                // SAFETY: other.head is a valid sentinel; next_as_ref returns
+                // a short-lived shared reference that is not retained.
                 let other_first_key: &K = &unsafe { other.head.as_ref() }
                     .next_as_ref()
                     .and_then(|n| n.value())
                     .expect("other is non-empty so its first data node has a value")
                     .0;
-                self.comparator.compare(self_last_key, other_first_key) != Ordering::Greater
+                self.comparator.compare(self_last_key, other_first_key) == Ordering::Less
             });
 
         if can_concat {
@@ -135,11 +143,9 @@ impl<K, V, const N: usize, C: Comparator<K>, G: LevelGenerator> SkipMap<K, V, N,
             other.len = 0;
 
             if let Some(first_nn) = first_of_other {
-                // Attach other's chain after self's tail (or self's head if empty).
-                //
+                let attach = self.tail.unwrap_or(self.head);
                 // SAFETY: The attachment point (self.tail or self.head) has
                 // next == None.  first_nn.prev was set to None by take_next_chain.
-                let attach = self.tail.unwrap_or(self.head);
                 unsafe { (*attach.as_ptr()).set_head_next(first_nn) };
 
                 // Rebuild all skip links in one O(n+m) pass.
@@ -163,8 +169,7 @@ impl<K, V, const N: usize, C: Comparator<K>, G: LevelGenerator> SkipMap<K, V, N,
     /// entries with key `>= key`.
     ///
     /// After the call, `self` retains all entries with key `< key`, and the
-    /// returned map contains all entries with key `>= key`.  When duplicate
-    /// keys equal to `key` are present they all move to the returned map.
+    /// returned map contains all entries with key `>= key`.
     ///
     /// # Examples
     ///
@@ -429,9 +434,10 @@ mod tests {
     }
 
     #[test]
-    fn append_equal_boundary_fast_path() {
-        // self.last_key == other.first_key: comparator returns Equal (not Greater),
-        // so can_concat is true and the fast path applies.
+    fn append_equal_boundary_replaces_value() {
+        // self.last_key == other.first_key: comparator returns Equal, so the
+        // slow path is taken and other's value replaces self's value for that
+        // key (matching BTreeMap::append semantics: no duplicates are created).
         let mut a = SkipMap::<i32, i32>::new();
         a.insert(1, 10);
         a.insert(3, 30);
@@ -441,11 +447,10 @@ mod tests {
 
         a.append(&mut b);
         assert!(b.is_empty());
-        assert_eq!(a.len(), 3);
-        // Both 3→30 and 3→300 are present; they appear in insertion order within
-        // the same key.
-        let keys: Vec<i32> = a.keys().copied().collect();
-        assert_eq!(keys, [1, 3, 3]);
+        // Key 3's value is overwritten by b's value; no duplicate is created.
+        assert_eq!(a.len(), 2);
+        let pairs: Vec<(i32, i32)> = a.iter().map(|(k, v)| (*k, *v)).collect();
+        assert_eq!(pairs, [(1, 10), (3, 300)]);
     }
 
     #[test]

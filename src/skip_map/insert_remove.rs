@@ -24,7 +24,7 @@ impl<K, V, const N: usize, C: Comparator<K>, G: LevelGenerator> SkipMap<K, V, N,
     /// When duplicate keys are present the first matching entry (in sorted
     /// order) is the one that is updated.
     ///
-    /// This operation is O(log n) on average.
+    /// This operation is `$O(\log n)$` on average.
     ///
     /// # Examples
     ///
@@ -173,7 +173,7 @@ impl<K, V, const N: usize, C: Comparator<K>, G: LevelGenerator> SkipMap<K, V, N,
     /// When duplicate keys are present the first matching entry (in sorted
     /// order) is removed.
     ///
-    /// This operation is `$O(\log n)$` on average.
+    /// This operation is O(log n) on average.
     ///
     /// # Examples
     ///
