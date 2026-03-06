@@ -328,6 +328,146 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
         }
     }
 
+    /// Removes all elements whose values fall within the given range and
+    /// returns them as an iterator in sorted order.
+    ///
+    /// The bound syntax is identical to [`range`](OrderedSkipList::range):
+    /// all standard Rust range expressions (`..`, `a..`, `..b`, `..=b`,
+    /// `a..b`, `a..=b`) are accepted.
+    ///
+    /// Elements outside the range remain in the list.  All elements inside
+    /// the range are collected eagerly before the `Drain` is returned, so
+    /// the list is updated regardless of whether the caller consumes the
+    /// iterator.
+    ///
+    /// This operation is `$O(n)$`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the lower bound is greater than the upper bound according to
+    /// the list's comparator (mirrors [`BTreeMap::drain_filter`] and
+    /// [`range`](OrderedSkipList::range)).
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use skiplist::ordered_skip_list::OrderedSkipList;
+    ///
+    /// let mut list = OrderedSkipList::<i32>::new();
+    /// for i in 1..=5 {
+    ///     list.insert(i);
+    /// }
+    ///
+    /// let mid: Vec<i32> = list.drain_range(2..=4).collect();
+    /// assert_eq!(mid, [2, 3, 4]);
+    /// let remaining: Vec<i32> = list.iter().copied().collect();
+    /// assert_eq!(remaining, [1, 5]);
+    /// ```
+    #[expect(
+        clippy::panic,
+        reason = "mirrors OrderedSkipList::range: panics on invalid range bounds, \
+                  not on internal invariant violations"
+    )]
+    #[expect(
+        clippy::expect_used,
+        reason = "`value()` / `take_value()` return None only for the head sentinel, \
+                  which is never visited in the data-node walk; \
+                  the expect fires only on invariant violations"
+    )]
+    #[expect(
+        clippy::multiple_unsafe_ops_per_block,
+        reason = "calling filter_rebuild (unsafe fn) and dereferencing cur inside the keep \
+                  closure are provably disjoint"
+    )]
+    #[inline]
+    pub fn drain_range<R: RangeBounds<T>>(&mut self, range: R) -> Drain<'_, T> {
+        let lo = range.start_bound();
+        let hi = range.end_bound();
+
+        // Validate bounds using the same contract as range().
+        if let (Bound::Included(a) | Bound::Excluded(a), Bound::Included(b) | Bound::Excluded(b)) =
+            (lo, hi)
+        {
+            match self.comparator.compare(a, b) {
+                Ordering::Greater => {
+                    panic!("range start is after range end in OrderedSkipList");
+                }
+                Ordering::Equal => {
+                    assert!(
+                        matches!((lo, hi), (Bound::Included(_), Bound::Included(_))),
+                        "range start is after range end in OrderedSkipList"
+                    );
+                }
+                Ordering::Less => {}
+            }
+        }
+
+        if self.is_empty() {
+            return Drain {
+                iter: Vec::new().into_iter(),
+                _marker: PhantomData,
+            };
+        }
+
+        let mut drained: Vec<T> = Vec::new();
+
+        // `self.head` is NonNull (Copy), so copying it does not borrow `self`.
+        // The keep closure borrows only `self.comparator` (shared) and `lo`/`hi`
+        // (borrowed from `range`, which outlives this call), both distinct from
+        // the mutable `self.tail`/`self.len` updates that follow.
+        let head = self.head;
+        let comparator = &self.comparator;
+        let mut past_hi = false;
+
+        // SAFETY: All raw pointers originate from heap allocations owned by
+        // this OrderedSkipList.  We hold &mut self so no other reference to
+        // any node exists.  The keep closure reads the value before any
+        // structural mutation occurs.
+        let (new_len, new_tail) = unsafe {
+            Node::filter_rebuild(
+                head,
+                |cur| {
+                    if past_hi {
+                        return true; // all remaining nodes are past upper bound: keep
+                    }
+                    // SAFETY: cur is a live, heap-allocated data node.
+                    let val: &T = (*cur).value().expect("data node has a value");
+
+                    let above_lo = match lo {
+                        Bound::Unbounded => true,
+                        Bound::Included(l) => comparator.compare(val, l) != Ordering::Less,
+                        Bound::Excluded(l) => comparator.compare(val, l) == Ordering::Greater,
+                    };
+                    if !above_lo {
+                        return true; // before range: keep
+                    }
+
+                    let below_hi = match hi {
+                        Bound::Unbounded => true,
+                        Bound::Included(h) => comparator.compare(val, h) != Ordering::Greater,
+                        Bound::Excluded(h) => comparator.compare(val, h) == Ordering::Less,
+                    };
+                    if !below_hi {
+                        past_hi = true;
+                        return true; // past upper bound: keep
+                    }
+
+                    false // inside range: drain
+                },
+                |mut boxed| {
+                    drained.push(boxed.take_value().expect("data node has a value"));
+                },
+            )
+        };
+        self.tail = new_tail;
+        self.len = new_len;
+
+        Drain {
+            iter: drained.into_iter(),
+            _marker: PhantomData,
+        }
+    }
+
     /// Creates a lazy iterator that removes and yields every element for
     /// which `pred` returns `true`.
     ///
@@ -1358,6 +1498,176 @@ mod tests {
         list.insert(10);
         assert_eq!(list.len(), 1);
         assert_eq!(list.first(), Some(&10));
+    }
+
+    // MARK: drain_range
+
+    #[test]
+    fn drain_range_empty_list() {
+        let mut list = OrderedSkipList::<i32>::new();
+        let drained: Vec<i32> = list.drain_range(1..=3).collect();
+        assert!(drained.is_empty());
+        assert!(list.is_empty());
+    }
+
+    #[test]
+    fn drain_range_no_match() {
+        let mut list = OrderedSkipList::<i32>::new();
+        for i in [1, 2, 3] {
+            list.insert(i);
+        }
+        let drained: Vec<i32> = list.drain_range(10..=20).collect();
+        assert!(drained.is_empty());
+        assert_eq!(list.len(), 3);
+        assert_eq!(list.iter().copied().collect::<Vec<_>>(), [1, 2, 3]);
+    }
+
+    #[test]
+    fn drain_range_all() {
+        let mut list = OrderedSkipList::<i32>::new();
+        for i in 1..=5 {
+            list.insert(i);
+        }
+        let drained: Vec<i32> = list.drain_range(..).collect();
+        assert_eq!(drained, [1, 2, 3, 4, 5]);
+        assert!(list.is_empty());
+    }
+
+    #[test]
+    fn drain_range_inclusive_range() {
+        let mut list = OrderedSkipList::<i32>::new();
+        for i in 1..=5 {
+            list.insert(i);
+        }
+        let drained: Vec<i32> = list.drain_range(2..=4).collect();
+        assert_eq!(drained, [2, 3, 4]);
+        assert_eq!(list.len(), 2);
+        assert_eq!(list.iter().copied().collect::<Vec<_>>(), [1, 5]);
+    }
+
+    #[test]
+    fn drain_range_exclusive_range() {
+        let mut list = OrderedSkipList::<i32>::new();
+        for i in 1..=5 {
+            list.insert(i);
+        }
+        let drained: Vec<i32> = list.drain_range(2..4).collect();
+        assert_eq!(drained, [2, 3]);
+        assert_eq!(list.len(), 3);
+        assert_eq!(list.iter().copied().collect::<Vec<_>>(), [1, 4, 5]);
+    }
+
+    #[test]
+    fn drain_range_from_bound() {
+        let mut list = OrderedSkipList::<i32>::new();
+        for i in 1..=5 {
+            list.insert(i);
+        }
+        let drained: Vec<i32> = list.drain_range(3..).collect();
+        assert_eq!(drained, [3, 4, 5]);
+        assert_eq!(list.len(), 2);
+        assert_eq!(list.iter().copied().collect::<Vec<_>>(), [1, 2]);
+    }
+
+    #[test]
+    fn drain_range_to_bound() {
+        let mut list = OrderedSkipList::<i32>::new();
+        for i in 1..=5 {
+            list.insert(i);
+        }
+        let drained: Vec<i32> = list.drain_range(..=3).collect();
+        assert_eq!(drained, [1, 2, 3]);
+        assert_eq!(list.len(), 2);
+        assert_eq!(list.iter().copied().collect::<Vec<_>>(), [4, 5]);
+    }
+
+    #[test]
+    fn drain_range_tail_pointer_correct() {
+        let mut list = OrderedSkipList::<i32>::new();
+        for i in 1..=5 {
+            list.insert(i);
+        }
+        // Drain the last two elements; tail should move to 3.
+        let drained: Vec<i32> = list.drain_range(4..).collect();
+        assert_eq!(drained, [4, 5]);
+        assert_eq!(list.last(), Some(&3));
+        assert_eq!(list.len(), 3);
+    }
+
+    #[test]
+    fn drain_range_links_consistent() {
+        let mut list = OrderedSkipList::<i32>::new();
+        for i in 0..20 {
+            list.insert(i);
+        }
+        let drained: Vec<i32> = list.drain_range(5..15).collect();
+        assert_eq!(drained, (5..15).collect::<Vec<_>>());
+        assert_eq!(list.len(), 10);
+        // Verify rank-based access and iteration are consistent.
+        let got: Vec<i32> = list.iter().copied().collect();
+        let expected: Vec<i32> = (0..5).chain(15..20).collect();
+        assert_eq!(got, expected);
+        for (i, &v) in expected.iter().enumerate() {
+            assert_eq!(list.get(i), Some(&v));
+        }
+    }
+
+    #[test]
+    fn drain_range_with_duplicates() {
+        let mut list = OrderedSkipList::<i32>::new();
+        for _ in 0..3 {
+            list.insert(2);
+        }
+        list.insert(1);
+        list.insert(3);
+        let drained: Vec<i32> = list.drain_range(2..=2).collect();
+        assert_eq!(drained, [2, 2, 2]);
+        assert_eq!(list.len(), 2);
+        assert_eq!(list.iter().copied().collect::<Vec<_>>(), [1, 3]);
+    }
+
+    #[test]
+    fn drain_range_list_usable_after() {
+        let mut list = OrderedSkipList::<i32>::new();
+        for i in 1..=5 {
+            list.insert(i);
+        }
+        drop(list.drain_range(2..=4));
+        list.insert(10);
+        assert_eq!(list.len(), 3);
+        assert_eq!(list.last(), Some(&10));
+    }
+
+    #[test]
+    #[should_panic(expected = "range start is after range end")]
+    #[expect(
+        clippy::reversed_empty_ranges,
+        reason = "intentionally testing invalid range detection in drain_range"
+    )]
+    fn drain_range_inverted_panics() {
+        let mut list = OrderedSkipList::<i32>::new();
+        for i in 1..=5 {
+            list.insert(i);
+        }
+        _ = list.drain_range(4..=2);
+    }
+
+    #[test]
+    #[expect(
+        clippy::reversed_empty_ranges,
+        reason = "false positive: 4..=2 is well-ordered in the list's internal \
+            order (largest to smallest)"
+    )]
+    fn drain_range_custom_comparator() {
+        // Largest-first ordering: list is [5, 4, 3, 2, 1].
+        let mut list: OrderedSkipList<i32, 16, _> =
+            OrderedSkipList::with_comparator(FnComparator(|a: &i32, b: &i32| b.cmp(a)));
+        for i in 1..=5 {
+            list.insert(i);
+        }
+        let drained: Vec<i32> = list.drain_range(4..=2).collect();
+        assert_eq!(drained, [4, 3, 2]);
+        assert_eq!(list.iter().copied().collect::<Vec<_>>(), [5, 1]);
     }
 
     // MARK: extract_if
