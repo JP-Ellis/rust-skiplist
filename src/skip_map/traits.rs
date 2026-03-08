@@ -2,6 +2,7 @@
 //! `Debug`, `Clone`, `PartialEq`, `Eq`, `Hash`, `Extend`, `FromIterator`.
 
 use core::{
+    cmp::Ordering,
     fmt,
     hash::{Hash, Hasher},
     ptr::NonNull,
@@ -168,6 +169,55 @@ impl<K: Eq, V: Eq, C: Comparator<K>, G: LevelGenerator, const N: usize> Eq
 {
 }
 
+// MARK: PartialOrd / Ord
+
+impl<K: PartialOrd, V: PartialOrd, C: Comparator<K>, G: LevelGenerator, const N: usize> PartialOrd
+    for SkipMap<K, V, N, C, G>
+{
+    /// Compares two maps lexicographically by key-value pairs in sorted order.
+    ///
+    /// Returns `None` if any pair of corresponding elements returns `None`
+    /// from their own `partial_cmp`.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use skiplist::skip_map::SkipMap;
+    ///
+    /// let mut a = SkipMap::<i32, i32>::new();
+    /// a.insert(1, 10);
+    /// let mut b = SkipMap::<i32, i32>::new();
+    /// b.insert(1, 20);
+    /// assert!(a < b);
+    /// ```
+    #[inline]
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        self.iter().partial_cmp(other.iter())
+    }
+}
+
+impl<K: Ord, V: Ord, C: Comparator<K>, G: LevelGenerator, const N: usize> Ord
+    for SkipMap<K, V, N, C, G>
+{
+    /// Compares two maps lexicographically by key-value pairs in sorted order.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use skiplist::skip_map::SkipMap;
+    ///
+    /// let mut a = SkipMap::<i32, i32>::new();
+    /// a.insert(1, 10);
+    /// let mut b = SkipMap::<i32, i32>::new();
+    /// b.insert(1, 20);
+    /// assert_eq!(a.cmp(&b), std::cmp::Ordering::Less);
+    /// ```
+    #[inline]
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.iter().cmp(other.iter())
+    }
+}
+
 // MARK: Hash
 
 impl<K: Hash, V: Hash, C: Comparator<K>, G: LevelGenerator, const N: usize> Hash
@@ -300,6 +350,46 @@ impl<K, V, C: Comparator<K> + Default, G: LevelGenerator + Default, const N: usi
         let mut map = Self::with_comparator_and_level_generator(C::default(), G::default());
         map.extend(iter);
         map
+    }
+}
+
+impl<K, V, C: Comparator<K> + Default, G: LevelGenerator + Default, const N: usize, const M: usize>
+    From<[(K, V); M]> for SkipMap<K, V, N, C, G>
+{
+    /// Creates a map from a fixed-size array of key-value pairs.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use skiplist::skip_map::SkipMap;
+    ///
+    /// let map = SkipMap::<i32, &str>::from([(1, "a"), (2, "b"), (3, "c")]);
+    /// assert_eq!(map.len(), 3);
+    /// assert_eq!(map.get(&2), Some(&"b"));
+    /// ```
+    #[inline]
+    fn from(arr: [(K, V); M]) -> Self {
+        arr.into_iter().collect()
+    }
+}
+
+impl<K, V, C: Comparator<K> + Default, G: LevelGenerator + Default, const N: usize>
+    From<Vec<(K, V)>> for SkipMap<K, V, N, C, G>
+{
+    /// Creates a map from a `Vec` of key-value pairs, consuming it.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use skiplist::skip_map::SkipMap;
+    ///
+    /// let map = SkipMap::<i32, &str>::from(vec![(1, "a"), (2, "b")]);
+    /// assert_eq!(map.len(), 2);
+    /// assert_eq!(map.get(&1), Some(&"a"));
+    /// ```
+    #[inline]
+    fn from(vec: Vec<(K, V)>) -> Self {
+        vec.into_iter().collect()
     }
 }
 

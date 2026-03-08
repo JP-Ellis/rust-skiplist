@@ -175,9 +175,10 @@ impl<T, G: LevelGenerator, const N: usize> Extend<T> for SkipList<T, N, G> {
     /// ```
     /// use skiplist::SkipList;
     ///
-    /// let mut list: SkipList<i32> = [1, 2].into();
+    /// let mut list: SkipList<i32> = [1, 2, 3, 4, 5].into_iter().take(2).collect();
     /// list.extend([3, 4, 5]);
-    /// assert_eq!(list, [1, 2, 3, 4, 5].into());
+    /// let got: Vec<i32> = list.into_iter().collect();
+    /// assert_eq!(got, [1, 2, 3, 4, 5]);
     /// ```
     #[inline]
     fn extend<I: IntoIterator<Item = T>>(&mut self, iter: I) {
@@ -195,10 +196,11 @@ impl<'a, T: Copy + 'a, G: LevelGenerator, const N: usize> Extend<&'a T> for Skip
     /// ```
     /// use skiplist::SkipList;
     ///
-    /// let mut list: SkipList<i32> = [1, 2].into();
+    /// let mut list: SkipList<i32> = [1, 2].into_iter().collect();
     /// let source = [3, 4, 5];
     /// list.extend(source.iter());
-    /// assert_eq!(list, [1, 2, 3, 4, 5].into());
+    /// let got: Vec<i32> = list.into_iter().collect();
+    /// assert_eq!(got, [1, 2, 3, 4, 5]);
     /// ```
     #[inline]
     fn extend<I: IntoIterator<Item = &'a T>>(&mut self, iter: I) {
@@ -208,7 +210,7 @@ impl<'a, T: Copy + 'a, G: LevelGenerator, const N: usize> Extend<&'a T> for Skip
 
 // MARK: FromIterator / From
 
-impl<T> FromIterator<T> for SkipList<T> {
+impl<T, G: LevelGenerator + Default, const N: usize> FromIterator<T> for SkipList<T, N, G> {
     /// Creates a list from an iterator by appending each item to the back.
     ///
     /// # Examples
@@ -217,17 +219,19 @@ impl<T> FromIterator<T> for SkipList<T> {
     /// use skiplist::SkipList;
     ///
     /// let list: SkipList<i32> = [1, 2, 3].into_iter().collect();
-    /// assert_eq!(list, [1, 2, 3].into());
+    /// assert_eq!(list.iter().copied().collect::<Vec<_>>(), [1, 2, 3]);
     /// ```
     #[inline]
     fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
-        let mut list = Self::new();
+        let mut list = Self::with_level_generator(G::default());
         list.extend(iter);
         list
     }
 }
 
-impl<T, const M: usize> From<[T; M]> for SkipList<T> {
+impl<T, G: LevelGenerator + Default, const N: usize, const M: usize> From<[T; M]>
+    for SkipList<T, N, G>
+{
     /// Creates a list from a fixed-size array.
     ///
     /// # Examples
@@ -235,7 +239,7 @@ impl<T, const M: usize> From<[T; M]> for SkipList<T> {
     /// ```
     /// use skiplist::SkipList;
     ///
-    /// let list = SkipList::from([10, 20, 30]);
+    /// let list = SkipList::<i32>::from([10, 20, 30]);
     /// assert_eq!(list.len(), 3);
     /// ```
     #[inline]
@@ -244,7 +248,7 @@ impl<T, const M: usize> From<[T; M]> for SkipList<T> {
     }
 }
 
-impl<T> From<Vec<T>> for SkipList<T> {
+impl<T, G: LevelGenerator + Default, const N: usize> From<Vec<T>> for SkipList<T, N, G> {
     /// Creates a list from a `Vec`, consuming it.
     ///
     /// # Examples
@@ -252,7 +256,7 @@ impl<T> From<Vec<T>> for SkipList<T> {
     /// ```
     /// use skiplist::SkipList;
     ///
-    /// let list = SkipList::from(vec![7, 8, 9]);
+    /// let list = SkipList::<i32>::from(vec![7, 8, 9]);
     /// assert_eq!(list.len(), 3);
     /// ```
     #[inline]

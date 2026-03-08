@@ -827,6 +827,8 @@ impl<T> DoubleEndedIterator for Drain<'_, T> {
     }
 }
 
+impl<T> ExactSizeIterator for Drain<'_, T> {}
+
 impl<T> FusedIterator for Drain<'_, T> {}
 
 // MARK: ExtractIf

@@ -7,7 +7,7 @@ use thiserror::Error;
 
 use crate::level_generator::LevelGenerator;
 
-#[derive(Error, Debug, PartialEq, Eq)]
+#[derive(Error, Debug, Clone, Copy, PartialEq, Eq)]
 /// Errors that can occur when creating a [`Geometric`] level generator.
 #[expect(
     clippy::module_name_repetitions,

@@ -743,9 +743,8 @@ impl<T, G: LevelGenerator, const N: usize> FusedIterator for IntoIter<T, N, G> {
 /// range remain in the list regardless of whether the `Drain` is fully
 /// consumed.
 ///
-/// Supports both forward and backward iteration
-/// ([`DoubleEndedIterator`]).  Does **not** implement
-/// [`ExactSizeIterator`].
+/// Supports forward and backward iteration ([`DoubleEndedIterator`]) and
+/// reports an exact count ([`ExactSizeIterator`]).
 ///
 /// # Examples
 ///
@@ -805,6 +804,8 @@ impl<T> DoubleEndedIterator for Drain<'_, T> {
         self.iter.next_back()
     }
 }
+
+impl<T> ExactSizeIterator for Drain<'_, T> {}
 
 impl<T> FusedIterator for Drain<'_, T> {}
 

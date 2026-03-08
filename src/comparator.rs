@@ -34,7 +34,7 @@
         with the core types."
 )]
 
-use core::cmp::Ordering;
+use core::{cmp::Ordering, fmt};
 
 /// A comparator defines a total order over values of type `T`.
 ///
@@ -89,7 +89,7 @@ pub trait Comparator<T: ?Sized> {
 /// [`OrderedSkipList::new`]: crate::ordered_skip_list::OrderedSkipList::new
 /// [`SkipSet::new`]: crate::skip_set::SkipSet::new
 /// [`SkipMap::new`]: crate::skip_map::SkipMap::new
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct OrdComparator;
 
@@ -128,6 +128,13 @@ impl<T: Ord> Comparator<T> for OrdComparator {
 )]
 pub struct FnComparator<F>(pub F);
 
+impl<F> fmt::Debug for FnComparator<F> {
+    #[inline]
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("FnComparator").finish_non_exhaustive()
+    }
+}
+
 impl<T, F: Fn(&T, &T) -> Ordering> Comparator<T> for FnComparator<F> {
     #[inline]
     fn compare(&self, a: &T, b: &T) -> Ordering {
@@ -155,12 +162,13 @@ impl<T, F: Fn(&T, &T) -> Ordering> Comparator<T> for FnComparator<F> {
 /// use skiplist::comparator::{Comparator, PartialOrdComparator};
 /// use core::cmp::Ordering;
 ///
-/// assert_eq!(PartialOrdComparator.compare(&1.0_f64, &2.0), Ordering::Less);
-/// assert_eq!(PartialOrdComparator.compare(&1.5_f64, &1.5), Ordering::Equal);
-/// assert_eq!(PartialOrdComparator.compare(&3.0_f64, &2.0), Ordering::Greater);
+/// let cmp = PartialOrdComparator::default();
+/// assert_eq!(cmp.compare(&1.0_f64, &2.0), Ordering::Less);
+/// assert_eq!(cmp.compare(&1.5_f64, &1.5), Ordering::Equal);
+/// assert_eq!(cmp.compare(&3.0_f64, &2.0), Ordering::Greater);
 /// ```
 #[cfg(feature = "partial-ord")]
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct PartialOrdComparator;
 
