@@ -42,17 +42,17 @@ hooks = [{ id = "yamlfix", args = ["--config-file", ".yamlfix.toml"] }]
 
 [[repos]]
 repo = "https://github.com/biomejs/pre-commit"
-rev = "v2.4.4"
+rev = "v2.4.6"
 hooks = [{ id = "biome-check" }]
 
 [[repos]]
 repo = "https://github.com/tombi-toml/tombi-pre-commit"
-rev = "v0.7.32"
+rev = "v0.9.3"
 hooks = [{ id = "tombi-format" }, { id = "tombi-lint" }]
 
 [[repos]]
 repo = "https://github.com/crate-ci/committed"
-rev = "v1.1.10"
+rev = "v1.1.11"
 hooks = [{ id = "committed" }]
 
 [[repos]]
@@ -62,7 +62,7 @@ hooks = [{ id = "markdownlint-cli2", args = ["--fix"] }]
 
 [[repos]]
 repo = "https://github.com/crate-ci/typos"
-rev = "v1.43.5"
+rev = "v1.44.0"
 hooks = [{ id = "typos" }]
 
 [[repos]]
