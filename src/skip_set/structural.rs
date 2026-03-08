@@ -35,9 +35,10 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> SkipSet<T, N, C, G>
     /// (the existing element in `self` is kept).  After the call, `self`
     /// contains the union of both sets.
     ///
-    /// This operation is `$O(n+m)$` when the element ranges are strictly disjoint
-    /// (`self.last() < other.first()` according to the comparator), and
-    /// `$O(m \log(n+m))$` when the ranges overlap.
+    /// This operation is `$O(n+m)$` when the element ranges are strictly
+    /// disjoint (`self.last() < other.first()` or `other.last() < self.first()`
+    /// according to the comparator), and `$O(m \log(n+m))$` when the ranges
+    /// overlap.
     ///
     /// # Examples
     ///
@@ -58,7 +59,7 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> SkipSet<T, N, C, G>
     #[expect(
         clippy::expect_used,
         clippy::missing_panics_doc,
-        reason = "self.last() / other.first() return None only when empty; \
+        reason = "self.last/first() / other.last/first() return None only when empty; \
                   both sets are checked to be non-empty before the expect calls"
     )]
     #[inline]
@@ -67,15 +68,23 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> SkipSet<T, N, C, G>
             return;
         }
 
-        // Fast path: if self is empty, or every element of other is strictly
-        // greater than every element of self, no duplicates can arise.  We
-        // delegate directly to the underlying OrderedSkipList, which splices
-        // the node chains and rebuilds skip links in O(n+m).
-        let disjoint = self.is_empty() || {
+        // Fast path: if self is empty, or the two ranges are strictly disjoint
+        // in either direction (self.last < other.first, or other.last <
+        // self.first), no duplicates can arise.  We delegate directly to the
+        // underlying OrderedSkipList, which picks the appropriate splice
+        // direction and rebuilds skip links in O(n+m).
+        let disjoint = if self.is_empty() {
+            true
+        } else {
             let cmp = self.inner.comparator();
             let self_last = self.last().expect("self is non-empty in this branch");
             let other_first = other.first().expect("other is non-empty in this branch");
+            let other_last = other.last().expect("other is non-empty in this branch");
+            let self_first = self.first().expect("self is non-empty in this branch");
+            // Forward: self.last < other.first
             cmp.compare(self_last, other_first) == Ordering::Less
+                // Reverse: other.last < self.first
+                || cmp.compare(other_last, self_first) == Ordering::Less
         };
 
         if disjoint {
@@ -340,6 +349,40 @@ mod tests {
         a.append(&mut b);
         let v: Vec<i32> = a.iter().copied().collect();
         assert_eq!(v, [5, 4, 3, 2, 1]);
+        assert!(b.is_empty());
+    }
+
+    #[test]
+    fn append_reverse_disjoint_fast_path() {
+        // Reverse fast path: every element of other is strictly less than
+        // every element of self.
+        let mut a = make_set(&[4, 5, 6]);
+        let mut b = make_set(&[1, 2, 3]);
+        a.append(&mut b);
+        assert_eq!(to_vec(&a), [1, 2, 3, 4, 5, 6]);
+        assert!(b.is_empty());
+    }
+
+    #[test]
+    fn append_reverse_equal_boundary_slow_path() {
+        // Equal boundary: other.last == self.first.  Strictly less is
+        // required for the reverse fast path, so this falls to the slow path
+        // which discards the duplicate.
+        let mut a = make_set(&[2, 3, 4]);
+        let mut b = make_set(&[1, 2]);
+        a.append(&mut b);
+        assert_eq!(to_vec(&a), [1, 2, 3, 4]);
+        assert!(b.is_empty());
+    }
+
+    #[test]
+    fn append_reverse_large_disjoint() {
+        let mut a = make_set(&(51..=100).collect::<Vec<_>>());
+        let mut b = make_set(&(1..=50).collect::<Vec<_>>());
+        a.append(&mut b);
+        assert_eq!(a.len(), 100);
+        assert_eq!(a.first(), Some(&1));
+        assert_eq!(a.last(), Some(&100));
         assert!(b.is_empty());
     }
 

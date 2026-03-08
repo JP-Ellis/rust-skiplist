@@ -60,10 +60,12 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
     /// according to `self`'s comparator.  After the call `self` contains all
     /// elements from both lists in sorted order and `other` is empty.
     ///
-    /// When every element of `other` is greater than or equal to every element
-    /// of `self` (i.e. the two sorted ranges are non-overlapping), this
-    /// operation runs in `$O(n+m)$` time.  When the ranges overlap, each element
-    /// of `other` is inserted individually in `$O(m \log(n+m))$` time.
+    /// When the two sorted ranges are non-overlapping (every element of
+    /// `other` is >= every element of `self`, or every element of `other`
+    /// is <= every element of `self`), the raw node chains are spliced and
+    /// skip links are rebuilt in one `$O(n+m)$` pass.  When the ranges
+    /// overlap, each element of `other` is inserted individually in
+    /// `$O(m \log(n+m))$` time.
     ///
     /// # Examples
     ///
@@ -100,9 +102,9 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
             return;
         }
 
-        // Fast path: when self is empty, or every element of other is ≥ every
-        // element of self (checked via self.last ≤ other.first), we can splice
-        // the raw node chains and rebuild skip links in one O(n+m) pass.
+        // Forward fast path: self is empty, or every element of other is >=
+        // every element of self (self.last <= other.first).  Splice other's
+        // chain after self's tail and rebuild skip links in one O(n+m) pass.
         let can_concat = self.is_empty()
             || self.tail.is_some_and(|tail_nn| {
                 // SAFETY: tail_nn is a live data node; other.head is a valid sentinel.
@@ -150,8 +152,73 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
                 self.len = new_len;
             }
         } else {
-            while let Some(v) = other.pop_first() {
-                self.insert(v);
+            // Reverse fast path: every element of other is <= every element of
+            // self (other.last <= self.first).  Prepend other's chain before
+            // self's chain and rebuild skip links in one O(n+m) pass.
+            //
+            // self is non-empty here because can_concat handles self.is_empty().
+            let other_tail_saved = other.tail;
+            let can_prepend = other_tail_saved.is_some_and(|other_tail_nn| {
+                // SAFETY: other_tail_nn is a live data node owned by other.
+                let other_last: &T = unsafe { other_tail_nn.as_ref() }
+                    .value()
+                    .expect("other tail node has a value");
+                // SAFETY: self.head is a valid sentinel; next_as_ref returns a
+                // short-lived shared reference that is not retained.
+                let self_first: &T = unsafe { self.head.as_ref() }
+                    .next_as_ref()
+                    .and_then(|n| n.value())
+                    .expect("self is non-empty so its first data node has a value");
+                self.comparator.compare(other_last, self_first) != Ordering::Greater
+            });
+
+            if can_prepend {
+                let other_tail_nn = other_tail_saved.expect("other is non-empty in this branch");
+
+                // Detach other's chain and clear its sentinel's skip links.
+                //
+                // SAFETY: other.head is a valid head sentinel; we hold &mut other.
+                let first_of_other = unsafe { (*other.head.as_ptr()).take_next_chain() };
+                for link in other.head_mut().links_mut() {
+                    *link = None;
+                }
+                other.tail = None;
+                other.len = 0;
+
+                // Detach self's existing chain so we can reattach it after
+                // other's chain.
+                //
+                // SAFETY: self.head is a valid head sentinel; we hold &mut self.
+                let first_of_self = unsafe { (*self.head.as_ptr()).take_next_chain() };
+
+                if let Some(first_other_nn) = first_of_other {
+                    // Wire: self.head -> other's chain -> self's old chain.
+                    //
+                    // SAFETY: self.head.next is None after take_next_chain.
+                    // first_other_nn.prev was cleared by take_next_chain.
+                    unsafe { (*self.head.as_ptr()).set_head_next(first_other_nn) };
+
+                    if let Some(first_self_nn) = first_of_self {
+                        // SAFETY: other_tail_nn.next is None (it was the tail
+                        // of other's chain).  first_self_nn.prev was cleared
+                        // by take_next_chain above.
+                        unsafe { (*other_tail_nn.as_ptr()).set_head_next(first_self_nn) };
+                    }
+
+                    // Rebuild all skip links in one O(n+m) pass.
+                    //
+                    // SAFETY: self.head is exclusively owned; all reachable
+                    // nodes are live heap allocations with no other live
+                    // references.
+                    let (new_len, new_tail) =
+                        unsafe { Node::filter_rebuild(self.head, |_| true, |_| {}) };
+                    self.tail = new_tail;
+                    self.len = new_len;
+                }
+            } else {
+                while let Some(v) = other.pop_first() {
+                    self.insert(v);
+                }
             }
         }
     }
@@ -745,6 +812,71 @@ mod tests {
         // Stored as [5, 4, 3, 1] (largest first).
         let vals: Vec<i32> = a.iter().copied().collect();
         assert_eq!(vals, [5, 4, 3, 1]);
+    }
+
+    #[test]
+    fn append_reverse_non_overlapping() {
+        // Reverse fast path: every element of other is <= every element of self.
+        let mut a = OrderedSkipList::<i32>::new();
+        a.insert(3);
+        a.insert(4);
+        let mut b = OrderedSkipList::<i32>::new();
+        b.insert(1);
+        b.insert(2);
+        a.append(&mut b);
+        assert!(b.is_empty());
+        let vals: Vec<i32> = a.iter().copied().collect();
+        assert_eq!(vals, [1, 2, 3, 4]);
+    }
+
+    #[test]
+    fn append_reverse_equal_boundary() {
+        // Reverse fast path also covers the equal-boundary case (other.last ==
+        // self.first), since OrderedSkipList allows duplicates.
+        let mut a = OrderedSkipList::<i32>::new();
+        a.insert(2);
+        a.insert(3);
+        let mut b = OrderedSkipList::<i32>::new();
+        b.insert(1);
+        b.insert(2);
+        a.append(&mut b);
+        assert!(b.is_empty());
+        let vals: Vec<i32> = a.iter().copied().collect();
+        assert_eq!(vals, [1, 2, 2, 3]);
+    }
+
+    #[test]
+    fn append_reverse_first_last_correct() {
+        let mut a = OrderedSkipList::<i32>::new();
+        for i in [3, 5] {
+            a.insert(i);
+        }
+        let mut b = OrderedSkipList::<i32>::new();
+        for i in [1, 2] {
+            b.insert(i);
+        }
+        a.append(&mut b);
+        assert_eq!(a.first(), Some(&1));
+        assert_eq!(a.last(), Some(&5));
+        assert_eq!(a.len(), 4);
+    }
+
+    #[test]
+    fn append_reverse_large() {
+        let mut a = OrderedSkipList::<i32>::new();
+        for i in 50..100 {
+            a.insert(i);
+        }
+        let mut b = OrderedSkipList::<i32>::new();
+        for i in 0..50 {
+            b.insert(i);
+        }
+        a.append(&mut b);
+        assert_eq!(a.len(), 100);
+        assert!(b.is_empty());
+        let vals: Vec<i32> = a.iter().copied().collect();
+        let expected: Vec<i32> = (0..100).collect();
+        assert_eq!(vals, expected);
     }
 
     // MARK: split_off

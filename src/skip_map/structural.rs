@@ -61,8 +61,9 @@ impl<K, V, const N: usize, C: Comparator<K>, G: LevelGenerator> SkipMap<K, V, N,
     /// from `other` already exists in `self`, the value from `other` overwrites
     /// the value in `self`.
     ///
-    /// When every key of `other` is strictly greater than every key of `self`
-    /// (the two sorted ranges are disjoint), this runs in `$O(n+m)$` time.
+    /// When the key ranges are strictly disjoint (every key of `other` is
+    /// strictly greater than every key of `self`, or every key of `other` is
+    /// strictly less than every key of `self`), this runs in `$O(n+m)$` time.
     /// Otherwise, when the key ranges overlap (including when
     /// `self.last_key == other.first_key`), each entry of `other` is inserted
     /// individually in `$O(m \log(n+m))$` time.
@@ -103,14 +104,14 @@ impl<K, V, const N: usize, C: Comparator<K>, G: LevelGenerator> SkipMap<K, V, N,
             return;
         }
 
-        // Fast path: when self is empty, or every key of other is strictly
-        // greater than every key of self, splice the raw node chains and
-        // rebuild skip links in one O(n+m) pass.
+        // Forward fast path: self is empty, or every key of other is strictly
+        // greater than every key of self.  Splice other's chain after self's
+        // tail and rebuild skip links in one O(n+m) pass.
         //
         // The condition is strictly `Less` (not `!= Greater`) so that when the
-        // last key of self equals the first key of other, we fall through to
-        // the slow path.  The slow path calls `insert`, which replaces the
-        // existing value, matching the BTreeMap::append contract.
+        // last key of self equals the first key of other, we fall through.
+        // The slow path calls `insert`, which replaces the existing value,
+        // matching the BTreeMap::append contract.
         let can_concat = self.is_empty()
             || self.tail.is_some_and(|tail_nn| {
                 // SAFETY: tail_nn is a live data node owned by self; the
@@ -157,9 +158,80 @@ impl<K, V, const N: usize, C: Comparator<K>, G: LevelGenerator> SkipMap<K, V, N,
                 self.len = new_len;
             }
         } else {
-            // Slow path: overlapping key ranges, insert each entry individually.
-            while let Some((k, v)) = other.pop_first() {
-                self.insert(k, v);
+            // Reverse fast path: every key of other is strictly less than every
+            // key of self (other.last_key < self.first_key).  Prepend other's
+            // chain before self's chain and rebuild skip links in one O(n+m)
+            // pass.
+            //
+            // Uses strict Less (not != Greater) for the same reason as above:
+            // equal-boundary keys must go through the slow path to replace.
+            //
+            // self is non-empty here (can_concat handles self.is_empty()).
+            let other_tail_saved = other.tail;
+            let can_prepend = other_tail_saved.is_some_and(|other_tail_nn| {
+                // SAFETY: other_tail_nn is a live data node owned by other.
+                let other_last_key: &K = &unsafe { other_tail_nn.as_ref() }
+                    .value()
+                    .expect("other tail node has a value")
+                    .0;
+                // SAFETY: self.head is a valid sentinel; next_as_ref returns a
+                // short-lived shared reference that is not retained.
+                let self_first_key: &K = &unsafe { self.head.as_ref() }
+                    .next_as_ref()
+                    .and_then(|n| n.value())
+                    .expect("self is non-empty so its first data node has a value")
+                    .0;
+                self.comparator.compare(other_last_key, self_first_key) == Ordering::Less
+            });
+
+            if can_prepend {
+                let other_tail_nn = other_tail_saved.expect("other is non-empty in this branch");
+
+                // Detach other's chain and clear its sentinel's skip links.
+                //
+                // SAFETY: other.head is a valid head sentinel; we hold &mut other.
+                let first_of_other = unsafe { (*other.head.as_ptr()).take_next_chain() };
+                for link in other.head_mut().links_mut() {
+                    *link = None;
+                }
+                other.tail = None;
+                other.len = 0;
+
+                // Detach self's existing chain so we can reattach it after
+                // other's chain.
+                //
+                // SAFETY: self.head is a valid head sentinel; we hold &mut self.
+                let first_of_self = unsafe { (*self.head.as_ptr()).take_next_chain() };
+
+                if let Some(first_other_nn) = first_of_other {
+                    // Wire: self.head -> other's chain -> self's old chain.
+                    //
+                    // SAFETY: self.head.next is None after take_next_chain.
+                    // first_other_nn.prev was cleared by take_next_chain.
+                    unsafe { (*self.head.as_ptr()).set_head_next(first_other_nn) };
+
+                    if let Some(first_self_nn) = first_of_self {
+                        // SAFETY: other_tail_nn.next is None (it was the tail
+                        // of other's chain).  first_self_nn.prev was cleared
+                        // by take_next_chain above.
+                        unsafe { (*other_tail_nn.as_ptr()).set_head_next(first_self_nn) };
+                    }
+
+                    // Rebuild all skip links in one O(n+m) pass.
+                    //
+                    // SAFETY: self.head is exclusively owned; all reachable
+                    // nodes are live heap allocations with no other live
+                    // references.
+                    let (new_len, new_tail) =
+                        unsafe { Node::filter_rebuild(self.head, |_| true, |_| {}) };
+                    self.tail = new_tail;
+                    self.len = new_len;
+                }
+            } else {
+                // Slow path: overlapping key ranges, insert each entry individually.
+                while let Some((k, v)) = other.pop_first() {
+                    self.insert(k, v);
+                }
             }
         }
     }
@@ -469,6 +541,63 @@ mod tests {
         }
         let mut b = SkipMap::<i32, i32>::new();
         for i in 50..100 {
+            b.insert(i, i);
+        }
+        a.append(&mut b);
+        assert_eq!(a.len(), 100);
+        assert!(b.is_empty());
+        let keys: Vec<i32> = a.keys().copied().collect();
+        let expected: Vec<i32> = (0..100).collect();
+        assert_eq!(keys, expected);
+    }
+
+    #[test]
+    fn append_reverse_disjoint_fast_path() {
+        // Reverse fast path: every key of other is strictly less than every
+        // key of self.
+        let mut a = SkipMap::<i32, i32>::new();
+        a.insert(3, 30);
+        a.insert(4, 40);
+
+        let mut b = SkipMap::<i32, i32>::new();
+        b.insert(1, 10);
+        b.insert(2, 20);
+
+        a.append(&mut b);
+        assert!(b.is_empty());
+        assert_eq!(a.len(), 4);
+        let kvs: Vec<(i32, i32)> = a.iter().map(|(&k, &v)| (k, v)).collect();
+        assert_eq!(kvs, [(1, 10), (2, 20), (3, 30), (4, 40)]);
+    }
+
+    #[test]
+    fn append_reverse_equal_boundary_slow_path() {
+        // Equal boundary: other.last_key == self.first_key.  The reverse fast
+        // path requires strictly Less, so this falls through to the slow path,
+        // which replaces the existing value (BTreeMap contract).
+        let mut a = SkipMap::<i32, i32>::new();
+        a.insert(2, 20);
+        a.insert(3, 30);
+
+        let mut b = SkipMap::<i32, i32>::new();
+        b.insert(1, 10);
+        b.insert(2, 200); // equal to a's first key
+
+        a.append(&mut b);
+        assert!(b.is_empty());
+        assert_eq!(a.len(), 3);
+        let kvs: Vec<(i32, i32)> = a.iter().map(|(&k, &v)| (k, v)).collect();
+        assert_eq!(kvs, [(1, 10), (2, 200), (3, 30)]);
+    }
+
+    #[test]
+    fn append_reverse_large_disjoint() {
+        let mut a = SkipMap::<i32, i32>::new();
+        for i in 50..100 {
+            a.insert(i, i);
+        }
+        let mut b = SkipMap::<i32, i32>::new();
+        for i in 0..50 {
             b.insert(i, i);
         }
         a.append(&mut b);
