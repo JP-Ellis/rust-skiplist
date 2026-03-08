@@ -1,5 +1,10 @@
 //! Node implementation for the skip list.
 //!
+//! This module documents the internal design of skip list nodes.  A
+//! user-facing version of this content, covering ownership, pointer
+//! provenance, and the `NonNull`-over-`Box` rationale, is available at
+//! [`crate::docs::internals`].
+//!
 //! Underlying all the operations of the skip list, skip map and ordered skip
 //! list is the node. Each node owns the next node, and has a link to the
 //! previous node. The node also has a level, which corresponds to how 'high'
@@ -537,10 +542,9 @@ impl<V, const N: usize> Node<V, N> {
     ///
     /// # Tree Borrows note
     ///
-    /// `self_ptr` is stored directly in `node.prev`.  Storing `self_ptr`
-    /// (rather than a new child reborrow of it) means that subsequent writes
-    /// through any child of `self_ptr` are NOT foreign to `self_ptr`, so
-    /// `self_ptr` is never transitioned to Disabled.
+    /// `self_ptr` is stored directly in `node.prev` (no reborrow), and the new
+    /// node is allocated via `Box::into_raw` (preserves root provenance).
+    /// See [`crate::docs::internals`] for the full explanation.
     #[inline]
     pub(crate) unsafe fn insert_after(
         mut self_ptr: NonNull<Self>,
@@ -558,11 +562,7 @@ impl<V, const N: usize> Node<V, N> {
         node.prev = Some(self_ptr);
         node.next = self_ref.next;
 
-        // Box::into_raw preserves the allocation's root provenance without
-        // creating an intermediate &mut reborrow layer.  Storing this
-        // node_ptr in Link objects means that subsequent accesses to the
-        // new node's memory go through children of node_ptr (not siblings),
-        // so node_ptr is never Disabled by foreign writes under Tree Borrows.
+        // Box::into_raw preserves root provenance; see crate::docs::internals.
         // SAFETY: Box::into_raw returns a non-null pointer.
         let node_ptr = unsafe { NonNull::new_unchecked(Box::into_raw(Box::new(node))) };
 

@@ -1,19 +1,98 @@
 //! Index-based skip list.
 //!
-//! This module provides [`SkipList`], a general-purpose sequence with
-//! O(log n) insert, remove, and random access by index.  It is a useful
-//! alternative to [`Vec`] when elements are frequently inserted or removed in
-//! the middle of the list while indexed access is still needed.
+//! [`SkipList`] is a general-purpose sequence that stores elements in
+//! **insertion order** and provides `$O(\log n)$` insert, remove, and indexed
+//! access by position.  It is a useful alternative to [`Vec`] when elements are
+//! frequently inserted or removed anywhere in the sequence, and to a plain
+//! linked list when `$O(\log n)$` random access by index is needed.
 //!
-//! # Example
+//! Elements need not implement [`Ord`]; the list imposes no ordering on them.
+//!
+//! # Key Invariants
+//!
+//! - Elements are stored in insertion order.
+//! - Rank (index) of an element equals its position in that insertion-order
+//!   sequence.
+//! - No ordering constraint exists on element values.
+//!
+//! # Intentional Omissions
+//!
+//! - There is no `sort` or `sort_by` method.  Use [`OrderedSkipList`] if you
+//!   need a sorted collection.
+//! - [`IterMut`] is provided because mutation of elements cannot break any
+//!   ordering invariant (there is none).
+//!
+//! # Method Summary
+//!
+//! **Constructors:** [`new`], [`with_capacity`], [`with_level_generator`],
+//!   [`with_comparator_and_level_generator`][SkipList::with_level_generator].
+//!
+//! **Access:** [`get`], [`get_mut`], [`front`], [`back`], [`front_mut`],
+//!   [`back_mut`].
+//!
+//! **Insertion:** [`insert`], [`push_front`], [`push_back`].
+//!
+//! **Removal:** [`remove`], [`pop_front`], [`pop_back`], [`retain`],
+//!   [`retain_mut`], [`dedup_by`], [`drain`], [`extract_if`].
+//!
+//! **Iteration:** [`iter`], [`iter_mut`], [`into_iter`].
+//!
+//! **Structural:** [`len`], [`is_empty`], [`clear`], [`split_off`], [`append`].
+//!
+//! # Examples
 //!
 //! ```rust
-//! use skiplist::skip_list::SkipList;
+//! use skiplist::SkipList;
 //!
-//! let list = SkipList::<i32>::new();
-//! assert!(list.is_empty());
-//! assert_eq!(list.len(), 0);
+//! let mut list = SkipList::<i32>::new();
+//!
+//! // Elements are kept in insertion order, not sorted order.
+//! list.push_back(30);
+//! list.push_back(10);
+//! list.push_back(20);
+//!
+//! // O(log n) indexed access.
+//! assert_eq!(list.get(0), Some(&30));
+//! assert_eq!(list.get(1), Some(&10));
+//!
+//! // O(log n) mid-sequence insert (no element shifting).
+//! list.insert(1, 99);
+//! assert_eq!(list.get(1), Some(&99));
+//!
+//! // Iterate in insertion order.
+//! let values: Vec<_> = list.iter().copied().collect();
+//! assert_eq!(values, [30, 99, 10, 20]);
 //! ```
+//!
+//! [`OrderedSkipList`]: crate::OrderedSkipList
+//! [`new`]: SkipList::new
+//! [`with_capacity`]: SkipList::with_capacity
+//! [`with_level_generator`]: SkipList::with_level_generator
+//! [`get`]: SkipList::get
+//! [`get_mut`]: SkipList::get_mut
+//! [`front`]: SkipList::front
+//! [`back`]: SkipList::back
+//! [`front_mut`]: SkipList::front_mut
+//! [`back_mut`]: SkipList::back_mut
+//! [`insert`]: SkipList::insert
+//! [`push_front`]: SkipList::push_front
+//! [`push_back`]: SkipList::push_back
+//! [`remove`]: SkipList::remove
+//! [`pop_front`]: SkipList::pop_front
+//! [`pop_back`]: SkipList::pop_back
+//! [`retain`]: SkipList::retain
+//! [`retain_mut`]: SkipList::retain_mut
+//! [`dedup_by`]: SkipList::dedup_by
+//! [`drain`]: SkipList::drain
+//! [`extract_if`]: SkipList::extract_if
+//! [`iter`]: SkipList::iter
+//! [`iter_mut`]: SkipList::iter_mut
+//! [`into_iter`]: SkipList::into_iter
+//! [`len`]: SkipList::len
+//! [`is_empty`]: SkipList::is_empty
+//! [`clear`]: SkipList::clear
+//! [`split_off`]: SkipList::split_off
+//! [`append`]: SkipList::append
 
 #![expect(
     clippy::pub_use,
@@ -70,13 +149,9 @@ pub struct SkipList<T, const N: usize = 16, G: LevelGenerator = Geometric> {
     /// Sentinel head node. Never holds a value; its `links` array has length
     /// equal to the maximum number of levels.
     ///
-    /// Stored as a raw NonNull pointer (not Box) so that all accesses,
-    /// whether shared (`head_ref`) or exclusive (`head_mut`, `insert_after`,
-    /// etc.), share the same provenance tag.  Under Tree Borrows, `Box<T>`
-    /// receives special "Unique" retagging that creates a new Reserved child
-    /// tag; write accesses through any sibling tag then disable the Box's tag,
-    /// causing false UB reports.  Using `NonNull` with a single provenance tag
-    /// avoids this problem entirely.
+    /// Stored as `NonNull` rather than `Box` to preserve a single root
+    /// provenance tag across all accesses.  See [`crate::docs::internals`]
+    /// for the full NonNull-over-Box rationale.
     ///
     /// # Invariant
     ///
@@ -136,18 +211,13 @@ impl<T, const N: usize> SkipList<T, N, Geometric> {
     /// Creates an empty skip list pre-configured for the expected number of
     /// elements.
     ///
-    /// Use this when you know roughly how many elements the list will hold.
-    /// The skip list will be tuned so that skip links span the right number of
-    /// nodes for that size, giving good average-case performance without
-    /// wasting memory on unnecessary levels for small lists or degrading for
-    /// large ones.
+    /// The level generator is initialised so that skip links are tuned for
+    /// `capacity` elements, giving good average-case performance without
+    /// unnecessary levels.  The level count is clamped to `N` so the node
+    /// links array is never overrun.
     ///
-    /// By default, there is an upper limit of `N = 16` levels, which is
-    /// optimal for up to about ~2^16 = 65,536 elements. If you need
-    /// significantly more levels, increase the const generic parameter `N`
-    /// when declaring the list type, e.g. `SkipList<T, 32>`.  The
-    /// `with_capacity` method will automatically clamp the level count to `N`
-    /// to avoid overrunning the node links array.
+    /// See [`crate::docs::concepts`] for the level-selection formula and
+    /// guidance on choosing `N`.
     ///
     /// # Examples
     ///

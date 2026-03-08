@@ -1,30 +1,109 @@
 //! Key-value ordered skip map.
 //!
-//! This module provides [`SkipMap`], a skip list that maps keys to values,
-//! maintaining key-value pairs in sorted key order according to a
-//! [`Comparator<K>`]. Insert, lookup, and remove are O(log n) on average.
-//! Each key maps to exactly one value; inserting a duplicate key replaces the
-//! existing value (identical to [`BTreeMap`] semantics).
+//! [`SkipMap`] maintains **unique** key-value pairs sorted by key according to
+//! a [`Comparator<K>`].  Insert, lookup, and remove are `$O(\log n)$` on average.
+//! Inserting a key that already exists replaces the existing value and returns
+//! the old one, identical to [`BTreeMap`] semantics.
 //!
-//! Unlike [`SkipList`], which stores elements in insertion order, a
-//! `SkipMap` imposes a total order on its keys and always keeps pairs
-//! sorted by key. The ordering is parameterised by a [`Comparator<K>`] so
-//! that custom orderings can be used without requiring [`Ord`] on the key
-//! type.
+//! Values can be mutated in place (via [`get_mut`]) because changing a value
+//! does not affect key order.
 //!
-//! # Example
+//! The key ordering is parameterised by `C: Comparator<K>` so that custom
+//! orderings can be used without requiring [`Ord`] on the key type.
+//!
+//! # Key Invariants
+//!
+//! - Each key appears at most once.
+//! - Keys are always stored in sorted order.
+//! - Values may be mutated in place; keys may not.
+//!
+//! # Intentional Omissions
+//!
+//! - **No `keys_mut` or `IterMut` over keys.**  Exposing mutable key
+//!   references would allow callers to break the sorted invariant without
+//!   reinserting.
+//!
+//! # Method Summary
+//!
+//! **Constructors:** [`new`], [`with_level_generator`], [`with_comparator`],
+//!   [`with_comparator_and_level_generator`].
+//!
+//! **Access:** [`get`], [`get_mut`], [`get_key_value`], [`get_by_index`],
+//!   [`contains_key`], [`first_key_value`], [`last_key_value`], [`rank`],
+//!   [`comparator`], [`entry`].
+//!
+//! **Insertion:** [`insert`], [`merge`].
+//!
+//! **Removal:** [`remove`], [`remove_entry`], [`pop_first`], [`pop_last`],
+//!   [`retain`], [`drain`], [`extract_if`].
+//!
+//! **Structural:** [`len`], [`is_empty`], [`clear`], [`split_off`], [`append`].
+//!
+//! **Iteration:** [`iter`], [`iter_mut`], [`keys`], [`values`], [`values_mut`],
+//!   [`into_keys`], [`into_values`], [`into_iter`].
+//!
+//! # Examples
 //!
 //! ```rust
-//! use skiplist::skip_map::SkipMap;
+//! use skiplist::SkipMap;
 //!
-//! let map = SkipMap::<&str, i32>::new();
-//! assert!(map.is_empty());
-//! assert_eq!(map.len(), 0);
+//! let mut map = SkipMap::<&str, usize>::new();
+//!
+//! // Inserting new keys returns None.
+//! assert_eq!(map.insert("banana", 2), None);
+//! assert_eq!(map.insert("apple",  1), None);
+//! assert_eq!(map.insert("cherry", 3), None);
+//!
+//! // Inserting a duplicate key replaces the value and returns the old one.
+//! assert_eq!(map.insert("apple", 10), Some(1));
+//!
+//! // Lookup by key.
+//! assert_eq!(map.get(&"apple"), Some(&10));
+//!
+//! // Iteration is in sorted key order.
+//! let pairs: Vec<_> = map.iter().map(|(k, v)| (*k, *v)).collect();
+//! assert_eq!(pairs, [("apple", 10), ("banana", 2), ("cherry", 3)]);
 //! ```
 //!
 //! [`SkipList`]: crate::skip_list::SkipList
 //! [`Comparator<K>`]: crate::comparator::Comparator
 //! [`BTreeMap`]: std::collections::BTreeMap
+//! [`new`]: SkipMap::new
+//! [`with_level_generator`]: SkipMap::with_level_generator
+//! [`with_comparator`]: SkipMap::with_comparator
+//! [`with_comparator_and_level_generator`]: SkipMap::with_comparator_and_level_generator
+//! [`get`]: SkipMap::get
+//! [`get_mut`]: SkipMap::get_mut
+//! [`get_key_value`]: SkipMap::get_key_value
+//! [`get_by_index`]: SkipMap::get_by_index
+//! [`contains_key`]: SkipMap::contains_key
+//! [`first_key_value`]: SkipMap::first_key_value
+//! [`last_key_value`]: SkipMap::last_key_value
+//! [`rank`]: SkipMap::rank
+//! [`comparator`]: SkipMap::comparator
+//! [`entry`]: SkipMap::entry
+//! [`insert`]: SkipMap::insert
+//! [`merge`]: SkipMap::merge
+//! [`remove`]: SkipMap::remove
+//! [`remove_entry`]: SkipMap::remove_entry
+//! [`pop_first`]: SkipMap::pop_first
+//! [`pop_last`]: SkipMap::pop_last
+//! [`retain`]: SkipMap::retain
+//! [`drain`]: SkipMap::drain
+//! [`extract_if`]: SkipMap::extract_if
+//! [`len`]: SkipMap::len
+//! [`is_empty`]: SkipMap::is_empty
+//! [`clear`]: SkipMap::clear
+//! [`split_off`]: SkipMap::split_off
+//! [`append`]: SkipMap::append
+//! [`iter`]: SkipMap::iter
+//! [`iter_mut`]: SkipMap::iter_mut
+//! [`keys`]: SkipMap::keys
+//! [`values`]: SkipMap::values
+//! [`values_mut`]: SkipMap::values_mut
+//! [`into_keys`]: SkipMap::into_keys
+//! [`into_values`]: SkipMap::into_values
+//! [`into_iter`]: SkipMap::into_iter
 
 mod access;
 mod entry;
@@ -89,20 +168,16 @@ pub struct SkipMap<
     C: Comparator<K> = OrdComparator,
     G: LevelGenerator = Geometric,
 > {
-    // Sentinel head node. Never holds a value; its `links` array has length
-    // equal to the maximum number of levels.
-    //
-    // Stored as a raw `NonNull` pointer (not `Box`) so that all accesses,
-    // whether shared (`head_ref`) or exclusive (`head_mut`), share the same
-    // provenance tag. Under Tree Borrows, `Box<T>` receives special
-    // "Unique" retagging that creates a new Reserved child tag; write
-    // accesses through any sibling tag then disable the Box's tag, causing
-    // false UB reports. Using `NonNull` with a single provenance tag avoids
-    // this problem entirely.
-    //
-    // Invariant: `head` was allocated via `Box::into_raw(Box::new(...))` in
-    // `with_comparator_and_level_generator` and is exclusively owned by this
-    // `SkipMap`. It is freed in `Drop`.
+    /// Sentinel head node. Never holds a value; its `links` array has length
+    /// equal to the maximum number of levels.
+    ///
+    /// Stored as `NonNull` rather than `Box` to preserve a single root
+    /// provenance tag across all accesses.  See `crate::docs::internals`
+    /// for the full NonNull-over-Box rationale.
+    ///
+    /// Invariant: `head` was allocated via `Box::into_raw(Box::new(...))` in
+    /// `with_comparator_and_level_generator` and is exclusively owned by this
+    /// `SkipMap`. It is freed in `Drop`.
     head: NonNull<Node<(K, V), N>>,
     /// Non-owning pointer to the last data node, or `None` when the map is
     /// empty. Maintained by every insert and remove operation to provide `$O(1)$`

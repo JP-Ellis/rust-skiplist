@@ -16,6 +16,7 @@ categories = ["data-structures"]
 
   [package.metadata]
     [package.metadata.docs.rs]
+    features = ["partial-ord", "docs"]
     rustdoc-args = [
       "--html-in-header",
       ".cargo/katex.header.html",
@@ -59,6 +60,9 @@ rstest = "0.26.1"
 codecov = { branch = "master", repository = "JP-Ellis/rust-skiplist", service = "github" }
 
 [features]
+## Enable the `docs` module, which provides long-form explanation pages for
+## skip list concepts, internals, and the `partial-ord` feature.
+docs = []
 ## Enable `PartialOrdComparator`, which uses `PartialOrd` and panics when
 ## elements are incomparable (i.e. `partial_cmp` returns `None`).
 partial-ord = []

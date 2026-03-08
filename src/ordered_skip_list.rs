@@ -1,26 +1,111 @@
 //! Value-ordered skip list.
 //!
-//! This module provides [`OrderedSkipList`], a skip list that maintains its
-//! elements in sorted order according to a [`Comparator<T>`].  Insert, lookup,
-//! and remove are O(log n) on average.  Duplicate elements are allowed.
+//! [`OrderedSkipList`] maintains elements in **sorted order** according to a
+//! [`Comparator<T>`] and permits **duplicate** values.  Insert, lookup, and
+//! remove are `$O(\log n)$` on average.
 //!
-//! Unlike [`SkipList`], which stores elements in insertion order, an
-//! `OrderedSkipList` imposes a total order on its elements and always keeps
-//! them sorted.  The ordering is parameterised by a [`Comparator<T>`] so that
-//! custom orderings can be used without requiring [`Ord`] on the element type.
+//! Unlike [`SkipList`], which stores elements in insertion order, every insert
+//! into an `OrderedSkipList` finds and occupies the correct sorted position.
+//! Unlike `BTreeSet`, duplicate values (those comparing `Equal`) are permitted
+//! and appear adjacent in the iteration order.
 //!
-//! # Example
+//! The ordering is parameterised by `C: Comparator<T>` so that custom
+//! orderings can be used without requiring [`Ord`] on the element type.
+//!
+//! # Key Invariants
+//!
+//! - The collection is **always sorted**; there is no way to insert an element
+//!   out of order.
+//! - **Duplicate values are allowed.**  Inserting the same value twice places
+//!   two adjacent entries in the list.
+//! - Elements cannot be mutated in place because that could silently break the
+//!   sorted invariant.
+//!
+//! # Intentional Omissions
+//!
+//! - **No `IterMut`.**  Exposing mutable references to stored values would
+//!   allow callers to change a value without reinserting it, silently
+//!   invalidating the sort order.  To update a value, remove it and reinsert
+//!   the new value.
+//! - **No `with_capacity`.**  Use [`SkipList::with_capacity`] if you need
+//!   capacity pre-configuration and do not require sorted order.
+//!
+//! # Method Summary
+//!
+//! **Constructors:** [`new`], [`with_level_generator`], [`with_comparator`],
+//!   [`with_comparator_and_level_generator`].
+//!
+//! **Access:** [`first`], [`last`], [`get_by_index`], [`contains`],
+//!   [`get`], [`get_first`], [`get_last`], [`rank`], [`count`], [`comparator`].
+//!
+//! **Insertion:** [`insert`].
+//!
+//! **Removal:** [`pop_first`], [`pop_last`], [`remove`], [`remove_all`],
+//!   [`retain`], [`dedup`], [`drain_range`], [`drain`], [`extract_if`].
+//!
+//! **Structural:** [`len`], [`is_empty`], [`clear`], [`split_off`], [`append`].
+//!
+//! **Iteration:** [`iter`], [`into_iter`].
+//!
+//! # Examples
 //!
 //! ```rust
-//! use skiplist::ordered_skip_list::OrderedSkipList;
+//! use skiplist::OrderedSkipList;
 //!
-//! let list = OrderedSkipList::<i32>::new();
-//! assert!(list.is_empty());
-//! assert_eq!(list.len(), 0);
+//! let mut list = OrderedSkipList::<i32>::new();
+//!
+//! // Elements are always kept in sorted order regardless of insertion order.
+//! list.insert(30);
+//! list.insert(10);
+//! list.insert(20);
+//! list.insert(10); // duplicates are allowed
+//!
+//! assert_eq!(list.first(), Some(&10));
+//! assert_eq!(list.last(), Some(&30));
+//! assert_eq!(list.len(), 4);
+//!
+//! // O(log n) rank query.
+//! assert_eq!(list.rank(&20), Some(2));
+//!
+//! // Iteration always yields elements in sorted order.
+//! let values: Vec<_> = list.iter().copied().collect();
+//! assert_eq!(values, [10, 10, 20, 30]);
 //! ```
 //!
 //! [`SkipList`]: crate::skip_list::SkipList
+//! [`SkipList::with_capacity`]: crate::skip_list::SkipList::with_capacity
 //! [`Comparator<T>`]: crate::comparator::Comparator
+//! [`new`]: OrderedSkipList::new
+//! [`with_level_generator`]: OrderedSkipList::with_level_generator
+//! [`with_comparator`]: OrderedSkipList::with_comparator
+//! [`with_comparator_and_level_generator`]: OrderedSkipList::with_comparator_and_level_generator
+//! [`first`]: OrderedSkipList::first
+//! [`last`]: OrderedSkipList::last
+//! [`get_by_index`]: OrderedSkipList::get_by_index
+//! [`contains`]: OrderedSkipList::contains
+//! [`get`]: OrderedSkipList::get
+//! [`get_first`]: OrderedSkipList::get_first
+//! [`get_last`]: OrderedSkipList::get_last
+//! [`rank`]: OrderedSkipList::rank
+//! [`count`]: OrderedSkipList::count
+//! [`comparator`]: OrderedSkipList::comparator
+//! [`insert`]: OrderedSkipList::insert
+//! [`pop_first`]: OrderedSkipList::pop_first
+//! [`pop_last`]: OrderedSkipList::pop_last
+//! [`remove`]: OrderedSkipList::remove
+//! [`remove_all`]: OrderedSkipList::remove_all
+//! [`retain`]: OrderedSkipList::retain
+//! [`dedup`]: OrderedSkipList::dedup
+//! [`drain_range`]: OrderedSkipList::drain_range
+//! [`drain`]: OrderedSkipList::drain
+//! [`extract_if`]: OrderedSkipList::extract_if
+//! [`len`]: OrderedSkipList::len
+//! [`is_empty`]: OrderedSkipList::is_empty
+//! [`clear`]: OrderedSkipList::clear
+//! [`split_off`]: OrderedSkipList::split_off
+//! [`append`]: OrderedSkipList::append
+//! [`iter`]: OrderedSkipList::iter
+//! [`into_iter`]: OrderedSkipList::into_iter
 
 use core::ptr::NonNull;
 
@@ -80,12 +165,9 @@ pub struct OrderedSkipList<
     /// Sentinel head node. Never holds a value; its `links` array has length
     /// equal to the maximum number of levels.
     ///
-    /// Stored as `NonNull` rather than `Box` so that all accesses (shared via
-    /// `head_ref` or exclusive via `head_mut`) share the same provenance tag.
-    /// Under Tree Borrows, `Box<T>` receives "Unique" retagging, which creates
-    /// a Reserved child tag; writes through any sibling tag then disable the
-    /// Box's tag, causing false UB reports in Miri.  `NonNull` with a single
-    /// provenance tag avoids this problem.
+    /// Stored as `NonNull` rather than `Box` to preserve a single root
+    /// provenance tag across all accesses.  See [`crate::docs::internals`]
+    /// for the full NonNull-over-Box rationale.
     ///
     /// # Invariant
     ///
