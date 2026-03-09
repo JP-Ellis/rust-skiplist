@@ -1,5 +1,5 @@
 ---
-name: test
+name: Test
 
 permissions:
   contents: read
@@ -12,295 +12,213 @@ on:
     branches:
       - main
 
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref || github.run_id }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
-
 env:
-  # Generic
-  FORCE_COLOR: '1'
-  CLICOLOR: '1'
-  # Rust
-  CARGO_TERM_COLOR: always
   RUST_BACKTRACE: '1'
-  NEXTEST_PROFILE: ci
+  FORCE_COLOR: '1'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   complete:
     name: Test completion check
     if: always()
-
-    permissions:
-      contents: none
-
-    runs-on: ubuntu-latest
     needs:
+      - prek
       - clippy
-      - coverage
       - format
-      - pre-commit
-      - spelling
       - test
+      - benches
+      - examples
+      - miri
+    runs-on: ubuntu-latest
 
     steps:
       - name: Failed
         run: exit 1
-        if: >
-          contains(needs.*.result, 'failure')
-          || contains(needs.*.result, 'cancelled')
-          || contains(needs.*.result, 'skipped')
-
-  clippy:
-    name: >-
-      Clippy Rust ${{ matrix.rust }}
-      on ${{ startsWith(matrix.os, 'macos-') && 'macOS' || startsWith(matrix.os, 'windows-') && 'Windows' || 'Linux' }}
-
-    runs-on: ${{ matrix.os }}
-
-    strategy:
-      matrix:
-        os:
-          - ubuntu-latest
-        rust:
-          - stable
-    continue-on-error: ${{ matrix.rust != 'stable' }}
-
-    steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: ${{ matrix.rust }}
-          components: clippy
-
-      - name: Cache Rust
-        uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5  # v2.8.2
-
-      - name: Install cargo-hack and cargo-action-fmt
-        uses: taiki-e/install-action@f92912fad184299a31e22ad070a5059fd07d4f59  # v2.68.7
-        with:
-          tool: cargo-hack,cargo-action-fmt
-
-      - name: Clippy
-        run: |
-          cargo hack \
-            --feature-powerset \
-            clippy \
-            --workspace \
-            --all-targets \
-            --message-format json \
-            -- \
-            -D warnings |
-           cargo-action-fmt
-
-  format:
-    name: >-
-      Format Rust ${{ matrix.rust }}
-      on ${{ startsWith(matrix.os, 'macos-') && 'macOS' || startsWith(matrix.os, 'windows-') && 'Windows' || 'Linux' }}
-
-    runs-on: ${{ matrix.os }}
-
-    strategy:
-      matrix:
-        os:
-          - ubuntu-latest
-        rust:
-          - stable
-    continue-on-error: ${{ matrix.rust != 'stable' }}
-
-    steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: ${{ matrix.rust }}
-          components: rustfmt
-
-      - name: Cache Rust
-        uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5  # v2.8.2
-
-      - name: Format
-        run: cargo fmt --check
-
-  test:
-    name: >-
-      Test Rust ${{ matrix.rust }}
-      on ${{ startsWith(matrix.os, 'macos-') && 'macOS' || startsWith(matrix.os, 'windows-') && 'Windows' || 'Linux' }}
-
-    runs-on: ${{ matrix.os }}
-
-    strategy:
-      matrix:
-        os:
-          - ubuntu-latest
-          - windows-latest
-          - macos-latest
-        rust:
-          - stable
-          - beta
-    continue-on-error: ${{ matrix.rust != 'stable' }}
-
-    steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: ${{ matrix.rust }}
-
-      - name: Cache Rust
-        uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5  # v2.8.2
-
-      - name: Install cargo-hack and nextest
-        uses: taiki-e/install-action@f92912fad184299a31e22ad070a5059fd07d4f59  # v2.68.7
-        with:
-          tool: cargo-hack,nextest
-
-      - name: Run tests
-        shell: bash
-        env:
-          NEXTEST_EXPERIMENTAL_LIBTEST_JSON: '1'
-        run: |
-          while IFS=$'\n' read -r line || ! retval=$line; do
-            if ! echo "$line" | jq -e . 2>/dev/null 1>&2; then
-              continue
-            fi
-
-            type=$(echo "$line" | jq -r '.type')
-            event=$(echo "$line" | jq -r '.event')
-            if [ "$type" != "test" ] || [ "$event" != "failed" ]; then
-              continue
-            fi
-
-            echo "Found failed test: $line"
-
-            failed=true
-            name=$(echo "$line" | jq -r '.name')
-            stdout=$(echo "$line" | jq -r '.stdout')
-
-            {
-              echo "## Failed test $name"
-              echo '```'
-              echo "$stdout"
-              echo '```'
-            } >>"$GITHUB_STEP_SUMMARY"
-          done < <(
-            cargo hack nextest run \
-              --feature-powerset \
-              --workspace \
-              --message-format libtest-json
-            printf '%s' "$?"
-          )
-
-          exit "$retval"
-
-  coverage:
-    name: >-
-      Coverage ${{ matrix.rust }}
-      on ${{ startsWith(matrix.os, 'macos-') && 'macOS' || startsWith(matrix.os, 'windows-') && 'Windows' || 'Linux' }}
-
-    runs-on: ${{ matrix.os }}
-
-    strategy:
-      matrix:
-        os:
-          - ubuntu-latest
-        rust:
-          - nightly
-    continue-on-error: ${{ matrix.rust != 'stable' }}
-
-    steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: ${{ matrix.rust }}
-
-      - name: Cache Rust
-        uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5  # v2.8.2
-
-      - name: Install cargo-hack, tarpaulin
-        uses: taiki-e/install-action@f92912fad184299a31e22ad070a5059fd07d4f59  # v2.68.7
-        with:
-          tool: cargo-hack,cargo-tarpaulin
-
-      - name: Run tests
-        shell: bash
-        env:
-          NEXTEST_EXPERIMENTAL_LIBTEST_JSON: '1'
-        run: |
-          cargo hack \
-            --feature-powerset \
-            --workspace \
-            tarpaulin \
-            --out Xml
-
-  spelling:
-    name: Spell check
-
-    runs-on: ubuntu-latest
-
-    steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
-
-      - name: Spell Check Repo
-        uses: crate-ci/typos@631208b7aac2daa8b707f55e7331f9112b0e062d  # v1.44.0
-
-  pre-commit:
-    name: Pre-commit
-
-    runs-on: ubuntu-latest
-
-    env:
-      PRE_COMMIT_HOME: ${{ github.workspace }}/.pre-commit
-
-    steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
-
-      - name: Cache pre-commit
-        uses: actions/cache@cdf6c1fa76f9f475f3d7449005a359c84ca0f306  # v5.0.3
-        with:
-          path: |
-            ${{ env.PRE_COMMIT_HOME }}
-          key: ${{ runner.os }}-pre-commit-${{ hashFiles('.pre-commit-config.yaml') }}
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt, clippy
-
-      - name: Set up uv
-        uses: astral-sh/setup-uv@5a095e7a2014a4212f075830d4f7277575a9d098  # v7.3.1
-        with:
-          enable-cache: true
-          cache-suffix: pre-commit
-          cache-dependency-glob: ''
-
-      - name: Install pre-commit
-        run: uv tool install pre-commit
-      - name: Install hatch
-        run: uv tool install hatch
-
-      - name: Run pre-commit
-        run: pre-commit run --show-diff-on-failure --color=always --all-files
-        env:
-          OPENAI_API_KEY: sk-000000000000000000000000000000000000000000000000
+        if: |
+          contains(needs.*.result, 'failure') ||
+          contains(needs.*.result, 'cancelled') ||
+          contains(needs.*.result, 'timed_out') ||
+          contains(needs.*.result, 'skipped')
 
   committed:
     name: Committed
-
-    runs-on: ubuntu-latest
     if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
         with:
           fetch-depth: 0
 
-      - name: committed-action
+      - name: Check commit messages
         uses: crate-ci/committed@faeed42f2e10c244533a01525f13c4d8b6ce383f  # v1.1.11
         with:
-          args: -vv --no-merge-commit --no-wip --no-fixup
+          args: --no-merge-commit
+
+  prek:
+    name: Prek
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Install prek
+        uses: taiki-e/install-action@a37010ded18ff788be4440302bd6830b1ae50d8b  # v2.68.25
+        with:
+          tool: prek
+
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+
+      - name: Restore prek cache
+        uses: actions/cache@cdf6c1fa76f9f475f3d7449005a359c84ca0f306  # v5.0.3
+        with:
+          path: ~/.cache/prek
+          key: prek-${{ runner.os }}-${{ hashFiles('prek.toml') }}
+
+      - name: Run prek
+        env:
+          SKIP: cargo-check,cargo-clippy,cargo-fmt
+        run: prek run --all-files
+
+  clippy:
+    name: Clippy
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+
+      - name: Install Rust (stable)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Restore Rust cache
+        uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5  # v2.8.2
+
+      - name: Install cargo-hack
+        uses: taiki-e/install-action@a37010ded18ff788be4440302bd6830b1ae50d8b  # v2.68.25
+        with:
+          tool: cargo-hack
+
+      - name: Run clippy
+        run: cargo hack --feature-powerset clippy --all-targets -- -D warnings
+
+  format:
+    name: Format
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+
+      - name: Install Rust (nightly)
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: rustfmt
+
+      - name: Check formatting
+        run: cargo fmt --check
+
+  test:
+    name: Test (${{ matrix.os }}, ${{ matrix.toolchain }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            toolchain: stable
+          - os: windows-latest
+            toolchain: stable
+          - os: macos-latest
+            toolchain: stable
+          - os: ubuntu-latest
+            toolchain: beta
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+
+      - name: Install Rust (${{ matrix.toolchain }})
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ matrix.toolchain }}
+
+      - name: Restore Rust cache
+        uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5  # v2.8.2
+
+      - name: Install cargo-hack and cargo-nextest
+        uses: taiki-e/install-action@a37010ded18ff788be4440302bd6830b1ae50d8b  # v2.68.25
+        with:
+          tool: cargo-hack,cargo-nextest
+
+      - name: Run tests
+        run: cargo hack --feature-powerset nextest run
+
+  benches:
+    name: Benchmarks
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+
+      - name: Install Rust (stable)
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Restore Rust cache
+        uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5  # v2.8.2
+
+      - name: Test benchmarks
+        run: cargo test --benches '/'
+
+  examples:
+    name: Examples
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+
+      - name: Install Rust (stable)
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Restore Rust cache
+        uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5  # v2.8.2
+
+      - name: Run getting_started
+        run: cargo run --example getting_started
+
+      - name: Run custom_ordering
+        run: cargo run --example custom_ordering
+
+      - name: Run float_keys
+        run: cargo run --example float_keys
+
+      - name: Run leaderboard
+        run: cargo run --example leaderboard
+
+  miri:
+    name: Miri
+    # Miri is slow, so we avoid running it unnecessarily
+    if: github.event.pull_request.draft == false || github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+
+      - name: Install Rust (nightly)
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: miri
+
+      - name: Restore Rust cache
+        uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5  # v2.8.2
+
+      - name: Run Miri
+        run: cargo miri test --all-features
