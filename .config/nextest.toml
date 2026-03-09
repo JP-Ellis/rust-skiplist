@@ -5,7 +5,10 @@ fail-fast = false
 # Timeout after 5 periods of 60 seconds
 slow-timeout = { period = "60s", terminate-after = 5 }
 
-[[profile.default.overrides]]
-# The geometric tests are probabilistic, and therefore flaky.
-filter = "test(geometric)"
-retries = 5
+# Output JUnit XML for Codecov test results integration
+junit = { path = "junit.xml" }
+
+  [[profile.ci.overrides]]
+  # The geometric tests are probabilistic, and therefore flaky.
+  filter = "test(geometric)"
+  retries = 5

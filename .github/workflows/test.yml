@@ -15,6 +15,7 @@ on:
 env:
   RUST_BACKTRACE: '1'
   FORCE_COLOR: '1'
+  NEXTEST_PROFILE: ci
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -32,6 +33,7 @@ jobs:
       - benches
       - examples
       - miri
+      - coverage
     runs-on: ubuntu-latest
 
     steps:
@@ -222,3 +224,39 @@ jobs:
 
       - name: Run Miri
         run: cargo miri test --all-features
+
+  coverage:
+    name: Coverage
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+
+      - name: Install Rust (stable)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: llvm-tools-preview
+
+      - name: Restore Rust cache
+        uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5  # v2.8.2
+
+      - name: Install cargo-llvm-cov and cargo-nextest
+        uses: taiki-e/install-action@a37010ded18ff788be4440302bd6830b1ae50d8b  # v2.68.25
+        with:
+          tool: cargo-llvm-cov,cargo-nextest
+
+      - name: Generate coverage
+        run: cargo llvm-cov nextest --all-features --lcov --output-path coverage.lcov
+
+      - name: Upload coverage
+        uses: codecov/codecov-action@671740ac38dd9b0130fbe1cec585b89eea48d3de  # v5.5.2
+        with:
+          files: coverage.lcov
+          token: ${{ secrets.CODECOV_TOKEN || '' }}
+
+      - name: Upload test results to Codecov
+        if: ${{ !cancelled() }}
+        uses: codecov/test-results-action@0fa95f0e1eeaafde2c782583b36b28ad0d8c77d3  # v1.2.1
+        with:
+          token: ${{ secrets.CODECOV_TOKEN || '' }}
