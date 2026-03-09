@@ -139,7 +139,21 @@ impl<T, G: LevelGenerator, const N: usize> SkipList<T, N, G> {
         F: FnMut(&mut T) -> K,
         K: PartialEq,
     {
-        self.dedup_by(|a, b| key(a) == key(b));
+        // Cache the key of the last retained element so `key` is called on it
+        // exactly once, even if `key` mutates its argument.  This matches the
+        // semantics of [`Vec::dedup_by_key`].
+        let mut last_key: Option<K> = None;
+        self.dedup_by(|a, b| {
+            // `b` is the retained element; compute its key only on first use.
+            let kb = last_key.get_or_insert_with(|| key(b));
+            let ka = key(a);
+            if ka == *kb {
+                true // drop `a`
+            } else {
+                last_key = Some(ka); // `a` will be retained; cache its key
+                false // keep `a`
+            }
+        });
     }
 
     /// Retains only the elements specified by the predicate.
@@ -599,6 +613,26 @@ mod tests {
         )]
         list.dedup_by_key(|i| *i / 10);
         assert!(list.is_empty());
+    }
+
+    #[test]
+    fn dedup_by_key_mutating_key_called_once_per_retained_element() {
+        // Key fn mutates: replaces the element with 0 and returns the original
+        // value.  If `key` were called more than once on the retained element,
+        // the second call would return 0 and later duplicates would be
+        // incorrectly kept.
+        let mut list = SkipList::<i32>::new();
+        for _ in 0..3 {
+            list.push_back(5);
+        }
+        list.dedup_by_key(|x| {
+            let v = *x;
+            *x = 0;
+            v
+        });
+        assert_eq!(list.len(), 1);
+        let got: Vec<i32> = list.iter().copied().collect();
+        assert_eq!(got, [0]);
     }
 
     #[test]
