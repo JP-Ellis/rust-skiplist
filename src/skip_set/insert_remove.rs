@@ -1,6 +1,10 @@
 //! Insertion and removal for [`SkipSet`](super::SkipSet).
 
-use crate::{comparator::Comparator, level_generator::LevelGenerator, skip_set::SkipSet};
+use crate::{
+    comparator::{Comparator, ComparatorKey},
+    level_generator::LevelGenerator,
+    skip_set::SkipSet,
+};
 
 impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> SkipSet<T, N, C, G> {
     /// Inserts `value` into the set if no element comparing equal to it is
@@ -47,7 +51,10 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> SkipSet<T, N, C, G>
     /// assert_eq!(set.len(), 1);
     /// ```
     #[inline]
-    pub fn replace(&mut self, value: T) -> Option<T> {
+    pub fn replace(&mut self, value: T) -> Option<T>
+    where
+        C: ComparatorKey<T, T>,
+    {
         let old = self.inner.take_first(&value);
         self.inner.insert(value);
         old
@@ -67,7 +74,11 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> SkipSet<T, N, C, G>
     /// assert_eq!(set.take(&1), None);
     /// ```
     #[inline]
-    pub fn take(&mut self, value: &T) -> Option<T> {
+    pub fn take<Q>(&mut self, value: &Q) -> Option<T>
+    where
+        Q: ?Sized,
+        C: ComparatorKey<T, Q>,
+    {
         self.inner.take_first(value)
     }
 
@@ -87,7 +98,11 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> SkipSet<T, N, C, G>
     /// assert!(!set.remove(&1));
     /// ```
     #[inline]
-    pub fn remove(&mut self, value: &T) -> bool {
+    pub fn remove<Q>(&mut self, value: &Q) -> bool
+    where
+        Q: ?Sized,
+        C: ComparatorKey<T, Q>,
+    {
         self.inner.take_first(value).is_some()
     }
 
@@ -517,5 +532,25 @@ mod tests {
         }
         assert_eq!(set.pop_last(), Some(1));
         assert_eq!(set.len(), 2);
+    }
+
+    // MARK: Borrow<Q> removals
+
+    #[test]
+    fn take_str_on_string_element() {
+        let mut set: SkipSet<String> = SkipSet::new();
+        set.insert("hello".to_owned());
+        set.insert("world".to_owned());
+        assert_eq!(set.take("hello"), Some("hello".to_owned()));
+        assert!(!set.contains("hello"));
+        assert_eq!(set.take("missing"), None);
+    }
+
+    #[test]
+    fn remove_str_on_string_element() {
+        let mut set: SkipSet<String> = SkipSet::new();
+        set.insert("hello".to_owned());
+        assert!(set.remove("hello"));
+        assert!(!set.remove("missing"));
     }
 }

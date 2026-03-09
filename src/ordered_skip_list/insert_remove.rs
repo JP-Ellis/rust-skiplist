@@ -3,7 +3,7 @@
 use core::{cmp::Ordering, ptr::NonNull};
 
 use crate::{
-    comparator::Comparator,
+    comparator::{Comparator, ComparatorKey},
     level_generator::LevelGenerator,
     node::{
         Node,
@@ -387,10 +387,14 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
                   splitting across blocks would require unsafe-crossing raw-pointer variables"
     )]
     #[inline]
-    pub fn take_first(&mut self, value: &T) -> Option<T> {
+    pub fn take_first<Q>(&mut self, value: &Q) -> Option<T>
+    where
+        Q: ?Sized,
+        C: ComparatorKey<T, Q>,
+    {
         let (target_ptr, found, precursors) = {
             let head = self.head;
-            let cmp = |v: &T, t: &T| self.comparator.compare(v, t);
+            let cmp = |v: &T, q: &Q| self.comparator.compare_key(v, q);
             let mut visitor = OrdMutVisitor::new(head, value, cmp);
             visitor.traverse();
             visitor.into_parts()
@@ -499,7 +503,11 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
                   unsafe-crossing raw-pointer variables"
     )]
     #[inline]
-    pub fn take_last(&mut self, value: &T) -> Option<T> {
+    pub fn take_last<Q>(&mut self, value: &Q) -> Option<T>
+    where
+        Q: ?Sized,
+        C: ComparatorKey<T, Q>,
+    {
         // Use a modified comparator that treats Equal as Less so that the
         // visitor advances past ALL equal nodes.  After traversal,
         // `cmp_past_precursors[0]` is the last node whose value compares equal
@@ -508,7 +516,7 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
         // skip-link at level l spans over target and must be decremented.
         let (target_ptr, cmp_past_precursors) = {
             let head = self.head;
-            let cmp_past = |v: &T, t: &T| match self.comparator.compare(v, t) {
+            let cmp_past = |v: &T, q: &Q| match self.comparator.compare_key(v, q) {
                 Ordering::Equal | Ordering::Less => Ordering::Less,
                 Ordering::Greater => Ordering::Greater,
             };
@@ -527,7 +535,7 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
         // node pointers reachable from head: all live for &mut self's lifetime.
         let is_equal = unsafe { target_ptr.as_ref() }
             .value()
-            .is_some_and(|v| self.comparator.compare(v, value) == Ordering::Equal);
+            .is_some_and(|v| self.comparator.compare_key(v, value) == Ordering::Equal);
         if !is_equal {
             return None;
         }
@@ -636,7 +644,11 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
     /// assert!(!list.contains(&2));
     /// ```
     #[inline]
-    pub fn take(&mut self, value: &T) -> Option<T> {
+    pub fn take<Q>(&mut self, value: &Q) -> Option<T>
+    where
+        Q: ?Sized,
+        C: ComparatorKey<T, Q>,
+    {
         self.take_first(value)
     }
 
@@ -662,7 +674,11 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
     /// assert!(!list.contains(&2));
     /// ```
     #[inline]
-    pub fn remove_all(&mut self, value: &T) -> usize {
+    pub fn remove_all<Q>(&mut self, value: &Q) -> usize
+    where
+        Q: ?Sized,
+        C: ComparatorKey<T, Q>,
+    {
         let mut count = 0_usize;
         while self.take_first(value).is_some() {
             count = count.saturating_add(1);
@@ -726,7 +742,11 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
                   which would be more error-prone than keeping all the logic in one place."
     )]
     #[inline]
-    pub fn take_fast(&mut self, value: &T) -> Option<T> {
+    pub fn take_fast<Q>(&mut self, value: &Q) -> Option<T>
+    where
+        Q: ?Sized,
+        C: ComparatorKey<T, Q>,
+    {
         // Pass 1: find the "fast" target, the first equal node encountered
         // during skip traversal (tends to be a higher-level node).
         //
@@ -738,7 +758,7 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
         let fast_ptr: NonNull<Node<T, N>> = {
             // SAFETY: self.head is a valid node for &mut self's lifetime.
             let max_levels = unsafe { self.head.as_ref() }.level();
-            let cmp = |v: &T| self.comparator.compare(v, value);
+            let cmp = |v: &T| self.comparator.compare_key(v, value);
             let mut current = self.head;
             let mut level = max_levels;
             let mut result: Option<NonNull<Node<T, N>>> = None;
@@ -804,7 +824,7 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
         // advancement) as the starting point for the pointer-equality scan.
         let (first_ptr, found, first_precursors) = {
             let head = self.head;
-            let cmp = |v: &T, t: &T| self.comparator.compare(v, t);
+            let cmp = |v: &T, q: &Q| self.comparator.compare_key(v, q);
             let mut visitor = OrdMutVisitor::new(head, value, cmp);
             visitor.traverse();
             visitor.into_parts()
@@ -2117,5 +2137,64 @@ mod tests {
         );
         let got: Vec<i32> = list.iter().copied().collect();
         assert_eq!(got, [3, 2, 1]);
+    }
+
+    // MARK: Borrow<Q> removals (String / &str)
+
+    #[test]
+    fn take_first_str_on_string_element() {
+        let mut list = OrderedSkipList::<String>::new();
+        list.insert("apple".to_owned());
+        list.insert("banana".to_owned());
+        list.insert("cherry".to_owned());
+        assert_eq!(list.take_first("banana"), Some("banana".to_owned()));
+        assert_eq!(list.len(), 2);
+        assert!(!list.contains("banana"));
+        assert_eq!(list.take_first("missing"), None);
+    }
+
+    #[test]
+    fn take_last_str_on_string_element() {
+        let mut list = OrderedSkipList::<String>::new();
+        list.insert("apple".to_owned());
+        list.insert("apple".to_owned());
+        list.insert("banana".to_owned());
+        // take_last removes the last occurrence
+        assert_eq!(list.take_last("apple"), Some("apple".to_owned()));
+        assert_eq!(list.count("apple"), 1);
+        assert_eq!(list.take_last("missing"), None);
+    }
+
+    #[test]
+    fn take_range_str_on_string_element() {
+        let mut list = OrderedSkipList::<String>::new();
+        for s in ["apple", "banana", "cherry", "date"] {
+            list.insert(s.to_owned());
+        }
+        // take_first within range using a &str probe
+        assert_eq!(list.take_first("cherry"), Some("cherry".to_owned()));
+        assert!(!list.contains("cherry"));
+    }
+
+    #[test]
+    fn remove_all_str_on_string_element() {
+        let mut list = OrderedSkipList::<String>::new();
+        list.insert("apple".to_owned());
+        list.insert("apple".to_owned());
+        list.insert("banana".to_owned());
+        assert_eq!(list.remove_all("apple"), 2);
+        assert_eq!(list.len(), 1);
+        assert!(!list.contains("apple"));
+        assert_eq!(list.remove_all("missing"), 0);
+    }
+
+    #[test]
+    fn take_fast_str_on_string_element() {
+        let mut list = OrderedSkipList::<String>::new();
+        list.insert("apple".to_owned());
+        list.insert("banana".to_owned());
+        assert_eq!(list.take_fast("apple"), Some("apple".to_owned()));
+        assert_eq!(list.len(), 1);
+        assert_eq!(list.take_fast("missing"), None);
     }
 }

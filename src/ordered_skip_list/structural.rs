@@ -4,7 +4,7 @@
 use core::{cmp::Ordering, ptr::NonNull};
 
 use crate::{
-    comparator::Comparator,
+    comparator::{Comparator, ComparatorKey},
     level_generator::LevelGenerator,
     node::{
         Node,
@@ -262,9 +262,10 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
     )]
     #[inline]
     #[must_use]
-    pub fn split_off(&mut self, value: &T) -> Self
+    pub fn split_off<Q>(&mut self, value: &Q) -> Self
     where
-        C: Clone,
+        Q: ?Sized,
+        C: Clone + ComparatorKey<T, Q>,
         G: Clone,
     {
         let max_levels = self.head_ref().level();
@@ -278,7 +279,7 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
         // is consumed by `into_parts()`.
         let pivot_nn = {
             let head = self.head;
-            let cmp = |v: &T, t: &T| self.comparator.compare(v, t);
+            let cmp = |v: &T, q: &Q| self.comparator.compare_key(v, q);
             let mut visitor = OrdMutVisitor::new(head, value, cmp);
             visitor.traverse();
             let (_current, _found, precursors) = visitor.into_parts();
@@ -1394,5 +1395,25 @@ mod tests {
         assert!(list.is_empty());
         assert_eq!(list.first(), None);
         assert_eq!(list.last(), None);
+    }
+
+    // MARK: Borrow<Q> split_off (String / &str)
+
+    #[test]
+    fn split_off_str_on_string_element() {
+        let mut list = OrderedSkipList::<String>::new();
+        for s in ["apple", "banana", "cherry", "date"] {
+            list.insert(s.to_owned());
+        }
+        // split at "cherry": self keeps apple, banana; right gets cherry, date
+        let right = list.split_off("cherry");
+        assert_eq!(
+            list.iter().map(String::as_str).collect::<Vec<_>>(),
+            ["apple", "banana"]
+        );
+        assert_eq!(
+            right.iter().map(String::as_str).collect::<Vec<_>>(),
+            ["cherry", "date"]
+        );
     }
 }

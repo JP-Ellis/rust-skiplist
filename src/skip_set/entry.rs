@@ -7,7 +7,7 @@
 use core::fmt;
 
 use crate::{
-    comparator::{Comparator, OrdComparator},
+    comparator::{Comparator, ComparatorKey, OrdComparator},
     level_generator::{LevelGenerator, geometric::Geometric},
     skip_set::SkipSet,
 };
@@ -154,7 +154,10 @@ impl<'a, T, C: Comparator<T>, G: LevelGenerator, const N: usize> Entry<'a, T, N,
     /// assert_eq!(set.len(), 1);
     /// ```
     #[inline]
-    pub fn or_insert(self) -> &'a T {
+    pub fn or_insert(self) -> &'a T
+    where
+        C: ComparatorKey<T, T>,
+    {
         match self {
             Self::Occupied(e) => e.into_ref(),
             Self::Vacant(VacantEntry { set, value }) => set.inner.get_or_insert(value),
@@ -181,6 +184,7 @@ impl<'a, T, C: Comparator<T>, G: LevelGenerator, const N: usize> Entry<'a, T, N,
     pub fn or_insert_with<F>(self, f: F) -> &'a T
     where
         F: FnOnce() -> T,
+        C: ComparatorKey<T, T>,
     {
         match self {
             Self::Occupied(e) => e.into_ref(),
@@ -206,6 +210,7 @@ impl<'a, T, C: Comparator<T>, G: LevelGenerator, const N: usize> Entry<'a, T, N,
     pub fn or_default(self) -> &'a T
     where
         T: Default,
+        C: ComparatorKey<T, T>,
     {
         self.or_insert_with(T::default)
     }
@@ -318,7 +323,10 @@ impl<'a, T, C: Comparator<T>, G: LevelGenerator, const N: usize> OccupiedEntry<'
     /// ```
     #[inline]
     #[must_use]
-    pub fn get(&self) -> &T {
+    pub fn get(&self) -> &T
+    where
+        C: ComparatorKey<T, T>,
+    {
         self.set
             .inner
             .get_fast(&self.value)
@@ -345,7 +353,10 @@ impl<'a, T, C: Comparator<T>, G: LevelGenerator, const N: usize> OccupiedEntry<'
     /// ```
     #[inline]
     #[must_use]
-    pub fn into_ref(self) -> &'a T {
+    pub fn into_ref(self) -> &'a T
+    where
+        C: ComparatorKey<T, T>,
+    {
         let Self { set, value } = self;
         set.inner
             .get_fast(&value)
@@ -371,7 +382,10 @@ impl<'a, T, C: Comparator<T>, G: LevelGenerator, const N: usize> OccupiedEntry<'
     /// assert!(!set.contains(&5));
     /// ```
     #[inline]
-    pub fn remove(self) -> T {
+    pub fn remove(self) -> T
+    where
+        C: ComparatorKey<T, T>,
+    {
         self.set
             .inner
             .take_first(&self.value)
@@ -399,7 +413,10 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> SkipSet<T, N, C, G>
     /// assert!(set.contains(&1));
     /// ```
     #[inline]
-    pub fn entry(&mut self, value: T) -> Entry<'_, T, N, C, G> {
+    pub fn entry(&mut self, value: T) -> Entry<'_, T, N, C, G>
+    where
+        C: ComparatorKey<T, T>,
+    {
         if self.inner.contains(&value) {
             Entry::Occupied(OccupiedEntry { set: self, value })
         } else {
@@ -410,8 +427,8 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> SkipSet<T, N, C, G>
 
 // MARK: Debug
 
-impl<T: fmt::Debug, C: Comparator<T>, G: LevelGenerator, const N: usize> fmt::Debug
-    for Entry<'_, T, N, C, G>
+impl<T: fmt::Debug, C: Comparator<T> + ComparatorKey<T, T>, G: LevelGenerator, const N: usize>
+    fmt::Debug for Entry<'_, T, N, C, G>
 {
     #[inline]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -433,8 +450,8 @@ impl<T: fmt::Debug, C: Comparator<T>, G: LevelGenerator, const N: usize> fmt::De
     }
 }
 
-impl<T: fmt::Debug, C: Comparator<T>, G: LevelGenerator, const N: usize> fmt::Debug
-    for OccupiedEntry<'_, T, N, C, G>
+impl<T: fmt::Debug, C: Comparator<T> + ComparatorKey<T, T>, G: LevelGenerator, const N: usize>
+    fmt::Debug for OccupiedEntry<'_, T, N, C, G>
 {
     #[inline]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {

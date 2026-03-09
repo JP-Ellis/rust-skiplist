@@ -3,7 +3,7 @@
 use core::{cmp::Ordering, ops::Index};
 
 use crate::{
-    comparator::Comparator,
+    comparator::{Comparator, ComparatorKey},
     level_generator::LevelGenerator,
     node::visitor::{IndexVisitor, OrdIndexVisitor, OrdVisitor, Visitor},
     ordered_skip_list::OrderedSkipList,
@@ -94,9 +94,13 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
     /// ```
     #[inline]
     #[must_use]
-    pub fn contains(&self, value: &T) -> bool {
+    pub fn contains<Q>(&self, value: &Q) -> bool
+    where
+        Q: ?Sized,
+        C: ComparatorKey<T, Q>,
+    {
         let head = self.head_ref();
-        let cmp = |v: &T, t: &T| self.comparator.compare(v, t);
+        let cmp = |v: &T, q: &Q| self.comparator.compare_key(v, q);
         OrdVisitor::new(head, value, cmp).traverse().is_some()
     }
 
@@ -127,7 +131,11 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
     /// ```
     #[inline]
     #[must_use]
-    pub fn get(&self, value: &T) -> Option<&T> {
+    pub fn get<Q>(&self, value: &Q) -> Option<&T>
+    where
+        Q: ?Sized,
+        C: ComparatorKey<T, Q>,
+    {
         self.get_fast(value)
     }
 
@@ -157,9 +165,13 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
     /// ```
     #[inline]
     #[must_use]
-    pub fn get_fast(&self, value: &T) -> Option<&T> {
+    pub fn get_fast<Q>(&self, value: &Q) -> Option<&T>
+    where
+        Q: ?Sized,
+        C: ComparatorKey<T, Q>,
+    {
         let head = self.head_ref();
-        let cmp = |v: &T, t: &T| self.comparator.compare(v, t);
+        let cmp = |v: &T, q: &Q| self.comparator.compare_key(v, q);
         OrdVisitor::new(head, value, cmp).traverse()?.value()
     }
 
@@ -191,9 +203,13 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
     /// ```
     #[inline]
     #[must_use]
-    pub fn get_first(&self, value: &T) -> Option<&T> {
+    pub fn get_first<Q>(&self, value: &Q) -> Option<&T>
+    where
+        Q: ?Sized,
+        C: ComparatorKey<T, Q>,
+    {
         let head = self.head_ref();
-        let cmp = |v: &T, t: &T| self.comparator.compare(v, t);
+        let cmp = |v: &T, q: &Q| self.comparator.compare_key(v, q);
         // OrdIndexVisitor advances only on strict Less, guaranteeing that
         // traversal lands on the *first* occurrence when duplicates exist.
         let mut visitor = OrdIndexVisitor::new(head, value, cmp);
@@ -225,12 +241,16 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
     /// ```
     #[inline]
     #[must_use]
-    pub fn get_last(&self, value: &T) -> Option<&T> {
+    pub fn get_last<Q>(&self, value: &Q) -> Option<&T>
+    where
+        Q: ?Sized,
+        C: ComparatorKey<T, Q>,
+    {
         let head = self.head_ref();
         // Treat Equal as Less so that traversal advances through *all* equal
         // nodes. After exhaustion, current() is the last equal node (or a
         // node that compares Less if none exist).
-        let cmp_past = |v: &T, t: &T| match self.comparator.compare(v, t) {
+        let cmp_past = |v: &T, q: &Q| match self.comparator.compare_key(v, q) {
             core::cmp::Ordering::Equal | core::cmp::Ordering::Less => core::cmp::Ordering::Less,
             core::cmp::Ordering::Greater => core::cmp::Ordering::Greater,
         };
@@ -241,7 +261,7 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
         // a Less node when no matching element exists at all).
         current
             .value()
-            .filter(|v| self.comparator.compare(v, value) == core::cmp::Ordering::Equal)
+            .filter(|v| self.comparator.compare_key(v, value) == core::cmp::Ordering::Equal)
     }
 
     /// Returns a shared reference to the element at the given 0-based `index`,
@@ -299,12 +319,16 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
     /// ```
     #[inline]
     #[must_use]
-    pub fn rank(&self, value: &T) -> Option<usize> {
+    pub fn rank<Q>(&self, value: &Q) -> Option<usize>
+    where
+        Q: ?Sized,
+        C: ComparatorKey<T, Q>,
+    {
         if self.is_empty() {
             return None;
         }
         let head = self.head_ref();
-        let cmp = |v: &T, t: &T| self.comparator.compare(v, t);
+        let cmp = |v: &T, q: &Q| self.comparator.compare_key(v, q);
         let mut visitor = OrdIndexVisitor::new(head, value, cmp);
         visitor.traverse();
         visitor.found().then(|| visitor.rank())
@@ -339,7 +363,11 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
     )]
     #[inline]
     #[must_use]
-    pub fn count(&self, value: &T) -> usize {
+    pub fn count<Q>(&self, value: &Q) -> usize
+    where
+        Q: ?Sized,
+        C: ComparatorKey<T, Q>,
+    {
         if self.is_empty() {
             return 0;
         }
@@ -347,7 +375,7 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
         // *first* occurrence of `value`. OrdVisitor follows Equal skip links
         // which can skip earlier duplicates when multiple equal nodes exist.
         let head = self.head_ref();
-        let cmp = |v: &T, t: &T| self.comparator.compare(v, t);
+        let cmp = |v: &T, q: &Q| self.comparator.compare_key(v, q);
         let mut visitor = OrdIndexVisitor::new(head, value, cmp);
         let first = visitor.traverse();
         if !visitor.found() {
@@ -358,7 +386,7 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
         let mut cur = first_node.next_as_ref();
         while let Some(node) = cur {
             match node.value() {
-                Some(v) if self.comparator.compare(v, value) == Ordering::Equal => {
+                Some(v) if self.comparator.compare_key(v, value) == Ordering::Equal => {
                     count = count.saturating_add(1);
                     cur = node.next_as_ref();
                 }
@@ -1102,5 +1130,50 @@ mod tests {
         assert_eq!(list[0], 3);
         assert_eq!(list[1], 2);
         assert_eq!(list[2], 1);
+    }
+
+    // MARK: Borrow<Q> lookups (String / &str)
+
+    #[test]
+    fn contains_str_on_string_element() {
+        let mut list = OrderedSkipList::<String>::new();
+        list.insert("apple".to_owned());
+        list.insert("banana".to_owned());
+        assert!(list.contains("apple"));
+        assert!(list.contains("banana"));
+        assert!(!list.contains("cherry"));
+    }
+
+    #[test]
+    fn get_fast_str_on_string_element() {
+        let mut list = OrderedSkipList::<String>::new();
+        list.insert("apple".to_owned());
+        list.insert("banana".to_owned());
+        assert_eq!(list.get_fast("apple"), Some(&"apple".to_owned()));
+        assert_eq!(list.get_fast("cherry"), None);
+    }
+
+    #[test]
+    fn rank_str_on_string_element() {
+        let mut list = OrderedSkipList::<String>::new();
+        list.insert("apple".to_owned());
+        list.insert("banana".to_owned());
+        list.insert("cherry".to_owned());
+        // Sorted: apple(0), banana(1), cherry(2)
+        assert_eq!(list.rank("apple"), Some(0));
+        assert_eq!(list.rank("banana"), Some(1));
+        assert_eq!(list.rank("cherry"), Some(2));
+        assert_eq!(list.rank("date"), None);
+    }
+
+    #[test]
+    fn count_str_on_string_element() {
+        let mut list = OrderedSkipList::<String>::new();
+        list.insert("apple".to_owned());
+        list.insert("apple".to_owned());
+        list.insert("banana".to_owned());
+        assert_eq!(list.count("apple"), 2);
+        assert_eq!(list.count("banana"), 1);
+        assert_eq!(list.count("cherry"), 0);
     }
 }

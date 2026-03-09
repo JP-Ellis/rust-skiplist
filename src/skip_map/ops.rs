@@ -3,12 +3,16 @@
 use core::ops::Index;
 
 use super::SkipMap;
-use crate::{comparator::Comparator, level_generator::LevelGenerator};
+use crate::{
+    comparator::{Comparator, ComparatorKey},
+    level_generator::LevelGenerator,
+};
 
 // MARK: Index<&K>
 
-impl<K, V, C: Comparator<K>, G: LevelGenerator, const N: usize> Index<&K>
-    for SkipMap<K, V, N, C, G>
+impl<K, V, C, G: LevelGenerator, const N: usize> Index<&K> for SkipMap<K, V, N, C, G>
+where
+    C: Comparator<K> + ComparatorKey<K, K>,
 {
     type Output = V;
 

@@ -2,7 +2,11 @@
 
 use core::ops::Index;
 
-use crate::{comparator::Comparator, level_generator::LevelGenerator, skip_set::SkipSet};
+use crate::{
+    comparator::{Comparator, ComparatorKey},
+    level_generator::LevelGenerator,
+    skip_set::SkipSet,
+};
 
 impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> SkipSet<T, N, C, G> {
     /// Returns a shared reference to the first (smallest) element, or `None`
@@ -58,7 +62,11 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> SkipSet<T, N, C, G>
     /// ```
     #[inline]
     #[must_use]
-    pub fn contains(&self, value: &T) -> bool {
+    pub fn contains<Q>(&self, value: &Q) -> bool
+    where
+        Q: ?Sized,
+        C: ComparatorKey<T, Q>,
+    {
         self.inner.contains(value)
     }
 
@@ -80,7 +88,11 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> SkipSet<T, N, C, G>
     /// ```
     #[inline]
     #[must_use]
-    pub fn get(&self, value: &T) -> Option<&T> {
+    pub fn get<Q>(&self, value: &Q) -> Option<&T>
+    where
+        Q: ?Sized,
+        C: ComparatorKey<T, Q>,
+    {
         self.inner.get_fast(value)
     }
 
@@ -131,7 +143,11 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> SkipSet<T, N, C, G>
     /// ```
     #[inline]
     #[must_use]
-    pub fn rank(&self, value: &T) -> Option<usize> {
+    pub fn rank<Q>(&self, value: &Q) -> Option<usize>
+    where
+        Q: ?Sized,
+        C: ComparatorKey<T, Q>,
+    {
         self.inner.rank(value)
     }
 }
@@ -508,5 +524,37 @@ mod tests {
     fn index_empty_panics() {
         let set = SkipSet::<i32>::new();
         let _: i32 = set[0];
+    }
+
+    // MARK: Borrow<Q> lookups (String / &str)
+
+    #[test]
+    fn rank_str_on_string_element() {
+        let mut set: SkipSet<String> = SkipSet::new();
+        set.insert("apple".to_owned());
+        set.insert("banana".to_owned());
+        set.insert("cherry".to_owned());
+        assert_eq!(set.rank("apple"), Some(0));
+        assert_eq!(set.rank("banana"), Some(1));
+        assert_eq!(set.rank("cherry"), Some(2));
+        assert_eq!(set.rank("date"), None);
+    }
+
+    #[test]
+    fn contains_str_on_string_element() {
+        let mut set: SkipSet<String> = SkipSet::new();
+        set.insert("hello".to_owned());
+        set.insert("world".to_owned());
+        assert!(set.contains("hello"));
+        assert!(set.contains("world"));
+        assert!(!set.contains("missing"));
+    }
+
+    #[test]
+    fn get_str_on_string_element() {
+        let mut set: SkipSet<String> = SkipSet::new();
+        set.insert("hello".to_owned());
+        assert_eq!(set.get("hello"), Some(&"hello".to_owned()));
+        assert_eq!(set.get("missing"), None);
     }
 }

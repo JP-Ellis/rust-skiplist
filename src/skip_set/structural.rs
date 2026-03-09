@@ -3,7 +3,11 @@
 
 use core::cmp::Ordering;
 
-use crate::{comparator::Comparator, level_generator::LevelGenerator, skip_set::SkipSet};
+use crate::{
+    comparator::{Comparator, ComparatorKey},
+    level_generator::LevelGenerator,
+    skip_set::SkipSet,
+};
 
 impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> SkipSet<T, N, C, G> {
     /// Removes all elements from the set.
@@ -155,9 +159,10 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> SkipSet<T, N, C, G>
     /// ```
     #[inline]
     #[must_use]
-    pub fn split_off(&mut self, value: &T) -> Self
+    pub fn split_off<Q>(&mut self, value: &Q) -> Self
     where
-        C: Clone,
+        Q: ?Sized,
+        C: Clone + ComparatorKey<T, Q>,
         G: Clone,
     {
         Self {
@@ -549,5 +554,25 @@ mod tests {
         let right = set.split_off_index(2);
         assert_eq!(set.iter().copied().collect::<Vec<_>>(), [5, 4]);
         assert_eq!(right.iter().copied().collect::<Vec<_>>(), [3, 2, 1]);
+    }
+
+    // MARK: Borrow<Q> split_off (String / &str)
+
+    #[test]
+    fn split_off_str_on_string_element() {
+        let mut set: SkipSet<String> = SkipSet::new();
+        for s in ["apple", "banana", "cherry", "date"] {
+            set.insert(s.to_owned());
+        }
+        // split at "cherry": left keeps apple, banana; right gets cherry, date
+        let right = set.split_off("cherry");
+        assert_eq!(
+            set.iter().map(String::as_str).collect::<Vec<_>>(),
+            ["apple", "banana"]
+        );
+        assert_eq!(
+            right.iter().map(String::as_str).collect::<Vec<_>>(),
+            ["cherry", "date"]
+        );
     }
 }

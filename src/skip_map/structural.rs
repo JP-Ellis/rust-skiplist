@@ -5,7 +5,7 @@ use core::{cmp::Ordering, ptr::NonNull};
 
 use super::SkipMap;
 use crate::{
-    comparator::Comparator,
+    comparator::{Comparator, ComparatorKey},
     level_generator::LevelGenerator,
     node::{
         Node,
@@ -274,9 +274,10 @@ impl<K, V, const N: usize, C: Comparator<K>, G: LevelGenerator> SkipMap<K, V, N,
     )]
     #[inline]
     #[must_use]
-    pub fn split_off(&mut self, key: &K) -> Self
+    pub fn split_off<Q>(&mut self, key: &Q) -> Self
     where
-        C: Clone,
+        Q: ?Sized,
+        C: Clone + ComparatorKey<K, Q>,
         G: Clone,
     {
         let max_levels = self.head_ref().level();
@@ -290,7 +291,7 @@ impl<K, V, const N: usize, C: Comparator<K>, G: LevelGenerator> SkipMap<K, V, N,
         // is consumed by `into_parts()`.
         let pivot_nn = {
             let head = self.head;
-            let cmp = |entry: &(K, V), k: &K| self.comparator.compare(&entry.0, k);
+            let cmp = |entry: &(K, V), q: &Q| self.comparator.compare_key(&entry.0, q);
             let mut visitor = OrdMutVisitor::new(head, key, cmp);
             visitor.traverse();
             let (_current, _found, precursors) = visitor.into_parts();
@@ -382,7 +383,7 @@ impl<K, V, const N: usize, C: Comparator<K>, G: LevelGenerator> SkipMap<K, V, N,
         F: FnMut(&K, V, V) -> V,
     {
         for (k, v) in other {
-            if let Some(old_v) = self.remove(&k) {
+            if let Some(old_v) = self.remove_impl(&k).map(|(_, val)| val) {
                 let merged = conflict(&k, old_v, v);
                 self.insert(k, merged);
             } else {
@@ -820,5 +821,31 @@ mod tests {
         for i in 0..10_i32 {
             assert_eq!(a.get(&i), Some(&(i + i * 100)));
         }
+    }
+
+    // MARK: Borrow<Q> split_off (String / &str)
+
+    #[test]
+    fn split_off_str_on_string_key() {
+        let mut map: SkipMap<String, i32> = SkipMap::new();
+        map.insert("apple".to_owned(), 1);
+        map.insert("banana".to_owned(), 2);
+        map.insert("cherry".to_owned(), 3);
+        map.insert("date".to_owned(), 4);
+        // split at "cherry": left keeps apple, banana; right gets cherry, date
+        let right = map.split_off("cherry");
+        assert_eq!(
+            map.iter()
+                .map(|(k, &v)| (k.as_str(), v))
+                .collect::<Vec<_>>(),
+            [("apple", 1), ("banana", 2)]
+        );
+        assert_eq!(
+            right
+                .iter()
+                .map(|(k, &v)| (k.as_str(), v))
+                .collect::<Vec<_>>(),
+            [("cherry", 3), ("date", 4)]
+        );
     }
 }

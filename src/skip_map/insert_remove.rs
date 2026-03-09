@@ -4,7 +4,7 @@ use core::ptr::NonNull;
 
 use super::SkipMap;
 use crate::{
-    comparator::Comparator,
+    comparator::{Comparator, ComparatorKey},
     level_generator::LevelGenerator,
     node::{
         Node,
@@ -188,8 +188,12 @@ impl<K, V, const N: usize, C: Comparator<K>, G: LevelGenerator> SkipMap<K, V, N,
     /// assert_eq!(map.len(), 1);
     /// ```
     #[inline]
-    pub fn remove(&mut self, key: &K) -> Option<V> {
-        self.remove_impl(key).map(|(_, v)| v)
+    pub fn remove<Q>(&mut self, key: &Q) -> Option<V>
+    where
+        Q: ?Sized,
+        C: ComparatorKey<K, Q>,
+    {
+        self.remove_impl_q(key).map(|(_, v)| v)
     }
 
     /// Removes the entry with the given key and returns the key-value pair,
@@ -211,16 +215,17 @@ impl<K, V, const N: usize, C: Comparator<K>, G: LevelGenerator> SkipMap<K, V, N,
     /// assert_eq!(map.remove_entry(&7), None);
     /// ```
     #[inline]
-    pub fn remove_entry(&mut self, key: &K) -> Option<(K, V)> {
-        self.remove_impl(key)
+    pub fn remove_entry<Q>(&mut self, key: &Q) -> Option<(K, V)>
+    where
+        Q: ?Sized,
+        C: ComparatorKey<K, Q>,
+    {
+        self.remove_impl_q(key)
     }
 
-    /// Shared implementation for `remove` and `remove_entry`.
-    ///
-    /// Locates the entry matching `key` via [`OrdMutVisitor`] (which records
-    /// the predecessor at every skip level), splices the target node out of the
-    /// list while keeping all skip-link distances accurate, updates `tail` and
-    /// `len`, and returns the key-value pair.
+    /// Non-generic removal used internally (e.g. by `merge`) where the key
+    /// type is always `K`.  Avoids requiring `C: ComparatorKey<K, K>` on
+    /// callers that only ever pass `&K`.
     #[expect(
         clippy::expect_used,
         reason = "Link::new distance is pred_to_target + target_to_succ - 1 >= 1; \
@@ -239,7 +244,7 @@ impl<K, V, const N: usize, C: Comparator<K>, G: LevelGenerator> SkipMap<K, V, N,
                   splitting across blocks would require unsafe-crossing raw-pointer variables"
     )]
     #[inline]
-    fn remove_impl(&mut self, key: &K) -> Option<(K, V)> {
+    pub(super) fn remove_impl(&mut self, key: &K) -> Option<(K, V)> {
         let (target_ptr, found, precursors) = {
             let head = self.head;
             let cmp = |entry: &(K, V), k: &K| self.comparator.compare(&entry.0, k);
@@ -271,6 +276,89 @@ impl<K, V, const N: usize, C: Comparator<K>, G: LevelGenerator> SkipMap<K, V, N,
             //   New: pred.links[l] points to succ (dist d1 + d2 - 1) or None.
             // For l >= target_height: pred.links[l] spans over target to some
             //   node at a rank 1 higher than before; decrement the distance.
+            for (l, pred_nn) in precursors.iter().enumerate().take(max_levels) {
+                let pred_ptr = pred_nn.as_ptr();
+                if l < target_height {
+                    let old_link = (*pred_ptr).links_mut()[l].take();
+                    let target_link = (*target_raw).links_mut()[l].take();
+                    (*pred_ptr).links_mut()[l] = match (old_link, target_link) {
+                        (Some(pred_to_target), Some(target_to_succ)) => {
+                            let new_dist = pred_to_target
+                                .distance()
+                                .get()
+                                .saturating_add(target_to_succ.distance().get())
+                                .saturating_sub(1);
+                            Some(Link::new(target_to_succ.node(), new_dist).expect("new_dist >= 1"))
+                        }
+                        (_, None) => None,
+                        (None, tgt) => tgt,
+                    };
+                } else if let Some(link) = (*pred_ptr).links_mut()[l].as_mut() {
+                    link.decrement_distance()
+                        .expect("skip link spanning target has distance >= 2");
+                }
+            }
+
+            let mut popped = (*target_raw).pop();
+            popped.take_value()
+        };
+
+        if self.tail == Some(target_ptr) {
+            self.tail = if self.len == 1 {
+                None
+            } else {
+                Some(precursors[0])
+            };
+        }
+        self.len = self.len.saturating_sub(1);
+        kv
+    }
+
+    /// Generic removal for the public `remove` / `remove_entry` API.
+    ///
+    /// Accepts any borrowed form `Q` of `K` via [`ComparatorKey`].
+    #[expect(
+        clippy::expect_used,
+        reason = "Link::new distance is pred_to_target + target_to_succ - 1 >= 1; \
+                  decrement_distance panics only on underflow to 0 which cannot happen \
+                  for valid skip-link distances; all expects are invariant violations"
+    )]
+    #[expect(
+        clippy::indexing_slicing,
+        reason = "l iterates 0..max_levels; precursors[l] is valid because \
+                  OrdMutVisitor fills all max_levels entries; \
+                  links_mut()[l] is valid because l < node.level() = max_levels"
+    )]
+    #[expect(
+        clippy::multiple_unsafe_ops_per_block,
+        reason = "link splicing and node pop touch provably disjoint heap nodes; \
+                  splitting across blocks would require unsafe-crossing raw-pointer variables"
+    )]
+    #[inline]
+    fn remove_impl_q<Q>(&mut self, key: &Q) -> Option<(K, V)>
+    where
+        Q: ?Sized,
+        C: ComparatorKey<K, Q>,
+    {
+        let (target_ptr, found, precursors) = {
+            let head = self.head;
+            let cmp = |entry: &(K, V), q: &Q| self.comparator.compare_key(&entry.0, q);
+            let mut visitor = OrdMutVisitor::new(head, key, cmp);
+            visitor.traverse();
+            visitor.into_parts()
+        };
+
+        if !found {
+            return None;
+        }
+
+        let max_levels = self.head_ref().level();
+
+        // SAFETY: same as `remove_impl`.
+        let kv = unsafe {
+            let target_height = target_ptr.as_ref().level();
+            let target_raw = target_ptr.as_ptr();
+
             for (l, pred_nn) in precursors.iter().enumerate().take(max_levels) {
                 let pred_ptr = pred_nn.as_ptr();
                 if l < target_height {
@@ -787,5 +875,27 @@ mod tests {
         *map.get_mut(&1).expect("key present") += 5;
         assert_eq!(map.get(&1), Some(&15));
         assert_eq!(map.get(&2), Some(&20));
+    }
+
+    // MARK: Borrow<Q> removals
+
+    #[test]
+    fn remove_str_on_string_key() {
+        let mut map: SkipMap<String, i32> = SkipMap::new();
+        map.insert("hello".to_owned(), 1);
+        map.insert("world".to_owned(), 2);
+        assert_eq!(map.remove("hello"), Some(1));
+        assert!(!map.contains_key("hello"));
+        assert_eq!(map.remove("missing"), None);
+    }
+
+    #[test]
+    fn remove_entry_str_on_string_key() {
+        let mut map: SkipMap<String, i32> = SkipMap::new();
+        map.insert("hello".to_owned(), 1);
+        map.insert("world".to_owned(), 2);
+        assert_eq!(map.remove_entry("hello"), Some(("hello".to_owned(), 1)));
+        assert!(!map.contains_key("hello"));
+        assert_eq!(map.remove_entry("missing"), None);
     }
 }

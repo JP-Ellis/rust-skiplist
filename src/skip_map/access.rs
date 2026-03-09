@@ -2,7 +2,7 @@
 
 use super::SkipMap;
 use crate::{
-    comparator::Comparator,
+    comparator::{Comparator, ComparatorKey},
     level_generator::LevelGenerator,
     node::visitor::{IndexVisitor, OrdIndexVisitor, OrdMutVisitor, OrdVisitor, Visitor},
 };
@@ -77,8 +77,12 @@ impl<K, V, const N: usize, C: Comparator<K>, G: LevelGenerator> SkipMap<K, V, N,
     /// ```
     #[inline]
     #[must_use]
-    pub fn contains_key(&self, key: &K) -> bool {
-        let cmp = |entry: &(K, V), k: &K| self.comparator.compare(&entry.0, k);
+    pub fn contains_key<Q>(&self, key: &Q) -> bool
+    where
+        Q: ?Sized,
+        C: ComparatorKey<K, Q>,
+    {
+        let cmp = |entry: &(K, V), q: &Q| self.comparator.compare_key(&entry.0, q);
         OrdVisitor::new(self.head_ref(), key, cmp)
             .traverse()
             .is_some()
@@ -106,8 +110,12 @@ impl<K, V, const N: usize, C: Comparator<K>, G: LevelGenerator> SkipMap<K, V, N,
     /// ```
     #[inline]
     #[must_use]
-    pub fn get(&self, key: &K) -> Option<&V> {
-        let cmp = |entry: &(K, V), k: &K| self.comparator.compare(&entry.0, k);
+    pub fn get<Q>(&self, key: &Q) -> Option<&V>
+    where
+        Q: ?Sized,
+        C: ComparatorKey<K, Q>,
+    {
+        let cmp = |entry: &(K, V), q: &Q| self.comparator.compare_key(&entry.0, q);
         let node = OrdVisitor::new(self.head_ref(), key, cmp).traverse()?;
         Some(&node.value()?.1)
     }
@@ -134,8 +142,12 @@ impl<K, V, const N: usize, C: Comparator<K>, G: LevelGenerator> SkipMap<K, V, N,
     /// ```
     #[inline]
     #[must_use]
-    pub fn get_key_value(&self, key: &K) -> Option<(&K, &V)> {
-        let cmp = |entry: &(K, V), k: &K| self.comparator.compare(&entry.0, k);
+    pub fn get_key_value<Q>(&self, key: &Q) -> Option<(&K, &V)>
+    where
+        Q: ?Sized,
+        C: ComparatorKey<K, Q>,
+    {
+        let cmp = |entry: &(K, V), q: &Q| self.comparator.compare_key(&entry.0, q);
         let node = OrdVisitor::new(self.head_ref(), key, cmp).traverse()?;
         let kv = node.value()?;
         Some((&kv.0, &kv.1))
@@ -169,8 +181,12 @@ impl<K, V, const N: usize, C: Comparator<K>, G: LevelGenerator> SkipMap<K, V, N,
     /// ```
     #[inline]
     #[must_use]
-    pub fn get_mut(&mut self, key: &K) -> Option<&mut V> {
-        let cmp = |entry: &(K, V), k: &K| self.comparator.compare(&entry.0, k);
+    pub fn get_mut<Q>(&mut self, key: &Q) -> Option<&mut V>
+    where
+        Q: ?Sized,
+        C: ComparatorKey<K, Q>,
+    {
+        let cmp = |entry: &(K, V), q: &Q| self.comparator.compare_key(&entry.0, q);
         let mut visitor = OrdMutVisitor::new(self.head, key, cmp);
         visitor.traverse();
         let (mut current, found, _precursors) = visitor.into_parts();
@@ -239,11 +255,15 @@ impl<K, V, const N: usize, C: Comparator<K>, G: LevelGenerator> SkipMap<K, V, N,
     /// ```
     #[inline]
     #[must_use]
-    pub fn rank(&self, key: &K) -> Option<usize> {
+    pub fn rank<Q>(&self, key: &Q) -> Option<usize>
+    where
+        Q: ?Sized,
+        C: ComparatorKey<K, Q>,
+    {
         if self.is_empty() {
             return None;
         }
-        let cmp = |entry: &(K, V), k: &K| self.comparator.compare(&entry.0, k);
+        let cmp = |entry: &(K, V), q: &Q| self.comparator.compare_key(&entry.0, q);
         let mut visitor = OrdIndexVisitor::new(self.head_ref(), key, cmp);
         visitor.traverse();
         visitor.found().then(|| visitor.rank())
@@ -425,5 +445,55 @@ mod tests {
             assert_eq!(map.rank(&key), Some(idx));
             assert_eq!(map.get_by_index(idx).map(|(&k, _)| k), Some(key));
         }
+    }
+
+    // MARK: Borrow<Q> lookups
+
+    #[test]
+    fn get_str_on_string_key() {
+        let mut map: SkipMap<String, i32> = SkipMap::new();
+        map.insert("hello".to_owned(), 1);
+        map.insert("world".to_owned(), 2);
+        assert_eq!(map.get("hello"), Some(&1));
+        assert_eq!(map.get("world"), Some(&2));
+        assert_eq!(map.get("missing"), None);
+    }
+
+    #[test]
+    fn contains_key_str_on_string_key() {
+        let mut map: SkipMap<String, i32> = SkipMap::new();
+        map.insert("hello".to_owned(), 1);
+        assert!(map.contains_key("hello"));
+        assert!(!map.contains_key("missing"));
+    }
+
+    #[test]
+    fn get_key_value_str_on_string_key() {
+        let mut map: SkipMap<String, i32> = SkipMap::new();
+        map.insert("hello".to_owned(), 1);
+        map.insert("world".to_owned(), 2);
+        assert_eq!(map.get_key_value("hello"), Some((&"hello".to_owned(), &1)));
+        assert_eq!(map.get_key_value("missing"), None);
+    }
+
+    #[test]
+    fn get_mut_str_on_string_key() {
+        let mut map: SkipMap<String, i32> = SkipMap::new();
+        map.insert("hello".to_owned(), 1);
+        *map.get_mut("hello").expect("key present") += 10;
+        assert_eq!(map.get("hello"), Some(&11));
+        assert_eq!(map.get_mut("missing"), None);
+    }
+
+    #[test]
+    fn rank_str_on_string_key() {
+        let mut map: SkipMap<String, i32> = SkipMap::new();
+        map.insert("apple".to_owned(), 1);
+        map.insert("banana".to_owned(), 2);
+        map.insert("cherry".to_owned(), 3);
+        assert_eq!(map.rank("apple"), Some(0));
+        assert_eq!(map.rank("banana"), Some(1));
+        assert_eq!(map.rank("cherry"), Some(2));
+        assert_eq!(map.rank("date"), None);
     }
 }

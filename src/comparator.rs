@@ -34,7 +34,7 @@
         with the core types."
 )]
 
-use core::{cmp::Ordering, fmt};
+use core::{borrow::Borrow, cmp::Ordering, fmt};
 
 /// A comparator defines a total order over values of type `T`.
 ///
@@ -100,6 +100,58 @@ impl<T: Ord> Comparator<T> for OrdComparator {
     }
 }
 
+// MARK: ComparatorKey
+
+/// Extension of [`Comparator<T>`] that enables borrowed-key lookup.
+///
+/// The standard [`Comparator<T>`] trait requires both arguments to be `&T`.
+/// `ComparatorKey<T, Q>` allows comparing a stored `T` against a borrowed key
+/// of a (potentially different) type `Q`, enabling patterns like looking up a
+/// `String` key in a map using only a `&str`.
+///
+/// # Blanket implementation
+///
+/// [`OrdComparator`] implements `ComparatorKey<T, Q>` for any `T: Borrow<Q>`
+/// and `Q: Ord + ?Sized`, mirroring the approach used by `std::collections::BTreeMap`.
+///
+/// # Custom comparators
+///
+/// [`FnComparator`] does not automatically implement this trait. If you use a
+/// custom comparator and want to perform borrowed-key lookups, implement
+/// `ComparatorKey` for your comparator type.
+///
+/// # Examples
+///
+/// ```rust
+/// use skiplist::comparator::{ComparatorKey, OrdComparator};
+/// use core::cmp::Ordering;
+///
+/// let cmp = OrdComparator::default();
+/// let stored = "hello".to_string();
+/// assert_eq!(cmp.compare_key(&stored, "hello"), Ordering::Equal);
+/// assert_eq!(cmp.compare_key(&stored, "world"), Ordering::Less);
+/// ```
+pub trait ComparatorKey<T, Q: ?Sized>: Comparator<T> {
+    /// Compare a stored `T` against a borrowed `Q`.
+    ///
+    /// The result must be consistent with the full comparison ordering:
+    /// `compare_key(a, b.borrow())` must equal `compare(a, b)` whenever
+    /// both are meaningful.
+    #[must_use]
+    fn compare_key(&self, stored: &T, key: &Q) -> Ordering;
+}
+
+impl<T, Q> ComparatorKey<T, Q> for OrdComparator
+where
+    T: Ord + Borrow<Q>,
+    Q: Ord + ?Sized,
+{
+    #[inline]
+    fn compare_key(&self, stored: &T, key: &Q) -> Ordering {
+        stored.borrow().cmp(key)
+    }
+}
+
 // MARK: FnComparator
 
 /// A comparator backed by a caller-supplied comparison function.
@@ -142,6 +194,13 @@ impl<T, F: Fn(&T, &T) -> Ordering> Comparator<T> for FnComparator<F> {
     }
 }
 
+impl<T, F: Fn(&T, &T) -> Ordering> ComparatorKey<T, T> for FnComparator<F> {
+    #[inline]
+    fn compare_key(&self, stored: &T, key: &T) -> Ordering {
+        (self.0)(stored, key)
+    }
+}
+
 // MARK: PartialOrdComparator
 
 /// A comparator that delegates to the type's [`PartialOrd`] implementation,
@@ -171,6 +230,14 @@ impl<T, F: Fn(&T, &T) -> Ordering> Comparator<T> for FnComparator<F> {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct PartialOrdComparator;
+
+#[cfg(feature = "partial-ord")]
+impl<T: PartialOrd> ComparatorKey<T, T> for PartialOrdComparator {
+    #[inline]
+    fn compare_key(&self, stored: &T, key: &T) -> Ordering {
+        self.compare(stored, key)
+    }
+}
 
 #[cfg(feature = "partial-ord")]
 impl<T: PartialOrd> Comparator<T> for PartialOrdComparator {

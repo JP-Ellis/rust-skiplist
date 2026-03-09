@@ -33,21 +33,21 @@ fn main() {
     // use it together with `get` to update counts.
     let words = ["the", "cat", "sat", "on", "the", "mat", "the", "cat"];
     for word in words {
-        let count = freq.get(&word.to_owned()).copied().unwrap_or(0);
+        let count = freq.get(word).copied().unwrap_or(0);
         freq.insert(word.to_owned(), count.saturating_add(1));
     }
 
     // Step 3: Inspect individual entries
     //
-    // `get` returns `Option<&V>`.  Because keys are strings, we need to pass a
-    // `&String`; the `.to_owned()` below constructs one from a `&str`.
-    println!("Frequency of 'the': {:?}", freq.get(&"the".to_owned()));
-    println!("Frequency of 'cat': {:?}", freq.get(&"cat".to_owned()));
-    println!("Frequency of 'dog': {:?}", freq.get(&"dog".to_owned()));
+    // `get` returns `Option<&V>`.  Because `SkipMap` implements `Borrow<Q>`,
+    // we can pass a `&str` directly when the key type is `String`.
+    println!("Frequency of 'the': {:?}", freq.get("the"));
+    println!("Frequency of 'cat': {:?}", freq.get("cat"));
+    println!("Frequency of 'dog': {:?}", freq.get("dog"));
 
-    assert_eq!(freq.get(&"the".to_owned()), Some(&3));
-    assert_eq!(freq.get(&"cat".to_owned()), Some(&2));
-    assert_eq!(freq.get(&"dog".to_owned()), None);
+    assert_eq!(freq.get("the"), Some(&3));
+    assert_eq!(freq.get("cat"), Some(&2));
+    assert_eq!(freq.get("dog"), None);
 
     // Step 4: Iterate in sorted key order
     //
