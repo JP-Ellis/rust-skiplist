@@ -46,7 +46,7 @@ Skip list collections with $O(\log n)$ average-case performance for access, inse
 
 > [!NOTE]
 >
-> **Note: version 1.0.0 is a complete rewrite.**
+> **Version 1.0.0 is a complete rewrite.**
 >
 > The 1.0.0 release shares no code with the 0.x series. The internal architecture, public API, and crate structure have all changed. If you are upgrading from 0.x, treat this as a new dependency and review the documentation from scratch rather than diffing against the old API.
 
