@@ -1,11 +1,14 @@
+# release-plz configuration file
+# See: https://release-plz.dev/docs/config
 [workspace]
-# Path to the git-cliff config used to generate the changelog
+# Changelog
 changelog_config = "cliff.toml"
-# Update CHANGELOG.md on release
 changelog_update = true
-# Create a GitHub release for each new version
+
+# Release/publish
 git_release_enable = true
-# Publish to crates.io
 publish = true
-# Allow publishing dirty (docs.rs config files, etc.)
 publish_allow_dirty = false
+
+# Pull Request
+pr_draft = true
