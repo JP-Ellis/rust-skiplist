@@ -652,6 +652,38 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
         self.take_first(value)
     }
 
+    /// Removes the first element that compares equal to `value` from the list.
+    ///
+    /// Returns `true` if the element was present and removed, or `false` if no
+    /// equal element was in the list.
+    ///
+    /// This is equivalent to [`take`](OrderedSkipList::take)`.is_some()`. Use
+    /// [`remove_all`](OrderedSkipList::remove_all) to remove every occurrence.
+    ///
+    /// This operation is `$O(\log n)$` on average.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use skiplist::ordered_skip_list::OrderedSkipList;
+    ///
+    /// let mut list = OrderedSkipList::<i32>::new();
+    /// list.insert(1);
+    /// list.insert(2);
+    /// list.insert(3);
+    /// assert!(list.remove_by_value(&2));
+    /// assert!(!list.remove_by_value(&2));
+    /// assert_eq!(list.len(), 2);
+    /// ```
+    #[inline]
+    pub fn remove_by_value<Q>(&mut self, value: &Q) -> bool
+    where
+        Q: ?Sized,
+        C: ComparatorKey<T, Q>,
+    {
+        self.take_first(value).is_some()
+    }
+
     /// Removes all elements that compare equal to `value` and returns the
     /// number of elements removed.
     ///
@@ -1894,6 +1926,90 @@ mod tests {
         assert_eq!(list.remove_all(&2), 2);
         assert_eq!(list.len(), 2);
         assert!(!list.contains(&2));
+    }
+
+    // MARK: remove_by_value
+
+    #[test]
+    fn remove_by_value_returns_false_when_absent() {
+        let mut list = OrderedSkipList::<i32>::new();
+        list.insert(1);
+        list.insert(3);
+        assert!(!list.remove_by_value(&2));
+        assert_eq!(list.len(), 2);
+    }
+
+    #[test]
+    fn remove_by_value_returns_false_on_empty() {
+        let mut list = OrderedSkipList::<i32>::new();
+        assert!(!list.remove_by_value(&1));
+        assert_eq!(list.len(), 0);
+    }
+
+    #[test]
+    fn remove_by_value_returns_true_when_present() {
+        let mut list = OrderedSkipList::<i32>::new();
+        list.insert(1);
+        list.insert(2);
+        list.insert(3);
+        assert!(list.remove_by_value(&2));
+        assert_eq!(list.len(), 2);
+        assert!(!list.contains(&2));
+    }
+
+    #[test]
+    fn remove_by_value_second_call_returns_false() {
+        let mut list = OrderedSkipList::<i32>::new();
+        list.insert(1);
+        list.insert(2);
+        list.insert(3);
+        assert!(list.remove_by_value(&2));
+        assert!(!list.remove_by_value(&2));
+        assert_eq!(list.len(), 2);
+    }
+
+    #[test]
+    fn remove_by_value_with_duplicates_removes_only_one() {
+        let g = Geometric::new(1, 0.5).expect("valid parameters");
+        let mut list = OrderedSkipList::<i32, 1>::with_level_generator(g);
+        list.insert(1);
+        list.insert(2);
+        list.insert(2);
+        list.insert(2);
+        list.insert(3);
+        assert!(list.remove_by_value(&2));
+        assert_eq!(list.len(), 4);
+        assert!(list.contains(&2));
+    }
+
+    #[test]
+    fn remove_by_value_custom_comparator() {
+        // Largest-first ordering.
+        let mut list: OrderedSkipList<i32, 16, _> =
+            OrderedSkipList::with_comparator(FnComparator(|a: &i32, b: &i32| b.cmp(a)));
+        list.insert(1);
+        list.insert(2);
+        list.insert(3);
+        assert!(list.remove_by_value(&2));
+        assert_eq!(list.len(), 2);
+        assert!(!list.contains(&2));
+        assert!(!list.remove_by_value(&2));
+    }
+
+    #[test]
+    fn remove_by_value_agrees_with_take() {
+        // remove_by_value must be equivalent to take(...).is_some()
+        let mut list1 = OrderedSkipList::<i32>::new();
+        let mut list2 = OrderedSkipList::<i32>::new();
+        for v in [1, 2, 2, 3] {
+            list1.insert(v);
+            list2.insert(v);
+        }
+        assert_eq!(list1.remove_by_value(&2), list2.take(&2).is_some());
+        assert_eq!(list1.len(), list2.len());
+        let v1: Vec<i32> = list1.iter().copied().collect();
+        let v2: Vec<i32> = list2.iter().copied().collect();
+        assert_eq!(v1, v2);
     }
 
     // MARK: remove (by index)
