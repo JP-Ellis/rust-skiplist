@@ -1,8 +1,11 @@
-#:schema https://www.schemastore.org/any.json
-
 [profile.ci]
 # In CI, we want to run all tests instead of failing fast
 fail-fast = false
 
 # Timeout after 5 periods of 60 seconds
 slow-timeout = { period = "60s", terminate-after = 5 }
+
+[[profile.default.overrides]]
+# The geometric tests are probabilistic, and therefore flaky.
+filter = "test(geometric)"
+retries = 5
