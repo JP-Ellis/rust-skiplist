@@ -66,7 +66,7 @@ skiplist = { version = "1", features = ["partial-ord"] }
 
 > [!WARNING]
 >
-> `PartialOrdComparator` panics at runtime if a comparison returns `None` (e.g.  when a `NaN` is inserted or looked up). For floating-point keys, prefer `FnComparator` with `f64::total_cmp`, which provides a true total order with no panics.
+> `PartialOrdComparator` panics at runtime if a comparison returns `None` (e.g. when a `NaN` is inserted or looked up). For floating-point keys, prefer `FnComparator` with `f64::total_cmp`, which provides a true total order with no panics.
 
 ## Basic usage
 
