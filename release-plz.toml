@@ -1,0 +1,11 @@
+[workspace]
+# Path to the git-cliff config used to generate the changelog
+changelog_config = "cliff.toml"
+# Update CHANGELOG.md on release
+changelog_update = true
+# Create a GitHub release for each new version
+git_release_enable = true
+# Publish to crates.io
+publish = true
+# Allow publishing dirty (docs.rs config files, etc.)
+publish_allow_dirty = false
