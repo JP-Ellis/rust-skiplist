@@ -2,13 +2,14 @@
 
 #![expect(clippy::float_arithmetic, reason = "computing probabilities")]
 
+use core::{error::Error, fmt};
+
 use rand::prelude::*;
-use thiserror::Error;
 
 use crate::level_generator::LevelGenerator;
 
-#[derive(Error, Debug, Clone, Copy, PartialEq, Eq)]
 /// Errors that can occur when creating a [`Geometric`] level generator.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[expect(
     clippy::module_name_repetitions,
     reason = "Using 'Error' would be too generic and may cause confusion."
@@ -16,15 +17,25 @@ use crate::level_generator::LevelGenerator;
 #[non_exhaustive]
 pub enum GeometricError {
     /// The maximum number of levels must be non-zero.
-    #[error("max must be non-zero.")]
     ZeroMax,
     /// The maximum number of levels must be less than `i32::MAX`.
-    #[error("max must be less than i32::MAX.")]
     MaxTooLarge,
     /// The probability `$p$` must be in the range `$(0, 1)$`.
-    #[error("p must be in (0, 1).")]
     InvalidProbability,
 }
+
+impl fmt::Display for GeometricError {
+    #[inline]
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::ZeroMax => write!(f, "max must be non-zero."),
+            Self::MaxTooLarge => write!(f, "max must be less than i32::MAX."),
+            Self::InvalidProbability => write!(f, "p must be in (0, 1)."),
+        }
+    }
+}
+
+impl Error for GeometricError {}
 
 /// A level generator using a geometric distribution.
 ///
