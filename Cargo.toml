@@ -2,7 +2,7 @@
 
 [package]
 name = "skiplist"
-version = "0.6.0"
+version = "1.0.0"
 description = "Skiplist implementation in Rust for fast insertion and removal, including a normal skiplist, ordered skiplist, and skipmap."
 
 documentation = "https://docs.rs/skiplist"
