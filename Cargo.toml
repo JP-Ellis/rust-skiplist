@@ -49,7 +49,6 @@ name = "skip_map"
 [dependencies]
 arrayvec = { version = "0.7", default-features = false }
 rand = "0.10"
-thiserror = "2.0"
 
 [dev-dependencies]
 anyhow = "=1.0.102"

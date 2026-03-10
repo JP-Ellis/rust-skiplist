@@ -4,9 +4,7 @@
 //! skip links to nodes further ahead. These links allow traversal to jump
 //! over runs of nodes, giving the skip list its `$O(\log n)$` characteristics.
 
-use core::{num::NonZeroUsize, ptr::NonNull};
-
-use thiserror::Error;
+use core::{error::Error, fmt, num::NonZeroUsize, ptr::NonNull};
 
 use crate::node::Node;
 
@@ -109,18 +107,27 @@ impl<V, const N: usize> Link<V, N> {
 }
 
 /// Errors that can occur when working with links.
-#[derive(Debug, Error)]
+#[derive(Debug)]
 pub(crate) enum LinkError {
     /// The distance between two nodes has overflowed.
-    #[error("distance overflow")]
     DistanceOverflow,
     /// The distance between two nodes has underflowed, becoming zero.
-    #[error("distance underflow")]
     DistanceUnderflow,
     /// The supplied distance is invalid (zero is not permitted).
-    #[error("invalid distance")]
     InvalidDistance,
 }
+
+impl fmt::Display for LinkError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::DistanceOverflow => write!(f, "distance overflow"),
+            Self::DistanceUnderflow => write!(f, "distance underflow"),
+            Self::InvalidDistance => write!(f, "invalid distance"),
+        }
+    }
+}
+
+impl Error for LinkError {}
 
 #[cfg(test)]
 mod tests {
