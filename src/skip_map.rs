@@ -106,6 +106,10 @@
 //! [`into_iter`]: SkipMap::into_iter
 
 mod access;
+#[cfg(feature = "cursor")]
+pub mod cursor;
+#[cfg(feature = "cursor")]
+pub use cursor::{Cursor, CursorMut, UnorderedKeyError};
 mod entry;
 mod filter;
 mod insert_remove;
