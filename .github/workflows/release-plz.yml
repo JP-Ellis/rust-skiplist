@@ -48,7 +48,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Restore Rust cache
-        uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5  # v2.8.2
+        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4  # v2.9.1
 
       - name: Run release-plz release-pr
         uses: release-plz/action@1528104d2ca23787631a1c1f022abb64b34c1e11  # v0.5.128
@@ -94,7 +94,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Restore Rust cache
-        uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5  # v2.8.2
+        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4  # v2.9.1
 
       - name: Run release-plz release
         uses: release-plz/action@1528104d2ca23787631a1c1f022abb64b34c1e11  # v0.5.128
