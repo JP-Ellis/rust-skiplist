@@ -303,7 +303,7 @@ impl<'a, K, V, const N: usize, C: Comparator<K>, G: LevelGenerator>
         // semantics for Equal).  For l >= target_height, precursors[l] is
         // the last node at level l whose link spans past target_ptr.
         // No other &mut references to any node exist.
-        let (key, val) = unsafe {
+        let (key, val, new_tail) = unsafe {
             let target_height = target_ptr.as_ref().level();
             let target_raw = target_ptr.as_ptr();
 
@@ -338,17 +338,15 @@ impl<'a, K, V, const N: usize, C: Comparator<K>, G: LevelGenerator>
                 }
             }
 
+            // Capture predecessor before removing the node.
+            let new_tail = (*target_raw).prev();
             let mut popped = (*target_raw).pop();
             let (k, v) = popped.take_value().expect("data node has a value");
-            (k, v)
+            (k, v, new_tail)
         };
 
         if map.tail == Some(target_ptr) {
-            map.tail = if map.len == 1 {
-                None
-            } else {
-                Some(precursors[0])
-            };
+            map.tail = if map.len == 1 { None } else { new_tail };
         }
         map.len = map.len.saturating_sub(1);
 
@@ -384,6 +382,11 @@ pub struct VacantEntry<
 > {
     /// The key that was looked up.
     key: K,
+    /// The node that the traversal stopped on (last node with key < searched
+    /// key).  The new node will be inserted immediately after this node.
+    current: NonNull<Node<(K, V), N>>,
+    /// Rank of `current` at the time of traversal (head = 0, first data = 1).
+    current_rank: usize,
     /// Precursor node at each skip level: the insertion point for
     /// wiring the new node's skip links.
     precursors: ArrayVec<NonNull<Node<(K, V), N>>, N>,
@@ -537,22 +540,26 @@ impl<'a, K, V, const N: usize, C: Comparator<K>, G: LevelGenerator> VacantEntry<
     ) {
         let Self {
             key,
+            current,
+            current_rank,
             precursors,
             precursor_distances,
             map,
         } = self;
 
-        let height = map.generator.level().saturating_add(1);
-        // The new node's internal rank (head = 0, first data node = 1).
-        let new_rank = precursor_distances[0].saturating_add(1);
+        // height ∈ [0, total]: number of skip links to allocate.
+        let height = map.generator.level();
+        // new_rank = current_rank + 1 (current is the last node with key < our key).
+        let new_rank = current_rank.saturating_add(1);
 
         // SAFETY: All raw pointers originate from `NonNull<Node<(K,V), N>>`
         // values captured during traversal. They point into heap allocations
         // exclusively owned by `map`. No safe `&mut` references to any node
         // exist while this block runs.
         let new_node_nonnull: NonNull<Node<(K, V), N>> = unsafe {
+            // Insert after `current` (the last node strictly less than `key`).
             let new_raw: *mut Node<(K, V), N> =
-                Node::insert_after(precursors[0], Node::with_value(height, (key, value))).as_ptr();
+                Node::insert_after(current, Node::with_value(height, (key, value))).as_ptr();
 
             // Wire skip links with accurate distances (identical pattern to
             // SkipMap::insert's structural path).
@@ -589,7 +596,11 @@ impl<'a, K, V, const N: usize, C: Comparator<K>, G: LevelGenerator> VacantEntry<
             NonNull::new_unchecked(new_raw)
         };
 
-        let is_new_tail = map.tail.is_none_or(|tail| precursors[0] == tail);
+        // The new node is the tail if it has no successor.
+        // SAFETY: `new_node_nonnull` was just created from `Box::into_raw`
+        // above; it is properly aligned, fully initialized, and no other
+        // reference to it exists yet.
+        let is_new_tail = unsafe { new_node_nonnull.as_ref() }.next().is_none();
         if is_new_tail {
             map.tail = Some(new_node_nonnull);
         }
@@ -909,14 +920,16 @@ impl<K, V, const N: usize, C: Comparator<K>, G: LevelGenerator> SkipMap<K, V, N,
     /// ```
     #[inline]
     pub fn entry(&mut self, key: K) -> Entry<'_, K, V, N, C, G> {
-        let (current, found, precursors, precursor_distances) = {
+        let (current_rank, current, found, precursors, precursor_distances) = {
             // Copy head (NonNull is Copy) so the closure borrows only
             // self.comparator, not the whole of self.
             let head = self.head;
             let cmp = |entry: &(K, V), k: &K| self.comparator.compare(&entry.0, k);
             let mut visitor = OrdIndexMutVisitor::new(head, &key, cmp);
             visitor.traverse();
-            visitor.into_parts()
+            let rank = visitor.current_rank_internal();
+            let (current, found, precursors, precursor_distances) = visitor.into_parts();
+            (rank, current, found, precursors, precursor_distances)
         };
 
         if found {
@@ -928,6 +941,8 @@ impl<K, V, const N: usize, C: Comparator<K>, G: LevelGenerator> SkipMap<K, V, N,
         } else {
             Entry::Vacant(VacantEntry {
                 key,
+                current,
+                current_rank,
                 precursors,
                 precursor_distances,
                 map: self,

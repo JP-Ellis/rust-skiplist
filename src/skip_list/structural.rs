@@ -80,12 +80,6 @@ impl<T, G: LevelGenerator, const N: usize> SkipList<T, N, G> {
     /// assert_eq!(list.get(3), None);
     /// ```
     #[expect(
-        clippy::expect_used,
-        clippy::missing_panics_doc,
-        reason = "the node at rank `len` exists because 0 < len < self.len was checked before \
-                  the traversal; the expect fires only on invariant violations"
-    )]
-    #[expect(
         clippy::indexing_slicing,
         reason = "l < max_levels = head.links.len(); every node in precursors[] was reached \
                   via a level-l link so its links.len() > l; all accesses are in bounds; \
@@ -110,10 +104,10 @@ impl<T, G: LevelGenerator, const N: usize> SkipList<T, N, G> {
         // 0 < len < self.len: keep elements at ranks 1..=len; drop the rest.
         let max_levels = self.head_ref().level();
 
-        // IndexMutVisitor with target = len records, for each level l, the last
-        // node at level l with rank < len.  precursors[0].links[0] points to the
-        // new tail at rank len.  into_parts() releases the &mut borrow.
-        let (_, precursors, _) = {
+        // IndexMutVisitor with target = len advances directly to the node at rank len.
+        // `current` from into_parts() is the new tail node itself.
+        // into_parts() releases the &mut borrow.
+        let (new_tail_node, precursors, _) = {
             let mut visitor = IndexMutVisitor::new(self.head, len);
             visitor.traverse();
             visitor.into_parts()
@@ -123,13 +117,8 @@ impl<T, G: LevelGenerator, const N: usize> SkipList<T, N, G> {
         // traversal.  They originate from heap allocations owned by this SkipList.
         // No safe references to any node exist while this block runs.
         let new_tail_ptr: *mut Node<T, N> = unsafe {
-            // The new tail is the level-0 successor of precursors[0].
-            // It exists because 0 < len < self.len.
-            let new_tail_ptr: *mut Node<T, N> = (*precursors[0].as_ptr()).links()[0]
-                .as_ref()
-                .expect("the node at rank `len` exists because len < self.len")
-                .node()
-                .as_ptr();
+            // `current` is the node at rank len (the new tail).
+            let new_tail_ptr: *mut Node<T, N> = new_tail_node.as_ptr();
 
             let new_tail_height = (*new_tail_ptr).level();
 

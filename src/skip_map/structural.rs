@@ -261,11 +261,6 @@ impl<K, V, const N: usize, C: Comparator<K>, G: LevelGenerator> SkipMap<K, V, N,
     /// assert_eq!(b_keys, [3, 4, 5]);
     /// ```
     #[expect(
-        clippy::indexing_slicing,
-        reason = "precursors[0] is valid because max_levels >= 1 (guaranteed by the \
-                  LevelGenerator invariant), so precursors.len() >= 1"
-    )]
-    #[expect(
         clippy::multiple_unsafe_ops_per_block,
         reason = "set_head_next is an unsafe fn called on a raw-pointer dereference; \
                   the two operations are on the same freshly allocated, exclusively-owned \
@@ -294,8 +289,21 @@ impl<K, V, const N: usize, C: Comparator<K>, G: LevelGenerator> SkipMap<K, V, N,
             let cmp = |entry: &(K, V), q: &Q| self.comparator.compare_key(&entry.0, q);
             let mut visitor = OrdMutVisitor::new(head, key, cmp);
             visitor.traverse();
-            let (_current, _found, precursors) = visitor.into_parts();
-            precursors[0]
+            let (current, found, _precursors) = visitor.into_parts();
+            // `found=true`:  current = first node with key == split_key;
+            //                pivot = the node just before it (prev()).
+            // `found=false`: current = last node with key < split_key
+            //                (or head if all keys >= split_key);
+            //                pivot = current.
+            if found {
+                // SAFETY: `current` is a `NonNull` pointing to a live node in
+                // `self`, returned by the visitor that traversed `self` while
+                // it was exclusively borrowed. The node is heap-allocated and
+                // valid for shared access here.
+                unsafe { current.as_ref() }.prev().unwrap_or(head)
+            } else {
+                current
+            }
         };
 
         // SAFETY: `Box::into_raw` transfers ownership; freed in `Drop`.

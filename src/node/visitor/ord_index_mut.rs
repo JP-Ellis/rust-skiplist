@@ -134,6 +134,13 @@ impl<'a, T, Q: ?Sized, F: Fn(&T, &Q) -> Ordering, const N: usize>
         self.rank.saturating_sub(1)
     }
 
+    /// Returns the internal 1-based rank of the current node after traversal.
+    ///
+    /// This is `self.rank` directly: head sentinel = 0, first data node = 1.
+    pub(crate) fn current_rank_internal(&self) -> usize {
+        self.rank
+    }
+
     /// Consume the visitor, releasing the borrow on the list and returning
     /// the internal state as owned values.
     ///

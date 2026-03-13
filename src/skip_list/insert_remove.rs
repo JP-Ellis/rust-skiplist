@@ -60,7 +60,8 @@ impl<T, G: LevelGenerator, const N: usize> SkipList<T, N, G> {
             self.len
         );
 
-        let height = self.generator.level().saturating_add(1);
+        // height ∈ [0, total]: number of skip links to allocate.
+        let height = self.generator.level();
         // new_rank: the rank of the new node after insertion
         // (head = rank 0; element at index i has rank i + 1).
         let new_rank = index.saturating_add(1);
@@ -69,7 +70,7 @@ impl<T, G: LevelGenerator, const N: usize> SkipList<T, N, G> {
         // level-l skip-link would overshoot or is absent at new_rank.
         // into_parts() releases the &mut borrow so the subsequent unsafe block
         // can take raw pointers to nodes.
-        let (_, precursors, precursor_distances) = {
+        let (current, precursors, precursor_distances) = {
             let mut visitor = IndexMutVisitor::new(self.head, new_rank);
             visitor.traverse();
             visitor.into_parts()
@@ -81,13 +82,20 @@ impl<T, G: LevelGenerator, const N: usize> SkipList<T, N, G> {
         // Different precursors may alias (same predecessor, different levels) but
         // each iteration accesses a distinct links[l] index.
         let new_node_nonnull: NonNull<Node<T, N>> = unsafe {
-            // Insert the new node right after the level-0 predecessor.
-            // insert_after returns node_ptr with the allocation's root provenance
-            // (Box::into_raw).  Storing it directly in Links avoids the
-            // sibling-tag issue that arises when using next_mut() (which creates
-            // a child reborrow that subsequent insert_after writes can Disable).
+            // When inserting in the middle (index < len), `current` is the node
+            // currently at rank `new_rank`; the new node must go before it, so
+            // insert after its immediate base-chain predecessor.
+            // When inserting at the end (index == len), `current` is the tail;
+            // insert after it directly.
+            let insert_after_ptr = if index < self.len {
+                (*current.as_ptr())
+                    .prev()
+                    .expect("node at rank >= 1 always has a predecessor")
+            } else {
+                current
+            };
             let new_raw: *mut Node<T, N> =
-                Node::insert_after(precursors[0], Node::with_value(height, value)).as_ptr();
+                Node::insert_after(insert_after_ptr, Node::with_value(height, value)).as_ptr();
 
             // Wire skip links.
             //
@@ -193,8 +201,9 @@ impl<T, G: LevelGenerator, const N: usize> SkipList<T, N, G> {
         let target_rank = index.saturating_add(1);
 
         // IndexMutVisitor records the predecessor at each level.
+        // `current` from into_parts() is the target node itself.
         // into_parts() releases the &mut borrow so the unsafe block can use raw ptrs.
-        let (_, precursors, precursor_distances) = {
+        let (target_node, precursors, precursor_distances) = {
             let mut visitor = IndexMutVisitor::new(self.head, target_rank);
             visitor.traverse();
             visitor.into_parts()
@@ -203,15 +212,8 @@ impl<T, G: LevelGenerator, const N: usize> SkipList<T, N, G> {
         // SAFETY: All raw pointers come from NonNull<Node<T, N>> captured during
         // traversal.  They originate from heap allocations owned by this SkipList.
         // No safe &mut references to any node exist while this block runs.
-        let (value, pred0) = unsafe {
-            // The target is precursors[0]'s level-0 successor.
-            // index < len guarantees this link exists.
-            let target_ptr: *mut Node<T, N> = (*precursors[0].as_ptr()).links()[0]
-                .as_ref()
-                .expect("precursors[0].links[0] points to the target node")
-                .node()
-                .as_ptr();
-
+        let (value, new_tail) = unsafe {
+            let target_ptr: *mut Node<T, N> = target_node.as_ptr();
             let target_height = (*target_ptr).level();
 
             // Rewire skip links around the removed node.
@@ -248,18 +250,19 @@ impl<T, G: LevelGenerator, const N: usize> SkipList<T, N, G> {
                 }
             }
 
+            // Capture predecessor before removing the node.
+            let new_tail = (*target_ptr).prev();
+
             // Detach the target node from the prev/next chain and take its value.
-            // Capture the level-0 predecessor for the tail update below.
-            let pred0 = precursors[0];
             let mut popped = (*target_ptr).pop();
             (
                 popped.take_value().expect("target node always has a value"),
-                pred0,
+                new_tail,
             )
         };
 
         if index.saturating_add(1) == self.len {
-            self.tail = if self.len == 1 { None } else { Some(pred0) };
+            self.tail = if self.len == 1 { None } else { new_tail };
         }
         self.len = self.len.saturating_sub(1);
         value
@@ -331,16 +334,11 @@ impl<T, G: LevelGenerator, const N: usize> SkipList<T, N, G> {
     }
 }
 
-#[expect(
-    clippy::undocumented_unsafe_blocks,
-    reason = "test code, safety guarantees can be relaxed"
-)]
 #[cfg(test)]
 mod tests {
     use pretty_assertions::assert_eq;
 
     use super::super::SkipList;
-    use crate::node::link::Link;
 
     // MARK: insert
 
@@ -429,12 +427,13 @@ mod tests {
         list.insert(5, 99);
     }
 
-    /// With `with_capacity(1)` the generator assigns height = 1 to every node.
-    /// Verify that links are correctly maintained after `insert(1, 2)` into [1, 3]:
+    /// With `with_capacity(1)` the generator assigns height = 0 to every node.
+    /// All data nodes have no skip links; `head.links[0]` is always `None`.
+    /// Verify that the prev/next chain is correct after `insert(1, 2)` into [1, 3]:
     ///
     /// ```text
-    /// Before: head ---[1]---> n1(1) ---[1]---> n3(3, links=None)
-    /// After:  head ---[1]---> n1(1) ---[1]---> new(2) ---[1]---> n3(3, links=None)
+    /// Before: head → n1(1) → n3(3)   [no skip links]
+    /// After:  head → n1(1) → new(2) → n3(3)
     /// ```
     #[expect(
         clippy::indexing_slicing,
@@ -448,46 +447,22 @@ mod tests {
         list.insert(1, 2); // [1, 2, 3]
 
         assert_eq!(list.len(), 3);
-        // head.links[0] → n1(1) at distance 1 (unchanged)
-        {
-            let link: &Link<_, _> = list.head_ref().links()[0].as_ref().expect("head link");
-            assert_eq!(link.distance().get(), 1);
-            assert_eq!(unsafe { link.node().as_ref() }.value(), Some(&1));
-        }
-        // n1(1).links[0] → new(2) at distance 1
-        {
-            let n1 = list.head_ref().next_as_ref().expect("n1");
-            assert_eq!(n1.value(), Some(&1));
-            let link: &Link<_, _> = n1.links()[0].as_ref().expect("n1 link");
-            assert_eq!(link.distance().get(), 1);
-            assert_eq!(unsafe { link.node().as_ref() }.value(), Some(&2));
-        }
-        // new(2).links[0] → n3(3) at distance 1
-        {
-            let new_node = list
-                .head_ref()
-                .next_as_ref()
-                .expect("n1")
-                .next_as_ref()
-                .expect("new_node");
-            assert_eq!(new_node.value(), Some(&2));
-            let link: &Link<_, _> = new_node.links()[0].as_ref().expect("new_node link");
-            assert_eq!(link.distance().get(), 1);
-            assert_eq!(unsafe { link.node().as_ref() }.value(), Some(&3));
-        }
-        // n3(3).links[0] = None
-        {
-            let n3 = list
-                .head_ref()
-                .next_as_ref()
-                .expect("n1")
-                .next_as_ref()
-                .expect("new_node")
-                .next_as_ref()
-                .expect("n3");
-            assert_eq!(n3.value(), Some(&3));
-            assert!(n3.links()[0].is_none());
-        }
+        // No skip links: all data nodes have height 0.
+        assert!(list.head_ref().links()[0].is_none());
+
+        // Verify prev/next chain: head → 1 → 2 → 3.
+        // links() is empty for height-0 nodes; use first() to avoid indexing.
+        let n1 = list.head_ref().next_as_ref().expect("n1");
+        assert_eq!(n1.value(), Some(&1));
+        assert!(n1.links().first().is_none_or(|l| l.is_none()));
+
+        let n2 = n1.next_as_ref().expect("new_node");
+        assert_eq!(n2.value(), Some(&2));
+        assert!(n2.links().first().is_none_or(|l| l.is_none()));
+
+        let n3 = n2.next_as_ref().expect("n3");
+        assert_eq!(n3.value(), Some(&3));
+        assert!(n3.links().first().is_none_or(|l| l.is_none()));
     }
 
     #[test]
@@ -616,13 +591,14 @@ mod tests {
         list.remove(0);
     }
 
-    /// With `with_capacity(1)` the generator assigns height = 1 to every node.
-    /// Verify that links are correctly maintained after removing the middle element
+    /// With `with_capacity(1)` the generator assigns height = 0 to every node.
+    /// All data nodes have no skip links; `head.links[0]` is always `None`.
+    /// Verify that the prev/next chain is correct after removing the middle element
     /// from [1, 2, 3]:
     ///
     /// ```text
-    /// Before: head ---[1]---> n1(1) ---[1]---> n2(2) ---[1]---> n3(3, None)
-    /// After:  head ---[1]---> n1(1) ---[1]---> n3(3, None)
+    /// Before: head → n1(1) → n2(2) → n3(3)   [no skip links]
+    /// After:  head → n1(1) → n3(3)
     /// ```
     #[expect(
         clippy::indexing_slicing,
@@ -637,31 +613,19 @@ mod tests {
         assert_eq!(list.remove(1), 2); // [1, 3]
 
         assert_eq!(list.len(), 2);
-        // head.links[0] → n1(1) at distance 1 (unchanged)
-        {
-            let link: &Link<_, _> = list.head_ref().links()[0].as_ref().expect("head link");
-            assert_eq!(link.distance().get(), 1);
-            assert_eq!(unsafe { link.node().as_ref() }.value(), Some(&1));
-        }
-        // n1(1).links[0] → n3(3) at distance 1 (previously pointed to n2)
-        {
-            let n1 = list.head_ref().next_as_ref().expect("n1");
-            assert_eq!(n1.value(), Some(&1));
-            let link: &Link<_, _> = n1.links()[0].as_ref().expect("n1 link");
-            assert_eq!(link.distance().get(), 1);
-            assert_eq!(unsafe { link.node().as_ref() }.value(), Some(&3));
-        }
-        // n3(3).links[0] = None
-        {
-            let n3 = list
-                .head_ref()
-                .next_as_ref()
-                .expect("n1")
-                .next_as_ref()
-                .expect("n3");
-            assert_eq!(n3.value(), Some(&3));
-            assert!(n3.links()[0].is_none());
-        }
+        // No skip links: all data nodes have height 0.
+        assert!(list.head_ref().links()[0].is_none());
+
+        // Verify prev/next chain: head → 1 → 3.
+        // links() is empty for height-0 nodes; use first() to avoid indexing.
+        let n1 = list.head_ref().next_as_ref().expect("n1");
+        assert_eq!(n1.value(), Some(&1));
+        assert!(n1.links().first().is_none_or(|l| l.is_none()));
+
+        let n3 = n1.next_as_ref().expect("n3");
+        assert_eq!(n3.value(), Some(&3));
+        assert!(n3.links().first().is_none_or(|l| l.is_none()));
+        assert!(n3.next_as_ref().is_none());
     }
 
     #[test]

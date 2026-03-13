@@ -56,7 +56,7 @@ impl Error for GeometricError {}
 ///
 /// let mut generator = Geometric::new(16, 0.5).unwrap();
 /// let level = generator.level();
-/// assert!(level < generator.total());
+/// assert!(level <= generator.total());
 /// ```
 #[derive(Debug, Clone)]
 pub struct Geometric {
@@ -156,11 +156,12 @@ impl LevelGenerator for Geometric {
         self.total
     }
 
-    /// Generates a random level in the range `$[0, \text{total})$`.
+    /// Returns the height (number of skip links) to allocate for a new node,
+    /// sampled from a truncated geometric distribution.
     ///
-    /// The level is sampled from the truncated geometric distribution configured
-    /// at construction time. Lower levels are more probable; level 0 is the most
-    /// common.
+    /// The returned value is in `$[0, \text{total}]$`.  Height `0` is the
+    /// most probable outcome (the node gets no skip links and participates only
+    /// in the base layer); `total` is the least probable.
     #[inline]
     #[expect(
         clippy::cast_possible_truncation,
@@ -183,9 +184,9 @@ impl LevelGenerator for Geometric {
             .log(self.q)
             .floor() as usize)
             // When q^total underflows to 0.0 due to floating-point precision,
-            // the formula can produce values >= total.  This ensures that we
-            // never return a level greater than total - 1.
-            .min(self.total.saturating_sub(1))
+            // the formula can produce values > total.  This ensures that we
+            // never return a level greater than total.
+            .min(self.total)
     }
 }
 
@@ -231,7 +232,7 @@ mod tests {
         assert_eq!(generator.total(), n);
         for _ in 0..MAX {
             let level = generator.level();
-            assert!((0..n).contains(&level));
+            assert!((0..=n).contains(&level));
         }
         Ok(())
     }
@@ -248,7 +249,7 @@ mod tests {
         assert_eq!(generator.total(), n);
         for _ in 0..1_000 {
             let level = generator.level();
-            assert!((0..n).contains(&level));
+            assert!((0..=n).contains(&level));
         }
         // Make sure that we can produce at least one level-0 node, and one at the
         // maximum level.
@@ -291,7 +292,7 @@ mod tests {
         assert_eq!(generator.total(), n);
         for _ in 0..1_000 {
             let level = generator.level();
-            assert!((0..n).contains(&level));
+            assert!((0..=n).contains(&level));
         }
         // Make sure that we can produce at least one level-0 node, and one at the
         // maximum level.

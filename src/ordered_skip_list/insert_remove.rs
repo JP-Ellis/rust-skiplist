@@ -192,7 +192,7 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
         // SAFETY: All raw pointers come from NonNull<Node<T, N>> values captured
         // during traversal or from self.tail.  No safe &mut references to any
         // node exist while this block runs.
-        let value = unsafe {
+        let (value, new_tail) = unsafe {
             let tail_raw = tail_ptr.as_ptr();
 
             // Clear all skip links pointing to the tail.
@@ -201,18 +201,14 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
                 (*pred_nn.as_ptr()).links_mut()[l] = None;
             }
 
+            // Capture predecessor before removing the node.
+            let new_tail = (*tail_raw).prev();
             let mut popped = (*tail_raw).pop();
-            popped.take_value()
+            (popped.take_value(), new_tail)
         };
 
-        // Update the cached tail pointer.  When the list becomes empty,
-        // precursors[0] equals head; we set tail to None rather than pointing
-        // at the sentinel.
-        self.tail = if self.len == 1 {
-            None
-        } else {
-            Some(precursors[0])
-        };
+        // Update the cached tail pointer.
+        self.tail = if self.len == 1 { None } else { new_tail };
         self.len = self.len.saturating_sub(1);
         value
     }
@@ -258,7 +254,8 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
     )]
     #[inline]
     pub fn insert(&mut self, value: T) {
-        let height = self.generator.level().saturating_add(1);
+        // height ∈ [0, total]: number of skip links to allocate.
+        let height = self.generator.level();
 
         // Use OrdIndexMutVisitor to locate the insertion point, collect precursors,
         // and track rank distances for accurate skip-link maintenance.
@@ -267,19 +264,26 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
         // borrow `self`.  The closure borrows only `self.comparator` (shared),
         // which is a distinct field from `self.head`.  Both borrows coexist
         // safely and are released when `visitor` is dropped via `into_parts()`.
-        let (precursors, precursor_distances) = {
+        let (current_rank, current, found, precursors, precursor_distances) = {
             let head = self.head;
             let cmp = |v: &T, t: &T| self.comparator.compare(v, t);
             let mut visitor = OrdIndexMutVisitor::new(head, &value, cmp);
             visitor.traverse();
-            let (_current, _found, precursors, precursor_distances) = visitor.into_parts();
-            (precursors, precursor_distances)
+            let rank = visitor.current_rank_internal();
+            let (current, found, precursors, precursor_distances) = visitor.into_parts();
+            (rank, current, found, precursors, precursor_distances)
         };
         // `visitor` and `cmp` are dropped here, releasing the borrow on
         // `self.comparator`.  `value` is no longer borrowed by the visitor.
 
         // The new node's internal rank (head = rank 0, first data node = rank 1).
-        let new_rank = precursor_distances[0].saturating_add(1);
+        // When found=true (inserting before an equal node), the new node takes the
+        // same rank as `current`; when found=false, it goes after `current`.
+        let new_rank = if found {
+            current_rank
+        } else {
+            current_rank.saturating_add(1)
+        };
 
         // SAFETY: All raw pointers originate from `NonNull<Node<T, N>>` values
         // captured during traversal.  They point into heap allocations exclusively
@@ -287,8 +291,20 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
         // exist while this block runs.  The pointer `new_raw` is distinct from
         // every precursor: it is freshly allocated by `Node::insert_after`.
         let new_node_nonnull: NonNull<Node<T, N>> = unsafe {
+            // When found=true, `current` is the first equal node; insert before it
+            // (after its immediate predecessor) so duplicates are ordered correctly.
+            // When found=false, `current` is the last node with value < target;
+            // insert after it directly.
+            let insert_after_ptr = if found {
+                current
+                    .as_ref()
+                    .prev()
+                    .expect("found node always has a predecessor")
+            } else {
+                current
+            };
             let new_raw: *mut Node<T, N> =
-                Node::insert_after(precursors[0], Node::with_value(height, value)).as_ptr();
+                Node::insert_after(insert_after_ptr, Node::with_value(height, value)).as_ptr();
 
             // Wire skip links with accurate distances.
             //
@@ -335,10 +351,13 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
 
         // Update the cached tail pointer if the new node is the last element.
         //
-        // The new node is the tail iff `precursors[0]` (the level-0 predecessor)
-        // was previously the tail, or the list was empty (tail = None) and the
-        // new node was inserted right after the head.
-        let is_new_tail = self.tail.is_none_or(|tail| precursors[0] == tail);
+        // The new node is the tail iff it has no successor in the base chain.
+        // This check is correct regardless of whether the predecessor had
+        // height 0.
+        // SAFETY: `new_node_nonnull` was just created from `Box::into_raw`
+        // above; it is properly aligned, fully initialized, and no other
+        // reference to it exists yet.
+        let is_new_tail = unsafe { new_node_nonnull.as_ref() }.next().is_none();
         if is_new_tail {
             self.tail = Some(new_node_nonnull);
         }
@@ -412,7 +431,7 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
         // semantics for Equal).  For l >= target_height, `precursors[l]` is the
         // last node at level l whose link spans past `target_ptr`.
         // No other &mut references to any node exist.
-        let val = unsafe {
+        let (val, new_tail) = unsafe {
             let target_height = target_ptr.as_ref().level();
             let target_raw = target_ptr.as_ptr();
 
@@ -446,16 +465,17 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
                 }
             }
 
+            // Capture the immediate base-chain predecessor BEFORE pop.
+            // This is necessary for the tail update when target is the last node
+            // and may have height 0 (so no skip link points to it from precursors[0]).
+            let new_tail = target_ptr.as_ref().prev();
+
             let mut popped = (*target_raw).pop();
-            popped.take_value()
+            (popped.take_value(), new_tail)
         };
 
         if self.tail == Some(target_ptr) {
-            self.tail = if self.len == 1 {
-                None
-            } else {
-                Some(precursors[0])
-            };
+            self.tail = if self.len == 1 { None } else { new_tail };
         }
         self.len = self.len.saturating_sub(1);
         val
@@ -522,9 +542,11 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
             };
             let mut visitor = OrdMutVisitor::new(head, value, cmp_past);
             visitor.traverse();
-            let (_current, _found, precursors) = visitor.into_parts();
-            let target = precursors[0];
-            (target, precursors)
+            // With cmp_past, `current` is the last node whose value compares
+            // <= value (Equal is treated as Less, so the visitor advances
+            // through all equal nodes and stops at the last one).
+            let (current, _found, precursors) = visitor.into_parts();
+            (current, precursors)
         };
 
         // Verify that target_ptr is actually equal to `value`; the head
@@ -573,7 +595,7 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
 
         // SAFETY: All raw pointers come from NonNull<Node<T, N>> values
         // captured above.  No safe &mut references to any node exist.
-        let val = unsafe {
+        let (val, new_tail) = unsafe {
             let target_raw = target_ptr.as_ptr();
 
             // For l < target_height: distance-preserving splice via scan_precursors.
@@ -603,16 +625,14 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
                 }
             }
 
+            // Capture predecessor before removing the node.
+            let new_tail = (*target_raw).prev();
             let mut popped = (*target_raw).pop();
-            popped.take_value()
+            (popped.take_value(), new_tail)
         };
 
         if self.tail == Some(target_ptr) {
-            self.tail = if self.len == 1 {
-                None
-            } else {
-                Some(scan_precursors[0])
-            };
+            self.tail = if self.len == 1 { None } else { new_tail };
         }
         self.len = self.len.saturating_sub(1);
         val
@@ -876,7 +896,7 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
         // The scan reads links via shared (immutable) access only; structural
         // mutations happen only in the splice loop afterwards.  Both phases touch
         // provably disjoint heap nodes.
-        let (val, level0_pred) = unsafe {
+        let (val, new_tail) = unsafe {
             let fast_height = fast_ptr.as_ref().level();
             let fast_raw = fast_ptr.as_ptr();
 
@@ -934,16 +954,14 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
                 }
             }
 
+            // Capture predecessor before removing the node.
+            let new_tail = (*fast_raw).prev();
             let mut popped = (*fast_raw).pop();
-            (popped.take_value(), scan_precursors[0])
+            (popped.take_value(), new_tail)
         };
 
         if self.tail == Some(fast_ptr) {
-            self.tail = if self.len == 1 {
-                None
-            } else {
-                Some(level0_pred)
-            };
+            self.tail = if self.len == 1 { None } else { new_tail };
         }
         self.len = self.len.saturating_sub(1);
         val
@@ -1019,7 +1037,7 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
         // pointing to `target_ptr`.  For l >= target_height, `precursors[l]`
         // is the last node whose level-l link spans past `target_ptr`.
         // No other &mut references to any node exist while this block runs.
-        let val = unsafe {
+        let (val, new_tail) = unsafe {
             let target_height = target_ptr.as_ref().level();
             let target_raw = target_ptr.as_ptr();
 
@@ -1046,16 +1064,14 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
                 }
             }
 
+            // Capture predecessor before removing the node.
+            let new_tail = (*target_raw).prev();
             let mut popped = (*target_raw).pop();
-            popped.take_value()
+            (popped.take_value(), new_tail)
         };
 
         if self.tail == Some(target_ptr) {
-            self.tail = if self.len == 1 {
-                None
-            } else {
-                Some(precursors[0])
-            };
+            self.tail = if self.len == 1 { None } else { new_tail };
         }
         self.len = self.len.saturating_sub(1);
         val.expect("removed node has a value")
@@ -1138,12 +1154,14 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
         F: FnOnce(T) -> T,
     {
         // Single traversal: find the first equal element or the insertion point.
-        let (current, found, precursors, precursor_distances) = {
+        let (current_rank, current, found, precursors, precursor_distances) = {
             let head = self.head;
             let cmp = |v: &T, t: &T| self.comparator.compare(v, t);
             let mut visitor = OrdIndexMutVisitor::new(head, &value, cmp);
             visitor.traverse();
-            visitor.into_parts()
+            let rank = visitor.current_rank_internal();
+            let (current, found, precursors, precursor_distances) = visitor.into_parts();
+            (rank, current, found, precursors, precursor_distances)
         };
         // `cmp` / `visitor` dropped; borrows on `self.comparator` and `value` end.
 
@@ -1157,9 +1175,12 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
 
         // Generate height only when we actually need to insert so the RNG is
         // not advanced on the "already present" fast path.
-        let height = self.generator.level().saturating_add(1);
+        // height ∈ [0, total]: number of skip links to allocate.
+        let height = self.generator.level();
         let insert_value = f(value);
-        let new_rank = precursor_distances[0].saturating_add(1);
+        // `found == false`: current is the last node with value < insert_value,
+        // so new_rank = current_rank + 1.
+        let new_rank = current_rank.saturating_add(1);
 
         // SAFETY: All raw pointers originate from `NonNull<Node<T, N>>` values
         // captured during traversal.  They point into heap allocations exclusively
@@ -1167,8 +1188,10 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
         // exist while this block runs.  The pointer `new_raw` is distinct from
         // every precursor: it is freshly allocated by `Node::insert_after`.
         let new_node: NonNull<Node<T, N>> = unsafe {
+            // `found == false`: current is the last node strictly less than value;
+            // insert the new node immediately after it.
             let new_raw: *mut Node<T, N> =
-                Node::insert_after(precursors[0], Node::with_value(height, insert_value)).as_ptr();
+                Node::insert_after(current, Node::with_value(height, insert_value)).as_ptr();
 
             for (l, (pred_nn, pred_rank)) in precursors
                 .iter()
@@ -1203,7 +1226,10 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
             NonNull::new_unchecked(new_raw)
         };
 
-        let is_new_tail = self.tail.is_none_or(|tail| precursors[0] == tail);
+        // The new node is the tail if it has no successor.
+        // SAFETY: `new_node` was just created from `Box::into_raw` above; it is properly
+        // aligned, fully initialized, and no other reference to it exists yet.
+        let is_new_tail = unsafe { new_node.as_ref() }.next().is_none();
         if is_new_tail {
             self.tail = Some(new_node);
         }

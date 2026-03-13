@@ -249,11 +249,6 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
     /// assert_eq!(b_vals, [3, 4, 5]);
     /// ```
     #[expect(
-        clippy::indexing_slicing,
-        reason = "precursors[0] is valid because max_levels >= 1 (guaranteed by the \
-                  LevelGenerator invariant), so precursors.len() >= 1"
-    )]
-    #[expect(
         clippy::multiple_unsafe_ops_per_block,
         reason = "set_head_next is an unsafe fn called on a raw-pointer dereference; \
                   the two operations are on the same freshly allocated, exclusively-owned \
@@ -282,8 +277,19 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
             let cmp = |v: &T, q: &Q| self.comparator.compare_key(v, q);
             let mut visitor = OrdMutVisitor::new(head, value, cmp);
             visitor.traverse();
-            let (_current, _found, precursors) = visitor.into_parts();
-            precursors[0]
+            let (current, found, _precursors) = visitor.into_parts();
+            // `found=true`:  current = first node with value == split_value;
+            //                pivot = the node just before it (prev()).
+            // `found=false`: current = last node with value < split_value
+            //                (or head if all values >= split_value);
+            //                pivot = current.
+            if found {
+                // SAFETY: current is a live data node; prev() gives the
+                // predecessor node (always Some for a non-head data node).
+                unsafe { current.as_ref() }.prev().unwrap_or(head)
+            } else {
+                current
+            }
         };
 
         // SAFETY: `Box::into_raw` transfers ownership; freed in `Drop`.
@@ -511,12 +517,6 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
     /// assert_eq!(list.get_by_index(3), None);
     /// ```
     #[expect(
-        clippy::expect_used,
-        clippy::missing_panics_doc,
-        reason = "the node at rank `len` exists because 0 < len < self.len was checked before \
-                  the traversal; the expect fires only on invariant violations"
-    )]
-    #[expect(
         clippy::indexing_slicing,
         reason = "l < max_levels = head.links.len(); every node in precursors[] was reached \
                   via a level-l link so its links.len() > l; all accesses are in bounds; \
@@ -540,10 +540,9 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
 
         let max_levels = self.head_ref().level();
 
-        // IndexMutVisitor with target = len records, for each level l, the last
-        // node at level l with rank < len.  precursors[0].links[0] points to the
-        // new tail at rank len.  into_parts() releases the &mut borrow.
-        let (_, precursors, _) = {
+        // IndexMutVisitor with target = len stops when current = the node at
+        // rank len (the new tail).  into_parts() returns that node as `current`.
+        let (new_tail_node, precursors, _) = {
             let mut visitor = IndexMutVisitor::new(self.head, len);
             visitor.traverse();
             visitor.into_parts()
@@ -554,13 +553,7 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
         // OrderedSkipList.  No safe references to any node exist while this block
         // runs.
         let new_tail_ptr: *mut Node<T, N> = unsafe {
-            // The new tail is the level-0 successor of precursors[0].
-            // It exists because 0 < len < self.len.
-            let new_tail_ptr: *mut Node<T, N> = (*precursors[0].as_ptr()).links()[0]
-                .as_ref()
-                .expect("the node at rank `len` exists because len < self.len")
-                .node()
-                .as_ptr();
+            let new_tail_ptr: *mut Node<T, N> = new_tail_node.as_ptr();
 
             let new_tail_height = (*new_tail_ptr).level();
 

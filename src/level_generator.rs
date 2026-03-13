@@ -13,20 +13,24 @@
 
 pub mod geometric;
 
-/// Trait for generating the level of a new node inserted into a skip list.
+/// Trait for generating the height of a new node inserted into a skip list.
 ///
-/// A level generator controls how many skip-link levels each new node
-/// participates in. Higher levels allow the skip list to skip over more nodes
-/// during traversal, trading memory for speed. The generator determines the
-/// probabilistic balance between the two.
+/// A level generator controls how many skip-link levels (the *height*) each new
+/// node receives.  Nodes with more skip links allow the list to skip over
+/// larger ranges during traversal, trading memory for speed.
 ///
-/// The returned level must always be in the range `$[0, \text{total})$`.
-/// Returning a value out of that range is considered a logic error and may
+/// The returned height must always be in the range `$[0, \text{total}]$`. A
+/// height of `0` means the node participates only in the base `prev`/`next`
+/// linked list and has no skip links.  A height of `total` (the maximum)
+/// gives the node the same number of skip links as the head sentinel.
+///
+/// Returning a value outside `$[0, \text{total}]$` is a logic error and may
 /// cause panics or incorrect behavior.
 ///
 /// # Examples
 ///
-/// Implementing a trivial level generator that always returns level 0:
+/// Implementing a trivial level generator that always returns height 0 (all
+/// nodes participate only in the base layer; traversal degrades to `$O(n)$`):
 ///
 /// ```rust
 /// use skiplist::level_generator::LevelGenerator;
@@ -52,8 +56,9 @@ pub mod geometric;
 pub trait LevelGenerator {
     /// Returns the total number of levels supported by this generator.
     ///
+    /// The head sentinel is created with exactly `total` skip-link slots.
     /// All values returned by [`level`][LevelGenerator::level] will be
-    /// strictly less than this value.
+    /// at most this value.
     ///
     /// # Examples
     ///
@@ -67,10 +72,18 @@ pub trait LevelGenerator {
     #[must_use]
     fn total(&self) -> usize;
 
-    /// Generate a random level for a new node in the range `$[0,
-    /// \text{total})$`.
+    /// Returns the number of skip links to allocate for a new node (its
+    /// *height*), sampled according to the generator's distribution.
     ///
-    /// This method must not return a value greater than or equal to
+    /// The returned value must be in `$[0, \text{total}]$`:
+    ///
+    /// - `0` — no skip links; the node is reachable only via the base
+    ///   `prev`/`next` pointers.
+    /// - `k` — the node receives skip links at levels `0` through `k - 1`.
+    /// - `total` — the maximum height; the node has the same number of skip
+    ///   links as the head sentinel.
+    ///
+    /// This method must not return a value greater than
     /// [`total`][LevelGenerator::total].
     ///
     /// # Examples
@@ -80,8 +93,8 @@ pub trait LevelGenerator {
     /// use skiplist::level_generator::LevelGenerator;
     ///
     /// let mut generator = Geometric::default();
-    /// let level = generator.level();
-    /// assert!(level < generator.total());
+    /// let height = generator.level();
+    /// assert!(height <= generator.total());
     /// ```
     #[must_use]
     fn level(&mut self) -> usize;
