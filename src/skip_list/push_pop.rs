@@ -47,8 +47,8 @@ impl<T, G: LevelGenerator, const N: usize> SkipList<T, N, G> {
     )]
     #[inline]
     pub fn push_front(&mut self, value: T) {
-        // height ∈ [1, max_levels]: generator.level() ∈ [0, total).
-        let height = self.generator.level().saturating_add(1);
+        // height ∈ [0, total]: number of skip links to allocate.
+        let height = self.generator.level();
         let max_levels = self.head_ref().level();
 
         // SAFETY: Node::with_value produces a detached node (prev = next = None),
@@ -139,8 +139,8 @@ impl<T, G: LevelGenerator, const N: usize> SkipList<T, N, G> {
     )]
     #[inline]
     pub fn push_back(&mut self, value: T) {
-        // height ∈ [1, max_levels]: generator.level() ∈ [0, total).
-        let height = self.generator.level().saturating_add(1);
+        // height ∈ [0, total]: number of skip links to allocate.
+        let height = self.generator.level();
 
         // IndexMutVisitor with target = len + 1 advances to the end of the list
         // (all ranks are ≤ len < len+1), recording the rightmost predecessor at
@@ -305,21 +305,13 @@ impl<T, G: LevelGenerator, const N: usize> SkipList<T, N, G> {
     /// assert_eq!(list.pop_back(), None);
     /// ```
     #[expect(
-        clippy::expect_used,
-        clippy::missing_panics_doc,
-        clippy::unwrap_in_result,
-        reason = "precursors[0].links[0] is Some because the list is non-empty and the traversal \
-                  stops at the predecessor of the tail; \
-                  all expects fire only on internal invariant violations, not user input"
-    )]
-    #[expect(
         clippy::indexing_slicing,
         reason = "l is bounded by max_levels = head.links.len(); any node reachable at level l \
                   has links.len() > l by the skip-list invariant, so all accesses are in bounds"
     )]
     #[expect(
         clippy::multiple_unsafe_ops_per_block,
-        reason = "link clearing and node pop touch provably disjoint heap nodes; \
+        reason = "link clearing, prev capture, and node pop touch provably disjoint heap nodes; \
                   splitting across blocks would require unsafe-crossing raw-pointer variables"
     )]
     #[inline]
@@ -328,9 +320,9 @@ impl<T, G: LevelGenerator, const N: usize> SkipList<T, N, G> {
             return None;
         }
 
-        // IndexMutVisitor with target = self.len advances to just before the tail,
-        // recording the predecessor at each level.  into_parts() releases &mut.
-        let (_, precursors, _) = {
+        // IndexMutVisitor with target = self.len advances to the tail node.
+        // `current` from into_parts() is the tail itself.
+        let (tail_node, precursors, _) = {
             let mut visitor = IndexMutVisitor::new(self.head, self.len);
             visitor.traverse();
             visitor.into_parts()
@@ -339,15 +331,8 @@ impl<T, G: LevelGenerator, const N: usize> SkipList<T, N, G> {
         // SAFETY: All raw pointers come from NonNull<Node<T, N>> captured during
         // traversal.  They originate from heap allocations owned by this SkipList.
         // No safe &mut references to any node exist while this block runs.
-        let (value, pred0) = unsafe {
-            // The tail is the node at level 0 immediately after precursors[0].
-            // The list is non-empty, so this link must exist.
-            let back_ptr: *mut Node<T, N> = (*precursors[0].as_ptr()).links()[0]
-                .as_ref()
-                .expect("precursors[0].links[0] points to tail in a non-empty list")
-                .node()
-                .as_ptr();
-
+        let (value, new_tail) = unsafe {
+            let back_ptr: *mut Node<T, N> = tail_node.as_ptr();
             let back_height = (*back_ptr).level();
 
             // Remove skip links that pointed to the tail.
@@ -357,29 +342,27 @@ impl<T, G: LevelGenerator, const N: usize> SkipList<T, N, G> {
                 (*pred_nn.as_ptr()).links_mut()[l] = None;
             }
 
+            // Capture the predecessor before removing the node.
+            let new_tail = (*back_ptr).prev();
+
             // Detach the tail from the prev/next chain.
             let mut popped = (*back_ptr).pop();
-            (popped.take_value(), precursors[0])
+            (popped.take_value(), new_tail)
         };
 
-        // Update the cached tail pointer.  When the list becomes empty pred0
-        // equals head; we set tail to None rather than pointing at head.
-        self.tail = if self.len == 1 { None } else { Some(pred0) };
+        // Update the cached tail pointer.  When the list had exactly one element
+        // new_tail points to the head sentinel; we set tail to None instead.
+        self.tail = if self.len == 1 { None } else { new_tail };
         self.len = self.len.saturating_sub(1);
         value
     }
 }
 
-#[expect(
-    clippy::undocumented_unsafe_blocks,
-    reason = "test code, safety guarantees can be relaxed"
-)]
 #[cfg(test)]
 mod tests {
     use pretty_assertions::assert_eq;
 
     use super::super::SkipList;
-    use crate::node::link::Link;
 
     // MARK: push_front
 
@@ -428,13 +411,13 @@ mod tests {
         }
     }
 
-    /// With `with_capacity(1)` the generator always assigns height = 1.
-    /// After two `push_front` calls the skip-link structure must be:
+    /// With `with_capacity(1)` the generator always assigns height = 0.
+    /// After two `push_front` calls all data nodes have no skip links, so all
+    /// skip-link slots remain `None` and navigation is via `prev`/`next` only:
     ///
     /// ```text
-    /// head.links[0] → second_node (value 20) at distance 1
-    /// second_node.links[0] → first_node (value 10) at distance 1
-    /// first_node.links is empty (height 1 = index-0 only)
+    /// head → node(20) → node(10)
+    /// head.links[0] = None  (no skip-link chains)
     /// ```
     #[expect(
         clippy::indexing_slicing,
@@ -445,28 +428,22 @@ mod tests {
         let mut list = SkipList::<i32>::with_capacity(1);
 
         list.push_front(10);
-        // After first push: head.links[0] → node(10) at distance 1
-        {
-            let link: &Link<_, _> = list.head_ref().links()[0].as_ref().expect("head link");
-            assert_eq!(link.distance().get(), 1);
-            assert_eq!(unsafe { link.node().as_ref() }.value(), Some(&10));
-        }
+        // No skip links: all data nodes have height 0.
+        assert!(list.head_ref().links()[0].is_none());
 
         list.push_front(20);
-        // After second push: head.links[0] → node(20) at distance 1
-        {
-            let link: &Link<_, _> = list.head_ref().links()[0].as_ref().expect("head link");
-            assert_eq!(link.distance().get(), 1);
-            assert_eq!(unsafe { link.node().as_ref() }.value(), Some(&20));
-        }
-        // node(20).links[0] → node(10) at distance 1
-        {
-            let front = list.head_ref().next_as_ref().expect("front node");
-            assert_eq!(front.value(), Some(&20));
-            let link: &Link<_, _> = front.links()[0].as_ref().expect("front link");
-            assert_eq!(link.distance().get(), 1);
-            assert_eq!(unsafe { link.node().as_ref() }.value(), Some(&10));
-        }
+        // Still no skip links.
+        assert!(list.head_ref().links()[0].is_none());
+
+        // Verify prev/next chain: head → 20 → 10.
+        // links() is empty for height-0 nodes; use first() to avoid indexing.
+        let front = list.head_ref().next_as_ref().expect("front node");
+        assert_eq!(front.value(), Some(&20));
+        assert!(front.links().first().is_none_or(|l| l.is_none()));
+
+        let second = front.next_as_ref().expect("second node");
+        assert_eq!(second.value(), Some(&10));
+        assert!(second.links().first().is_none_or(|l| l.is_none()));
     }
 
     // MARK: push_back
@@ -516,13 +493,13 @@ mod tests {
         }
     }
 
-    /// With `with_capacity(1)` the generator always assigns height = 1.
-    /// After two `push_back` calls the skip-link structure must be:
+    /// With `with_capacity(1)` the generator always assigns height = 0.
+    /// After two `push_back` calls all data nodes have no skip links, so all
+    /// skip-link slots remain `None` and navigation is via `prev`/`next` only:
     ///
     /// ```text
-    /// head.links[0]         → first_node  (value 10) at distance 1
-    /// first_node.links[0]   → second_node (value 20) at distance 1
-    /// second_node.links[0]  = None
+    /// head → node(10) → node(20)
+    /// head.links[0] = None  (no skip-link chains)
     /// ```
     #[expect(
         clippy::indexing_slicing,
@@ -533,39 +510,22 @@ mod tests {
         let mut list = SkipList::<i32>::with_capacity(1);
 
         list.push_back(10);
-        // After first push: head.links[0] → node(10) at distance 1
-        {
-            let link: &Link<_, _> = list.head_ref().links()[0].as_ref().expect("head link");
-            assert_eq!(link.distance().get(), 1);
-            assert_eq!(unsafe { link.node().as_ref() }.value(), Some(&10));
-        }
+        // No skip links: all data nodes have height 0.
+        assert!(list.head_ref().links()[0].is_none());
 
         list.push_back(20);
-        // head.links[0] still → node(10) at distance 1 (unchanged)
-        {
-            let link: &Link<_, _> = list.head_ref().links()[0].as_ref().expect("head link");
-            assert_eq!(link.distance().get(), 1);
-            assert_eq!(unsafe { link.node().as_ref() }.value(), Some(&10));
-        }
-        // node(10).links[0] → node(20) at distance 1
-        {
-            let front = list.head_ref().next_as_ref().expect("front node");
-            assert_eq!(front.value(), Some(&10));
-            let link: &Link<_, _> = front.links()[0].as_ref().expect("front link");
-            assert_eq!(link.distance().get(), 1);
-            assert_eq!(unsafe { link.node().as_ref() }.value(), Some(&20));
-        }
-        // node(20).links[0] = None
-        {
-            let second = list
-                .head_ref()
-                .next_as_ref()
-                .expect("first node")
-                .next_as_ref()
-                .expect("second node");
-            assert_eq!(second.value(), Some(&20));
-            assert!(second.links()[0].is_none());
-        }
+        // Still no skip links.
+        assert!(list.head_ref().links()[0].is_none());
+
+        // Verify prev/next chain: head → 10 → 20.
+        // links() is empty for height-0 nodes; use first() to avoid indexing.
+        let front = list.head_ref().next_as_ref().expect("first node");
+        assert_eq!(front.value(), Some(&10));
+        assert!(front.links().first().is_none_or(|l| l.is_none()));
+
+        let second = front.next_as_ref().expect("second node");
+        assert_eq!(second.value(), Some(&20));
+        assert!(second.links().first().is_none_or(|l| l.is_none()));
     }
 
     #[test]
@@ -630,16 +590,18 @@ mod tests {
         assert_eq!(list.pop_front(), None);
     }
 
-    /// With `with_capacity(1)` the generator always assigns height = 1.
-    /// After three `push_back` calls followed by two `pop_front` calls
-    /// the skip-link structure must be kept consistent.
+    /// With `with_capacity(1)` the generator always assigns height = 0.
+    /// All data nodes have no skip links; head.links[0] is always None.
+    /// Popping from the front only updates the prev/next chain.
     ///
     /// ```text
-    /// Initial:  head → n1(10,d=1) → n2(20,d=1) → n3(30,None)
+    /// Initial:  head → n1(10) → n2(20) → n3(30)   [no skip links]
     /// After 1st pop_front (removes 10):
-    ///   head → n2(20,d=1) → n3(30,None)
+    ///   head → n2(20) → n3(30)
     /// After 2nd pop_front (removes 20):
-    ///   head → n3(30,None)
+    ///   head → n3(30)
+    /// After 3rd pop_front (removes 30):
+    ///   head  (empty)
     /// ```
     #[expect(
         clippy::indexing_slicing,
@@ -652,32 +614,32 @@ mod tests {
         list.push_back(20);
         list.push_back(30);
 
+        // No skip links at any point; head.links[0] is always None.
+        assert!(list.head_ref().links()[0].is_none());
+
         // First pop_front: removes 10
         assert_eq!(list.pop_front(), Some(10));
         assert_eq!(list.len(), 2);
-        {
-            let link: &Link<_, _> = list.head_ref().links()[0]
-                .as_ref()
-                .expect("head link after 1st pop");
-            assert_eq!(link.distance().get(), 1);
-            assert_eq!(unsafe { link.node().as_ref() }.value(), Some(&20));
-        }
+        assert!(list.head_ref().links()[0].is_none());
+        assert_eq!(
+            list.head_ref().next_as_ref().and_then(|n| n.value()),
+            Some(&20)
+        );
 
         // Second pop_front: removes 20
         assert_eq!(list.pop_front(), Some(20));
         assert_eq!(list.len(), 1);
-        {
-            let link: &Link<_, _> = list.head_ref().links()[0]
-                .as_ref()
-                .expect("head link after 2nd pop");
-            assert_eq!(link.distance().get(), 1);
-            assert_eq!(unsafe { link.node().as_ref() }.value(), Some(&30));
-        }
+        assert!(list.head_ref().links()[0].is_none());
+        assert_eq!(
+            list.head_ref().next_as_ref().and_then(|n| n.value()),
+            Some(&30)
+        );
 
-        // Third pop_front: removes 30, head link becomes None
+        // Third pop_front: removes 30
         assert_eq!(list.pop_front(), Some(30));
         assert_eq!(list.len(), 0);
         assert!(list.head_ref().links()[0].is_none());
+        assert!(list.head_ref().next_as_ref().is_none());
     }
 
     #[test]
@@ -740,16 +702,18 @@ mod tests {
         assert_eq!(list.pop_back(), None);
     }
 
-    /// With `with_capacity(1)` the generator always assigns height = 1.
-    /// After three `push_back` calls followed by two `pop_back` calls
-    /// the skip-link structure must be kept consistent.
+    /// With `with_capacity(1)` the generator always assigns height = 0.
+    /// All data nodes have no skip links; head.links[0] is always None.
+    /// Popping from the back only updates the prev/next chain and tail pointer.
     ///
     /// ```text
-    /// Initial:  head → n1(10,d=1) → n2(20,d=1) → n3(30,d=1) → None
+    /// Initial:  head → n1(10) → n2(20) → n3(30)   [no skip links]
     /// After 1st pop_back (removes 30):
-    ///   head → n1(10,d=1) → n2(20,d=1) → None
+    ///   head → n1(10) → n2(20)
     /// After 2nd pop_back (removes 20):
-    ///   head → n1(10,d=1) → None
+    ///   head → n1(10)
+    /// After 3rd pop_back (removes 10):
+    ///   head  (empty)
     /// ```
     #[expect(
         clippy::indexing_slicing,
@@ -762,51 +726,26 @@ mod tests {
         list.push_back(20);
         list.push_back(30);
 
-        // First pop_back: removes 30
+        // No skip links at any point; head.links[0] is always None.
+        assert!(list.head_ref().links()[0].is_none());
+
+        // First pop_back: removes 30; tail becomes node(20).
         assert_eq!(list.pop_back(), Some(30));
         assert_eq!(list.len(), 2);
-        {
-            // head.links[0] still → node(10) at distance 1
-            let link: &Link<_, _> = list.head_ref().links()[0]
-                .as_ref()
-                .expect("head link after 1st pop_back");
-            assert_eq!(link.distance().get(), 1);
-            assert_eq!(unsafe { link.node().as_ref() }.value(), Some(&10));
-        }
-        {
-            // node(10).links[0] → node(20) at distance 1
-            let n1 = list.head_ref().next_as_ref().expect("n1");
-            let link: &Link<_, _> = n1.links()[0].as_ref().expect("n1 link");
-            assert_eq!(link.distance().get(), 1);
-            assert_eq!(unsafe { link.node().as_ref() }.value(), Some(&20));
-        }
-        {
-            // node(20).links[0] = None (was cleared by pop_back)
-            let n2 = list
-                .head_ref()
-                .next_as_ref()
-                .expect("n1")
-                .next_as_ref()
-                .expect("n2");
-            assert!(n2.links()[0].is_none());
-        }
+        assert!(list.head_ref().links()[0].is_none());
+        assert_eq!(list.back(), Some(&20));
 
-        // Second pop_back: removes 20
+        // Second pop_back: removes 20; tail becomes node(10).
         assert_eq!(list.pop_back(), Some(20));
         assert_eq!(list.len(), 1);
-        {
-            // head.links[0] → node(10) at distance 1
-            let link: &Link<_, _> = list.head_ref().links()[0]
-                .as_ref()
-                .expect("head link after 2nd pop_back");
-            assert_eq!(link.distance().get(), 1);
-            assert_eq!(unsafe { link.node().as_ref() }.value(), Some(&10));
-        }
+        assert!(list.head_ref().links()[0].is_none());
+        assert_eq!(list.back(), Some(&10));
 
-        // Third pop_back: removes 10, head link becomes None
+        // Third pop_back: removes 10; list is now empty.
         assert_eq!(list.pop_back(), Some(10));
         assert_eq!(list.len(), 0);
         assert!(list.head_ref().links()[0].is_none());
+        assert!(list.head_ref().next_as_ref().is_none());
     }
 
     #[test]

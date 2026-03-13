@@ -78,6 +78,9 @@
 //! - A node's 'level' is the number of links it has (excluding the
 //!   `prev`/`next` links). In the above example, node (1) has a level of 0,
 //!   node (2) a level of 1 and node (5) a level of 2.
+//!   **A node at level 0 has no skip links and participates only in the
+//!   sequential base layer** (reachable via `prev`/`next` only).  This is
+//!   the most common case for a well-tuned generator.
 //! - The head node always has the maximum number of levels. In the example
 //!   above, the head node has a level of 4, even if it doesn't contain a fourth
 //!   link. That fourth link will be created when a new node of level 4 is
