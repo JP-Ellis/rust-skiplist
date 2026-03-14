@@ -2,7 +2,37 @@
 
 All notable changes to this project will be documented in this file.
 
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
 <!-- markdownlint-disable -->
+
+## [1.1.0](https://github.com/JP-Ellis/rust-skiplist/compare/v1.0.0...v1.1.0) - _2026-03-14_
+
+### 🚀 Features
+
+-   Add seeded constructor
+
+### 🐛 Bug Fixes
+
+-   Unable to create upper bound
+-   Two off-by-one errors
+
+### 📚 Documentation
+
+-   Fix p/q confusion
+
+### 🧪 Testing
+
+-   Add structural snapshots
+
+### ⚙️ Miscellaneous Tasks
+
+-   Fold cliff config into release-plz
+-   Remove output from cliff config
+-   _(ci)_ Test doc examples
+-   _(ci)_ Run tests on ready for review
+
 
 ## [1.0.0] _2026-03-10_
 
