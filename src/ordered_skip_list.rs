@@ -341,7 +341,7 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
     ///
     /// The head sentinel is always valid for the lifetime of `&self`.
     #[inline]
-    fn head_ref(&self) -> &Node<T, N> {
+    pub(crate) fn head_ref(&self) -> &Node<T, N> {
         // SAFETY: `self.head` was allocated in `with_comparator_and_level_generator`
         // and remains valid for `&self`'s lifetime.
         unsafe { self.head.as_ref() }
