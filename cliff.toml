@@ -41,7 +41,6 @@ footer = """
 """
 trim = true
 postprocessors = []
-output = "CHANGELOG.md"
 
 [git]
 conventional_commits = true
