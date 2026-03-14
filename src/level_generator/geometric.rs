@@ -20,7 +20,7 @@ pub enum GeometricError {
     ZeroMax,
     /// The maximum number of levels must be less than `i32::MAX`.
     MaxTooLarge,
-    /// The probability `$p$` must be in the range `$(0, 1)$`.
+    /// The probability `$q$` must be in the range `$(0, 1)$`.
     InvalidProbability,
 }
 
@@ -30,7 +30,7 @@ impl fmt::Display for GeometricError {
         match self {
             Self::ZeroMax => write!(f, "max must be non-zero."),
             Self::MaxTooLarge => write!(f, "max must be less than i32::MAX."),
-            Self::InvalidProbability => write!(f, "p must be in (0, 1)."),
+            Self::InvalidProbability => write!(f, "q must be in (0, 1)."),
         }
     }
 }
@@ -41,11 +41,17 @@ impl Error for GeometricError {}
 ///
 /// Each new element is assigned a random level drawn from a truncated geometric
 /// distribution. If an element exists at level `$n$`, the probability that it
-/// also exists at level `$n+1$` is `$p \in (0, 1)$`. The level is capped at the
+/// also exists at level `$n+1$` is `$q \in (0, 1)$`. The level is capped at the
 /// configured maximum.
 ///
+/// Note that in mathematics, geometric distributions are conventionally defined
+/// in terms of the success probability `$p = 1 - q$`.
+///
+/// Also note that for very large values of `$q$`, the assumption that `$P(k +
+/// 1|k) = q$` breaks down due to the truncation at `total`.
+///
 /// Use [`Geometric::new`] to configure the number of levels and the promotion
-/// probability, or [`Geometric::default`] for the standard 16-level, `$p =
+/// probability, or [`Geometric::default`] for the standard 16-level, `$q =
 /// 0.5$` configuration.
 ///
 /// # Examples
@@ -63,11 +69,11 @@ pub struct Geometric {
     /// The total number of levels that are assumed to exist.
     total: usize,
     /// The total number of levels as an `i32` for use in the CDF computation.
-    total_i32: i32,
-    /// The probability that a node is not present in the next level.
-    ///
-    /// While the geometric distribution is defined using the probability `$p$`,
-    /// the computations needed rely on `$q = 1 - p$`.
+    /// This needs to be 1 more than the maximum levels to ensure that it
+    /// includes the full range of possible levels (0..=total).
+    total_inclusive: i32,
+    /// The promotion probability, i.e., the probability that a node at level
+    /// `n` also appears at level `n + 1`.
     q: f64,
     /// The random number generator.
     rng: SmallRng,
@@ -77,13 +83,13 @@ impl Geometric {
     /// Creates a new geometric level generator.
     ///
     /// `total` sets the maximum number of levels (must be at least 1 and less
-    /// than `i32::MAX`). `p` is the probability that an element is promoted to
+    /// than `i32::MAX`). `q` is the probability that an element is promoted to
     /// the next level and must be strictly between 0 and 1.
     ///
     /// # Errors
     ///
-    /// Returns a [`GeometricError`] if `total` is zero, if `total` exceeds
-    /// `i32::MAX`, or if `p` is not in the open interval `$(0, 1)$`.
+    /// Returns a [`GeometricError`] if `total` is zero, if `total` is too
+    /// large, or if `q` is not in the open interval `$(0, 1)$`.
     ///
     /// # Examples
     ///
@@ -103,27 +109,27 @@ impl Geometric {
     /// assert_eq!(Geometric::new(16, 1.0).unwrap_err(), GeometricError::InvalidProbability);
     /// ```
     #[inline]
-    pub fn new(total: usize, p: f64) -> Result<Self, GeometricError> {
+    pub fn new(total: usize, q: f64) -> Result<Self, GeometricError> {
         if total == 0 {
             return Err(GeometricError::ZeroMax);
         }
         let Ok(total_i32) = i32::try_from(total) else {
             return Err(GeometricError::MaxTooLarge);
         };
-        if !(0.0 < p && p < 1.0) {
+        if !(0.0 < q && q < 1.0) {
             return Err(GeometricError::InvalidProbability);
         }
         Ok(Geometric {
             total,
             total_i32,
-            q: 1.0 - p,
+            q,
             rng: SmallRng::from_rng(&mut rand::rng()),
         })
     }
 }
 
 impl Default for Geometric {
-    /// Creates a `Geometric` level generator with 16 levels and `p = 0.5`.
+    /// Creates a `Geometric` level generator with 16 levels and `q = 0.5`.
     ///
     /// These defaults match the standard skip list configuration and provide a
     /// good balance between memory usage and search performance for most use
@@ -142,11 +148,11 @@ impl Default for Geometric {
     fn default() -> Self {
         #[expect(
             clippy::expect_used,
-            reason = "16 levels and p = 0.5 are compile-time constants whose \
+            reason = "16 levels and q = 0.5 are compile-time constants whose \
                       validity is guaranteed by the Geometric invariants"
         )]
         Geometric::new(16, 0.5)
-            .expect("16 levels and p = 0.5 are always valid Geometric parameters")
+            .expect("16 levels and q = 0.5 are always valid Geometric parameters")
     }
 }
 
