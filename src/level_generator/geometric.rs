@@ -126,6 +126,43 @@ impl Geometric {
             rng: SmallRng::from_rng(&mut rand::rng()),
         })
     }
+
+    /// Creates a new geometric level generator with a fixed seed for
+    /// reproducible output.
+    ///
+    /// Identical to [`Geometric::new`] except the internal RNG is seeded from
+    /// `seed` instead of the thread-local RNG. Useful for deterministic tests.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`GeometricError`] if `total` is zero, if `total` is too
+    /// large, or if `q` is not in the open interval `$(0, 1)$`.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use skiplist::level_generator::geometric::Geometric;
+    ///
+    /// let mut g = Geometric::new_with_seed(16, 0.5, 42).unwrap();
+    /// ```
+    #[inline]
+    pub fn new_with_seed(total: usize, q: f64, seed: u64) -> Result<Self, GeometricError> {
+        if total == 0 {
+            return Err(GeometricError::ZeroMax);
+        }
+        let Some(total_inclusive) = i32::try_from(total).ok().and_then(|i| i.checked_add(1)) else {
+            return Err(GeometricError::MaxTooLarge);
+        };
+        if !(0.0 < q && q < 1.0) {
+            return Err(GeometricError::InvalidProbability);
+        }
+        Ok(Geometric {
+            total,
+            total_inclusive,
+            q,
+            rng: SmallRng::seed_from_u64(seed),
+        })
+    }
 }
 
 impl Default for Geometric {
@@ -200,9 +237,7 @@ impl LevelGenerator for Geometric {
 
 #[cfg(test)]
 mod tests {
-    use anyhow::Result;
-    #[cfg(not(miri))]
-    use anyhow::bail;
+    use anyhow::{Result, anyhow};
     use pretty_assertions::assert_eq;
     use rstest::rstest;
 
@@ -226,108 +261,158 @@ mod tests {
         );
     }
 
-    // Miri is very slow, so we use a much smaller number of iterations, and
-    // don't check for the presence of min and max level nodes.
-    #[cfg(miri)]
     #[rstest]
-    fn new_miri(
-        #[values(1, 2, 128, 1024)] n: usize,
-        #[values(0.01, 0.1, 0.5, 0.99)] p: f64,
+    fn total_is_correct(
+        #[values(1, 2, 4, 8, 128, 512, 1024)] n: usize,
+        #[values(0.01, 0.1, 0.5, 0.99)] q: f64,
     ) -> Result<()> {
-        const MAX: usize = 10;
-
-        let mut generator = Geometric::new(n, p)?;
+        let generator = Geometric::new_with_seed(n, q, 42)?;
         assert_eq!(generator.total(), n);
-        for _ in 0..MAX {
-            let level = generator.level();
-            assert!((0..=n).contains(&level));
-        }
         Ok(())
     }
 
-    #[cfg(not(miri))]
+    /// Checks that level 0 is reachable within `MAX` attempts.
+    ///
+    /// P(level = 0) = 1 - q, so the expected number of draws is 1/(1-q). Even
+    /// with a large q, the probability of not seeing level 0 after MAX attempts
+    /// is negligible.
     #[rstest]
-    fn new_small(
-        #[values(1, 2, 4, 8)] n: usize,
-        #[values(0.01, 0.1, 0.5, 0.8)] p: f64,
+    fn generates_level_zero(
+        #[values(1, 2, 4, 8, 128, 512, 1024)] n: usize,
+        #[values(0.01, 0.1, 0.2, 0.5, 0.8, 0.99)] q: f64,
     ) -> Result<()> {
-        const MAX: usize = 10_000_000;
+        const MAX: usize = if cfg!(miri) { 50 } else { 10_000_000 };
 
-        let mut generator = Geometric::new(n, p)?;
-        assert_eq!(generator.total(), n);
-        for _ in 0..1_000 {
+        let mut generator = Geometric::new_with_seed(n, q, 42)?;
+        let found = (0..MAX).any(|_| {
             let level = generator.level();
-            assert!((0..=n).contains(&level));
-        }
-        // Make sure that we can produce at least one level-0 node, and one at the
-        // maximum level.
-        let mut found = false;
-        for _ in 0..MAX {
-            let level = generator.level();
-            if level == 0 {
-                found = true;
-                break;
-            }
-        }
-        if !found {
-            bail!("Failed to generate a level-0 node.");
-        }
+            assert!(
+                (0..=n).contains(&level),
+                "level {level} out of range 0..={n}"
+            );
+            level == 0
+        });
 
-        found = false;
-        for _ in 0..MAX {
-            let level = generator.level();
-            if level == n.checked_sub(1).expect("n is guaranteed to be > 0") {
-                found = true;
-                break;
-            }
-        }
-        if !found {
-            bail!(
-                "Failed to generate a level-{} node.",
-                n.checked_sub(1).expect("n is guaranteed to be > 0")
+        if !cfg!(miri) {
+            // Skip as miri is slow and changes are the test will fail with only
+            // 50 trials.
+            assert!(
+                found,
+                "Failed to generate a level-0 node after {MAX} attempts"
             );
         }
-
         Ok(())
     }
 
-    #[cfg(not(miri))]
+    /// Checks that the maximum level is reachable within `MAX` attempts.
+    ///
+    /// The probability is P(level = n) = p·q^n, so the expected number of draws
+    /// is 1/(p·q^n). For small q and large n, this may require many trials,
+    /// hence select values of `q` which are not _too_ small.
     #[rstest]
-    fn new_large(#[values(512, 1024)] n: usize, #[values(0.001, 0.01)] p: f64) -> Result<()> {
-        const MAX: usize = 10_000_000;
+    fn generates_max_level_small_n(
+        #[values(1, 2, 4, 8)] n: usize,
+        #[values(0.2, 0.5, 0.8, 0.9, 0.99)] q: f64,
+    ) -> Result<()> {
+        const MAX: usize = if cfg!(miri) { 50 } else { 10_000_000 };
 
-        let mut generator = Geometric::new(n, p)?;
-        assert_eq!(generator.total(), n);
-        for _ in 0..1_000 {
+        let mut generator = Geometric::new_with_seed(n, q, 42)?;
+        let found = (0..MAX).any(|_| {
             let level = generator.level();
-            assert!((0..=n).contains(&level));
+            assert!(
+                (0..=n).contains(&level),
+                "level {level} out of range 0..={n}"
+            );
+            level == n
+        });
+
+        if !cfg!(miri) {
+            // Skip as miri is slow and changes are the test will fail with only
+            // 50 trials.
+            assert!(
+                found,
+                "Failed to generate a level-{n} node after {MAX} attempts"
+            );
         }
-        // Make sure that we can produce at least one level-0 node, and one at the
-        // maximum level.
-        let mut found = false;
-        for _ in 0..MAX {
+        Ok(())
+    }
+
+    #[rstest]
+    fn generates_max_level_large_n(
+        #[values(32, 64)] n: usize,
+        #[values(0.99, 0.999)] q: f64,
+    ) -> Result<()> {
+        const MAX: usize = if cfg!(miri) { 50 } else { 10_000_000 };
+
+        let mut generator = Geometric::new_with_seed(n, q, 42)?;
+        let found = (0..MAX).any(|_| {
             let level = generator.level();
-            if level == 0 {
-                found = true;
-                break;
+            assert!(
+                (0..=n).contains(&level),
+                "level {level} out of range 0..={n}"
+            );
+            level == n
+        });
+
+        if !cfg!(miri) {
+            assert!(
+                found,
+                "Failed to generate a level-{n} node after {MAX} attempts"
+            );
+        }
+        Ok(())
+    }
+
+    /// Verifies that consecutive level counts follow the expected geometric
+    /// ratio.
+    ///
+    /// Only adjacent pairs where both counts exceed `MIN_COUNT` are checked to avoid
+    /// statistical noise from low counts.
+    #[rstest]
+    fn distribution_ratio(
+        #[values(4, 8, 16)] n: usize,
+        #[values(0.1, 0.2, 0.5, 0.8, 0.9)] q: f64,
+    ) -> Result<()> {
+        const SAMPLES: usize = if cfg!(miri) { 50 } else { 10_000_000 };
+        const MIN_COUNT: u32 = 1_000;
+        const TOLERANCE: f64 = 0.05;
+
+        let mut counts = vec![0_u32; n.strict_add(1)];
+        let mut generator = Geometric::new_with_seed(n, q, 42)?;
+        for _ in 0..SAMPLES {
+            if let Some(count) = counts.get_mut(generator.level()) {
+                *count = count.strict_add(1);
+            } else {
+                panic!("Generated level {} out of range 0..={n}", generator.level());
             }
         }
-        if !found {
-            bail!("Failed to generate a level-0 node.");
+
+        if cfg!(miri) {
+            return Ok(());
         }
 
-        found = false;
-        for _ in 0..MAX {
-            let level = generator.level();
-            if level == n.checked_sub(1).expect("n is guaranteed to be > 0") {
-                found = true;
+        for k in 0..n {
+            let next_k = k.strict_add(1);
+            let count_k = counts
+                .get(k)
+                .copied()
+                .ok_or_else(|| anyhow!("invalid count bin"))?;
+            let count_next_k = counts
+                .get(next_k)
+                .copied()
+                .ok_or_else(|| anyhow!("invalid count bin"))?;
+            if count_k < MIN_COUNT || count_next_k < MIN_COUNT {
+                // Higher levels will have even fewer samples; no point continuing.
                 break;
             }
-        }
-        if !found {
-            bail!(
-                "Failed to generate a level-{} node.",
-                n.checked_sub(1).expect("n is guaranteed to be > 0")
+
+            let ratio = f64::from(count_next_k) / f64::from(count_k);
+            let relative_err = (ratio - q).abs() / q;
+            assert!(
+                relative_err < TOLERANCE,
+                "level {k}→{next_k}: count[{k}]={count_k}, count[{next_k}]={count_next_k}, \
+                 ratio={ratio:.4}, expected q={q:.4} (err {:.1}%)",
+                relative_err * 100.0,
             );
         }
 
