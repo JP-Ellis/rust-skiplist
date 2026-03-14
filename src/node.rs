@@ -799,7 +799,7 @@ impl<V: Debug, const N: usize> Node<V, N> {
     /// tail: None
     /// ```
     #[inline]
-    fn display(&self) -> Result<String, fmt::Error> {
+    pub(crate) fn display(&self) -> Result<String, fmt::Error> {
         let mut output = String::new();
         write!(
             output,

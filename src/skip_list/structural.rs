@@ -967,4 +967,44 @@ mod tests {
         let expected: Vec<usize> = (0..(n + m)).collect();
         assert_eq!(vals, expected);
     }
+
+    // MARK: link_structure
+
+    #[test]
+    fn link_structure() -> anyhow::Result<()> {
+        use insta::assert_snapshot;
+
+        use crate::level_generator::geometric::Geometric;
+
+        let g = Geometric::new_with_seed(4, 0.5, 42)?;
+        let mut list = SkipList::<i32, 4>::with_level_generator(g);
+        for i in 1..=10 {
+            list.push_back(i);
+        }
+
+        if !cfg!(miri) {
+            let display = list.head_ref().display()?;
+            assert_snapshot!(display, @"
+            [04]: 00 -------------> 03
+            [03]: 00 -------------> 03 -------------------------------------> 10
+            [02]: 00 -> 01 -------> 03 -------> 05 -------------------------> 10
+            [01]: 00 -> 01 -------> 03 -> 04 -> 05 -> 06 -------> 08 -------> 10
+            [->]: 00 -> 01 -> 02 -> 03 -> 04 -> 05 -> 06 -> 07 -> 08 -> 09 -> 10
+            [<-]: 00 <- 01 <- 02 <- 03 <- 04 <- 05 <- 06 <- 07 <- 08 <- 09 <- 10
+
+            [00|04] None
+            [01|02] Some(1)
+            [02|00] Some(2)
+            [03|04] Some(3)
+            [04|01] Some(4)
+            [05|02] Some(5)
+            [06|01] Some(6)
+            [07|00] Some(7)
+            [08|01] Some(8)
+            [09|00] Some(9)
+            [10|03] Some(10)
+            ");
+        }
+        Ok(())
+    }
 }
