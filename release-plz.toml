@@ -2,7 +2,6 @@
 # See: https://release-plz.dev/docs/config
 [workspace]
 # Changelog
-changelog_config = "cliff.toml"
 changelog_update = true
 
 # Release/publish
@@ -12,3 +11,55 @@ publish_allow_dirty = false
 
 # Pull Request
 pr_draft = true
+
+[changelog]
+protect_breaking_commits = true
+tag_pattern = '^v[0-9]+\.[0-9]+\.[0-9]+$'
+commit_preprocessors = [
+  # Remove the PR number added by GitHub when merging PR in UI
+  { pattern = '\s*\(#([0-9]+)\)$', replace = "" },
+]
+commit_parsers = [
+  # Skip dependency-only chore/fix commits (e.g. from Renovate)
+  { message = '^(chore|fix)\(deps.*\)', skip = true },
+  # Group commits by type
+  { group = "<!-- 00 -->🚀 Features", message = "^feat" },
+  { group = "<!-- 01 -->🐛 Bug Fixes", message = "^fix" },
+  { group = "<!-- 50 -->🚜 Refactor", message = "^refactor" },
+  { group = "<!-- 51 -->⚡ Performance", message = "^perf" },
+  { group = "<!-- 52 -->🎨 Styling", message = "^style" },
+  { group = "<!-- 60 -->📚 Documentation", message = "^docs?" },
+  { group = "<!-- 80 -->🧪 Testing", message = "^test" },
+  { group = "<!-- 98 -->◀️ Revert", message = "^revert" },
+  { group = "<!-- 99 -->⚙️ Miscellaneous Tasks", message = "(^chore|.*)" },
+]
+
+header = """# Changelog
+
+All notable changes to this project will be documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+<!-- markdownlint-disable -->
+"""
+# For information on the tera templating:
+# https://keats.github.io/tera/docs/#introduction
+body = """
+## [{{ version | trim_start_matches(pat="v") }}]{% if release_link %}({{ release_link }}){% endif %} - _{{ timestamp | date(format="%Y-%m-%d") }}_
+{% for group, commits in commits | group_by(attribute="group") %}
+### {{ group | striptags | trim | upper_first }}
+{% for commit in commits %}
+-   {% if commit.scope -%}_({{ commit.scope }})_ {% endif -%}
+    {% if commit.breaking %}[**breaking**] {% endif -%}
+    {{ commit.message | upper_first }}
+{% endfor -%}
+{% endfor %}
+{% if github.contributors %}
+### Contributors
+{% for contributor in github.contributors %}
+{% if not contributor.username or contributor.username is ending_with("[bot]") %}{% continue %}{% endif %}
+-   @{{ contributor.username }}
+{% endfor %}
+{% endif %}
+"""
