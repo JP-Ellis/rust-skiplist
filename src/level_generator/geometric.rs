@@ -113,7 +113,7 @@ impl Geometric {
         if total == 0 {
             return Err(GeometricError::ZeroMax);
         }
-        let Ok(total_i32) = i32::try_from(total) else {
+        let Some(total_inclusive) = i32::try_from(total).ok().and_then(|i| i.checked_add(1)) else {
             return Err(GeometricError::MaxTooLarge);
         };
         if !(0.0 < q && q < 1.0) {
@@ -121,7 +121,7 @@ impl Geometric {
         }
         Ok(Geometric {
             total,
-            total_i32,
+            total_inclusive,
             q,
             rng: SmallRng::from_rng(&mut rand::rng()),
         })
@@ -180,13 +180,15 @@ impl LevelGenerator for Geometric {
         //
         //   CDF(n) = (q^n - 1) / (q^t - 1)
         //
+        // where t is the _exclusive_ upper bound (i.e., total + 1).
+        //
         // Solving for n given a uniform variate u in [0, 1]:
         //
-        //   n = floor( log_q( 1 + (q^total - 1) * u ) )
+        //   n = floor( log_q( 1 + (q^t - 1) * u ) )
         //
         // where q = 1 - p and t is the total number of levels.
         let u = self.rng.random::<f64>();
-        ((1.0 + (self.q.powi(self.total_i32) - 1.0) * u)
+        ((1.0 + (self.q.powi(self.total_inclusive) - 1.0) * u)
             .log(self.q)
             .floor() as usize)
             // When q^total underflows to 0.0 due to floating-point precision,

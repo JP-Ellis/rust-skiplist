@@ -427,44 +427,6 @@ mod tests {
         list.insert(5, 99);
     }
 
-    /// With `with_capacity(1)` the generator assigns height = 0 to every node.
-    /// All data nodes have no skip links; `head.links[0]` is always `None`.
-    /// Verify that the prev/next chain is correct after `insert(1, 2)` into [1, 3]:
-    ///
-    /// ```text
-    /// Before: head → n1(1) → n3(3)   [no skip links]
-    /// After:  head → n1(1) → new(2) → n3(3)
-    /// ```
-    #[expect(
-        clippy::indexing_slicing,
-        reason = "links slice length is known to be 1 for with_capacity(1)"
-    )]
-    #[test]
-    fn insert_links_with_single_level() {
-        let mut list = SkipList::<i32>::with_capacity(1);
-        list.push_back(1); // [1]
-        list.push_back(3); // [1, 3]
-        list.insert(1, 2); // [1, 2, 3]
-
-        assert_eq!(list.len(), 3);
-        // No skip links: all data nodes have height 0.
-        assert!(list.head_ref().links()[0].is_none());
-
-        // Verify prev/next chain: head → 1 → 2 → 3.
-        // links() is empty for height-0 nodes; use first() to avoid indexing.
-        let n1 = list.head_ref().next_as_ref().expect("n1");
-        assert_eq!(n1.value(), Some(&1));
-        assert!(n1.links().first().is_none_or(|l| l.is_none()));
-
-        let n2 = n1.next_as_ref().expect("new_node");
-        assert_eq!(n2.value(), Some(&2));
-        assert!(n2.links().first().is_none_or(|l| l.is_none()));
-
-        let n3 = n2.next_as_ref().expect("n3");
-        assert_eq!(n3.value(), Some(&3));
-        assert!(n3.links().first().is_none_or(|l| l.is_none()));
-    }
-
     #[test]
     fn insert_interleaved_with_pop() {
         let mut list = SkipList::<i32>::with_capacity(1);
@@ -589,43 +551,6 @@ mod tests {
     fn remove_from_empty() {
         let mut list = SkipList::<i32>::new();
         list.remove(0);
-    }
-
-    /// With `with_capacity(1)` the generator assigns height = 0 to every node.
-    /// All data nodes have no skip links; `head.links[0]` is always `None`.
-    /// Verify that the prev/next chain is correct after removing the middle element
-    /// from [1, 2, 3]:
-    ///
-    /// ```text
-    /// Before: head → n1(1) → n2(2) → n3(3)   [no skip links]
-    /// After:  head → n1(1) → n3(3)
-    /// ```
-    #[expect(
-        clippy::indexing_slicing,
-        reason = "links slice length is known to be 1 for with_capacity(1)"
-    )]
-    #[test]
-    fn remove_links_with_single_level() {
-        let mut list = SkipList::<i32>::with_capacity(1);
-        list.push_back(1); // [1]
-        list.push_back(2); // [1, 2]
-        list.push_back(3); // [1, 2, 3]
-        assert_eq!(list.remove(1), 2); // [1, 3]
-
-        assert_eq!(list.len(), 2);
-        // No skip links: all data nodes have height 0.
-        assert!(list.head_ref().links()[0].is_none());
-
-        // Verify prev/next chain: head → 1 → 3.
-        // links() is empty for height-0 nodes; use first() to avoid indexing.
-        let n1 = list.head_ref().next_as_ref().expect("n1");
-        assert_eq!(n1.value(), Some(&1));
-        assert!(n1.links().first().is_none_or(|l| l.is_none()));
-
-        let n3 = n1.next_as_ref().expect("n3");
-        assert_eq!(n3.value(), Some(&3));
-        assert!(n3.links().first().is_none_or(|l| l.is_none()));
-        assert!(n3.next_as_ref().is_none());
     }
 
     #[test]
