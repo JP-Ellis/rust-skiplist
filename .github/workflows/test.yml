@@ -36,6 +36,7 @@ jobs:
       - format
       - test
       - benches
+      - docs
       - examples
       - miri
       - coverage
@@ -182,6 +183,23 @@ jobs:
 
       - name: Test benchmarks
         run: cargo test --benches '/'
+
+  docs:
+    name: Docs
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+
+      - name: Install Rust (stable)
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Restore Rust cache
+        uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5  # v2.8.2
+
+      - name: Test benchmarks
+        run: cargo test --doc
 
   examples:
     name: Examples
