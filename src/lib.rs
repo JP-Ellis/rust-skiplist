@@ -61,6 +61,8 @@
 //!
 //! - [`docs::concepts`]: skip list theory, collection taxonomy, comparator
 //!   design, and the capacity / levels formula.
+//! - [`docs::cursor`]: the gap cursor model, `lower_bound`/`upper_bound`
+//!   semantics, and how-to guides (requires the `cursor` feature).
 //! - [`docs::internals`]: node ownership, pointer provenance, and the
 //!   `NonNull`-over-`Box` rationale for contributors.
 //! - [`docs::partial_ord`]: the `partial-ord` feature, NaN caveats, and the
@@ -109,4 +111,6 @@ pub mod prelude {
         Comparator, ComparatorKey, FnComparator, Geometric, LevelGenerator, OrdComparator,
         OrderedSkipList, SkipList, SkipMap, SkipSet,
     };
+    #[cfg(feature = "cursor")]
+    pub use crate::{ordered_skip_list::UnorderedValueError, skip_map::UnorderedKeyError};
 }
