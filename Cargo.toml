@@ -53,7 +53,7 @@ rand = "0.10"
 [dev-dependencies]
 anyhow = "=1.0.102"
 criterion = { version = "=0.8.2", features = ["html_reports"] }
-insta = "=1.46.3"
+insta = "=1.47.0"
 pretty_assertions = { version = "=1.4.1", features = ["unstable"] }
 rstest = "=0.26.1"
 
