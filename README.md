@@ -68,6 +68,31 @@ skiplist = { version = "1", features = ["partial-ord"] }
 >
 > `PartialOrdComparator` panics at runtime if a comparison returns `None` (e.g. when a `NaN` is inserted or looked up). For floating-point keys, prefer `FnComparator` with `f64::total_cmp`, which provides a true total order with no panics.
 
+### Cursor API (unstable)
+
+The `cursor` feature adds `lower_bound` / `upper_bound` factory methods to `OrderedSkipList`, `SkipSet`, and `SkipMap`. A cursor points at a **gap between two adjacent elements** and supports `O(1)` peeking in both directions, `O(log n)` insertion and removal, and efficient range traversal:
+
+```toml
+[dependencies]
+skiplist = { version = "1", features = ["cursor"] }
+```
+
+```rust
+use skiplist::SkipSet;
+use core::ops::Bound;
+
+let set: SkipSet<i32> = (1..=10).collect();
+
+// Find the neighbours of 5 without a full search.
+let cur = set.lower_bound(Bound::Included(&5));
+assert_eq!(cur.peek_prev(), Some(&4)); // largest element < 5
+assert_eq!(cur.peek_next(), Some(&5)); // smallest element >= 5
+```
+
+> [!NOTE]
+>
+> The cursor API is modelled on the `BTreeMap` and `LinkedList` cursor design from RFC 2570 and [rust-lang/rust#107540](https://github.com/rust-lang/rust/issues/107540), which has not yet been stabilised in the standard library. This implementation is likewise **unstable**: the API may change in a future minor release. See the [cursor documentation on docs.rs](https://docs.rs/skiplist/latest/skiplist/docs/cursor/index.html) for the full guide.
+
 ## Basic usage
 
 ```rust
