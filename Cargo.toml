@@ -69,14 +69,6 @@ docs = []
 partial-ord = []
 
 [lints]
-  [lints.rust]
-  future-incompatible = "warn"
-  missing_docs = "warn"
-  warnings = "warn"
-
-  [lints.rustdoc]
-  missing-crate-level-docs = "warn"
-
   [lints.clippy]
   # I prefer enabling all lints and then silencing the ones I don't care about
   cargo = { level = "warn", priority = -1 }
@@ -112,3 +104,11 @@ partial-ord = []
   string_add = "allow"
   unreachable = "allow"
   unused_trait_names = "allow"
+
+  [lints.rust]
+  future-incompatible = "warn"
+  missing_docs = "warn"
+  warnings = "warn"
+
+  [lints.rustdoc]
+  missing-crate-level-docs = "warn"
