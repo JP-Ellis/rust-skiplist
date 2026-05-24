@@ -73,7 +73,7 @@ jobs:
 
     steps:
       - name: Install prek
-        uses: taiki-e/install-action@213ccc1a076163c093f914550b94feb90fab916d  # v2.79.2
+        uses: taiki-e/install-action@d9be7d8cda89035c9c843f78bd44d4f72d8403d4  # v2.79.7
         with:
           tool: prek
 
@@ -108,7 +108,7 @@ jobs:
         uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4  # v2.9.1
 
       - name: Install cargo-hack
-        uses: taiki-e/install-action@213ccc1a076163c093f914550b94feb90fab916d  # v2.79.2
+        uses: taiki-e/install-action@d9be7d8cda89035c9c843f78bd44d4f72d8403d4  # v2.79.7
         with:
           tool: cargo-hack
 
@@ -160,7 +160,7 @@ jobs:
         uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4  # v2.9.1
 
       - name: Install cargo-hack and cargo-nextest
-        uses: taiki-e/install-action@213ccc1a076163c093f914550b94feb90fab916d  # v2.79.2
+        uses: taiki-e/install-action@d9be7d8cda89035c9c843f78bd44d4f72d8403d4  # v2.79.7
         with:
           tool: cargo-hack,cargo-nextest
 
@@ -265,7 +265,7 @@ jobs:
         uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4  # v2.9.1
 
       - name: Install cargo-llvm-cov and cargo-nextest
-        uses: taiki-e/install-action@213ccc1a076163c093f914550b94feb90fab916d  # v2.79.2
+        uses: taiki-e/install-action@d9be7d8cda89035c9c843f78bd44d4f72d8403d4  # v2.79.7
         with:
           tool: cargo-llvm-cov,cargo-nextest
 
