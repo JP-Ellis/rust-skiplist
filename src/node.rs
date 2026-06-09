@@ -138,6 +138,7 @@ use arrayvec::ArrayVec;
 
 use crate::node::link::Link;
 
+pub(crate) mod cursor_raw;
 pub(crate) mod link;
 pub(crate) mod visitor;
 
@@ -748,6 +749,177 @@ impl<V, const N: usize> Node<V, N> {
         // SAFETY: forwarded from caller.
         let (_, tail) = unsafe { Self::filter_rebuild(head, |_| true, |_| {}) };
         tail
+    }
+
+    /// Unlinks `target` from the skip links and the base-layer doubly-linked
+    /// list, returning it as an owned [`Box`].
+    ///
+    /// For each level `l` in `0..precursors.len()`, `precursors[l]` is the
+    /// level-`l` predecessor of `target`.  The function patches those
+    /// predecessors so that they skip over `target` (either by merging the
+    /// two link distances or by decrementing the spanning link distance) and
+    /// then calls [`pop`](Self::pop) to detach `target` from the base layer.
+    ///
+    /// The caller is responsible for extracting the value (via
+    /// [`take_value`](Self::take_value)) and for updating any tail and length
+    /// bookkeeping on the containing collection.
+    ///
+    /// # Safety
+    ///
+    /// - `target` must be a live, linked data node - not the head sentinel.
+    /// - `precursors[l]` must be the correct level-`l` predecessor of
+    ///   `target` for every `l` in `0..precursors.len()`.
+    /// - No other live references to `target` or any node in `precursors`
+    ///   may exist for the duration of this call.
+    #[expect(
+        clippy::expect_used,
+        reason = "distances are always >= 1 in a valid list; expects fire only on \
+                  internal invariant violations"
+    )]
+    #[expect(
+        clippy::indexing_slicing,
+        reason = "l iterates 0..precursors.len(); links_mut()[l] is valid because \
+                  precursors.len() == max_levels == links.len()"
+    )]
+    #[expect(
+        clippy::multiple_unsafe_ops_per_block,
+        reason = "link surgery touches provably disjoint pred and target nodes"
+    )]
+    #[expect(
+        clippy::unnecessary_box_returns,
+        reason = "pop() yields a Box<Self>; returning it transfers the ownership \
+                  token rather than immediately dropping it"
+    )]
+    pub(crate) unsafe fn splice_out(
+        target: NonNull<Self>,
+        precursors: &[NonNull<Self>],
+    ) -> Box<Self> {
+        // SAFETY: caller guarantees target is a valid, live node.
+        let target_height = unsafe { target.as_ref() }.level();
+        let target_raw = target.as_ptr();
+
+        for (l, &pred_nn) in precursors.iter().enumerate() {
+            let pred_ptr = pred_nn.as_ptr();
+            if l < target_height {
+                // SAFETY: pred_ptr and target_raw are valid, live, and disjoint.
+                let old_link = unsafe { (*pred_ptr).links_mut()[l].take() };
+                // SAFETY: same — target_raw is valid and disjoint from pred_ptr.
+                let target_link = unsafe { (*target_raw).links_mut()[l].take() };
+                // SAFETY: pred_ptr is valid; the assignment cannot alias target_raw
+                // because l < target_height implies target has a link at level l,
+                // and a node cannot be its own level-l predecessor.
+                unsafe {
+                    (*pred_ptr).links_mut()[l] = match (old_link, target_link) {
+                        (Some(p2t), Some(t2s)) => {
+                            let new_dist = p2t
+                                .distance()
+                                .get()
+                                .saturating_add(t2s.distance().get())
+                                .saturating_sub(1);
+                            Some(Link::new(t2s.node(), new_dist).expect("new_dist >= 1"))
+                        }
+                        (_, None) => None,
+                        (None, tgt) => {
+                            debug_assert!(
+                                false,
+                                "level-{l} predecessor had no link pointing to target"
+                            );
+                            tgt
+                        }
+                    };
+                }
+            } else {
+                // SAFETY: pred_ptr is valid; `l >= target_height` means this is a
+                // spanning link whose distance must be decremented.
+                if let Some(link) = unsafe { (*pred_ptr).links_mut()[l].as_mut() } {
+                    link.decrement_distance()
+                        .expect("skip link spanning target has distance >= 2");
+                }
+            }
+        }
+
+        // SAFETY: caller guarantees target is a valid, live data node.
+        // All skip links pointing to it have been removed above, so the only
+        // remaining pointer to target is the prev-node's `next` ownership;
+        // pop() transfers that ownership to the returned Box.
+        unsafe { (*target_raw).pop() }
+    }
+
+    /// Wires the skip links for a newly inserted node.
+    ///
+    /// `new_node` must already be inserted in the base-layer doubly-linked
+    /// list (via [`insert_after`](Self::insert_after)) before this is called.
+    /// For each level `l` in `0..precursors.len()`:
+    ///
+    /// - If `l < height`: patches `precursors[l]` to point to `new_node`
+    ///   and sets `new_node.links[l]` to point to the old successor.
+    /// - If `l >= height`: increments the spanning predecessor link by 1.
+    ///
+    /// # Safety
+    ///
+    /// - `new_node` must be freshly inserted in the base layer and not yet
+    ///   wired into any skip links.
+    /// - `precursors[l]` must be the correct level-`l` predecessor of
+    ///   `new_node` for every `l` in `0..precursors.len()`.
+    /// - `precursor_ranks[l]` must be the rank of `precursors[l]`.
+    /// - `precursors.len() == precursor_ranks.len()`.
+    #[expect(
+        clippy::expect_used,
+        reason = "distances are always >= 1 during a valid insert; expects fire only on \
+                  internal invariant violations"
+    )]
+    #[expect(
+        clippy::indexing_slicing,
+        reason = "l iterates 0..precursors.len(); links_mut()[l] is valid because \
+                  precursors.len() == max_levels == links.len()"
+    )]
+    #[expect(
+        clippy::multiple_unsafe_ops_per_block,
+        reason = "wiring pred and new_node links touches provably disjoint heap nodes"
+    )]
+    pub(crate) unsafe fn wire_links(
+        new_node: NonNull<Self>,
+        new_rank: usize,
+        height: usize,
+        precursors: &[NonNull<Self>],
+        precursor_ranks: &[usize],
+    ) {
+        let new_raw = new_node.as_ptr();
+
+        for (l, (&pred_nn, &pred_rank)) in precursors.iter().zip(precursor_ranks.iter()).enumerate()
+        {
+            let pred_ptr = pred_nn.as_ptr();
+            if l < height {
+                let distance = new_rank.saturating_sub(pred_rank);
+                // SAFETY: pred_ptr and new_raw are valid, live, and disjoint.
+                let old_link = unsafe { (*pred_ptr).links_mut()[l].take() };
+                // SAFETY: pred_ptr and new_raw are valid and disjoint; new_raw is
+                // freshly inserted so no other node's link points to it yet.
+                unsafe {
+                    (*pred_ptr).links_mut()[l] = Some(
+                        Link::new(NonNull::new_unchecked(new_raw), distance)
+                            .expect("distance >= 1"),
+                    );
+                    (*new_raw).links_mut()[l] = if let Some(old) = old_link {
+                        let new_d = old
+                            .distance()
+                            .get()
+                            .saturating_sub(distance)
+                            .saturating_add(1);
+                        Some(Link::new(old.node(), new_d).expect("new_d >= 1"))
+                    } else {
+                        None
+                    };
+                }
+            } else {
+                // SAFETY: pred_ptr is valid; `l >= height` means this is a
+                // spanning link whose distance must be incremented.
+                if let Some(link) = unsafe { (*pred_ptr).links_mut()[l].as_mut() } {
+                    link.increment_distance()
+                        .expect("distance overflow requires > usize::MAX nodes");
+                }
+            }
+        }
     }
 }
 

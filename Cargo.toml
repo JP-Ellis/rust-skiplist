@@ -18,7 +18,7 @@ rust-version = "1.89"
 
   [package.metadata]
     [package.metadata.docs.rs]
-    features = ["partial-ord", "docs"]
+    features = ["partial-ord", "docs", "cursor"]
     rustdoc-args = [
       "--html-in-header",
       ".cargo/katex.header.html",
@@ -61,6 +61,12 @@ rstest = "=0.26.1"
 codecov = { branch = "main", repository = "JP-Ellis/rust-skiplist", service = "github" }
 
 [features]
+## Enable the gap-cursor API (`lower_bound`, `upper_bound`, `CursorMut`, etc.)
+## for [`OrderedSkipList`], [`SkipSet`], and [`SkipMap`].
+##
+## **This feature is unstable.** The cursor API may change in a future minor
+## release without prior notice.
+cursor = []
 ## Enable the `docs` module, which provides long-form explanation pages for
 ## skip list concepts, internals, and the `partial-ord` feature.
 docs = []
