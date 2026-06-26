@@ -51,7 +51,7 @@ arrayvec = { version = "0.7", default-features = false }
 rand = "0.10"
 
 [dev-dependencies]
-anyhow = "=1.0.102"
+anyhow = "=1.0.103"
 criterion = { version = "=0.8.2", features = ["html_reports"] }
 insta = "=1.48.0"
 pretty_assertions = { version = "=1.4.1", features = ["unstable"] }
