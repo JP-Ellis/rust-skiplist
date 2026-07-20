@@ -1,20 +1,20 @@
 {
-	"$schema": "https://docs.renovatebot.com/renovate-schema.json",
-	"extends": ["config:best-practices"],
-	"timezone": "Australia/Melbourne",
-	"pre-commit": {
-		"enabled": true
-	},
-	"git-submodules": {
-		"enabled": true
-	},
-	"prHourlyLimit": 0,
-	"prConcurrentLimit": 0,
-	"automerge": true,
-	"packageRules": [
-		{
-			"matchPackageNames": ["taiki-e/install-action"],
-			"schedule": "before 4am on monday"
-		}
-	]
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:best-practices"],
+  "timezone": "Australia/Melbourne",
+  "pre-commit": {
+    "enabled": true
+  },
+  "git-submodules": {
+    "enabled": true
+  },
+  "prHourlyLimit": 0,
+  "prConcurrentLimit": 0,
+  "automerge": true,
+  "packageRules": [
+    {
+      "matchPackageNames": ["rust", "rust-lang/rust"],
+      "groupName": "rust toolchain"
+    }
+  ]
 }
