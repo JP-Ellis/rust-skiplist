@@ -1,0 +1,23 @@
+[global]
+exclude = [".github/copilot-instructions.md", "CHANGELOG.md"]
+disable = ["MD013"]
+
+# indent without style selects "fixed"; rumdl's default "text-aligned" ignores
+# indent entirely, and setting both is contradictory.
+[MD007]
+indent = 4
+
+[MD030]
+ul-single = 3
+ul-multi = 3
+ol-single = 2
+ol-multi = 2
+
+[MD046]
+style = "fenced"
+
+[MD049]
+style = "underscore"
+
+[MD050]
+style = "asterisk"
