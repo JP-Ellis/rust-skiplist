@@ -157,7 +157,10 @@ impl<T: Hash, G: LevelGenerator, const N: usize> Hash for SkipList<T, N, G> {
     /// assert_eq!(hash(&a), hash(&b));
     /// ```
     #[inline]
-    fn hash<H: Hasher>(&self, state: &mut H) {
+    fn hash<H>(&self, state: &mut H)
+    where
+        H: Hasher,
+    {
         self.len().hash(state);
         for item in self {
             item.hash(state);
@@ -181,7 +184,10 @@ impl<T, G: LevelGenerator, const N: usize> Extend<T> for SkipList<T, N, G> {
     /// assert_eq!(got, [1, 2, 3, 4, 5]);
     /// ```
     #[inline]
-    fn extend<I: IntoIterator<Item = T>>(&mut self, iter: I) {
+    fn extend<I>(&mut self, iter: I)
+    where
+        I: IntoIterator<Item = T>,
+    {
         for item in iter {
             self.push_back(item);
         }
@@ -203,7 +209,10 @@ impl<'a, T: Copy + 'a, G: LevelGenerator, const N: usize> Extend<&'a T> for Skip
     /// assert_eq!(got, [1, 2, 3, 4, 5]);
     /// ```
     #[inline]
-    fn extend<I: IntoIterator<Item = &'a T>>(&mut self, iter: I) {
+    fn extend<I>(&mut self, iter: I)
+    where
+        I: IntoIterator<Item = &'a T>,
+    {
         self.extend(iter.into_iter().copied());
     }
 }
@@ -222,7 +231,10 @@ impl<T, G: LevelGenerator + Default, const N: usize> FromIterator<T> for SkipLis
     /// assert_eq!(list.iter().copied().collect::<Vec<_>>(), [1, 2, 3]);
     /// ```
     #[inline]
-    fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
+    fn from_iter<I>(iter: I) -> Self
+    where
+        I: IntoIterator<Item = T>,
+    {
         let mut list = Self::with_level_generator(G::default());
         list.extend(iter);
         list

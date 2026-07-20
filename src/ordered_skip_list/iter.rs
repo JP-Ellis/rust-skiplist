@@ -217,7 +217,10 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
                   clearest way to express the narrowing from Option to the final triple"
     )]
     #[inline]
-    pub fn range<R: RangeBounds<T>>(&self, range: R) -> Iter<'_, T, N> {
+    pub fn range<R>(&self, range: R) -> Iter<'_, T, N>
+    where
+        R: RangeBounds<T>,
+    {
         let lo = range.start_bound();
         let hi = range.end_bound();
 
@@ -378,7 +381,10 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
                   closure are provably disjoint"
     )]
     #[inline]
-    pub fn drain_range<R: RangeBounds<T>>(&mut self, range: R) -> Drain<'_, T> {
+    pub fn drain_range<R>(&mut self, range: R) -> Drain<'_, T>
+    where
+        R: RangeBounds<T>,
+    {
         let lo = range.start_bound();
         let hi = range.end_bound();
 

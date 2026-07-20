@@ -168,7 +168,10 @@ impl<T: Hash, C: Comparator<T>, G: LevelGenerator, const N: usize> Hash for Skip
     /// assert_eq!(hash_of(&a), hash_of(&b));
     /// ```
     #[inline]
-    fn hash<H: Hasher>(&self, state: &mut H) {
+    fn hash<H>(&self, state: &mut H)
+    where
+        H: Hasher,
+    {
         self.len().hash(state);
         for item in self {
             item.hash(state);
@@ -192,7 +195,10 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> Extend<T> for SkipS
     /// assert_eq!(collected, [1, 2, 3, 4]);
     /// ```
     #[inline]
-    fn extend<I: IntoIterator<Item = T>>(&mut self, iter: I) {
+    fn extend<I>(&mut self, iter: I)
+    where
+        I: IntoIterator<Item = T>,
+    {
         for item in iter {
             self.insert(item);
         }
@@ -217,7 +223,10 @@ impl<'a, T: Copy + 'a, C: Comparator<T>, G: LevelGenerator, const N: usize> Exte
     /// assert_eq!(collected, [1, 2, 3, 4]);
     /// ```
     #[inline]
-    fn extend<I: IntoIterator<Item = &'a T>>(&mut self, iter: I) {
+    fn extend<I>(&mut self, iter: I)
+    where
+        I: IntoIterator<Item = &'a T>,
+    {
         self.extend(iter.into_iter().copied());
     }
 }
@@ -244,7 +253,10 @@ impl<T, C: Comparator<T> + Default, G: LevelGenerator + Default, const N: usize>
     /// assert_eq!(collected, [1, 2, 3]);
     /// ```
     #[inline]
-    fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
+    fn from_iter<I>(iter: I) -> Self
+    where
+        I: IntoIterator<Item = T>,
+    {
         let mut set = Self::with_comparator_and_level_generator(C::default(), G::default());
         set.extend(iter);
         set
@@ -306,7 +318,7 @@ mod tests {
         hash::{Hash, Hasher},
     };
 
-    use pretty_assertions::assert_eq;
+    use pretty_assertions::{assert_eq, assert_ne};
 
     use super::SkipSet;
     use crate::comparator::FnComparator;
@@ -323,7 +335,10 @@ mod tests {
         set.iter().copied().collect()
     }
 
-    fn hash_of<T: Hash>(val: &T) -> u64 {
+    fn hash_of<T>(val: &T) -> u64
+    where
+        T: Hash,
+    {
         let mut h = DefaultHasher::new();
         val.hash(&mut h);
         h.finish()
@@ -410,21 +425,21 @@ mod tests {
     fn eq_different_lengths() {
         let a = make_set(&[1, 2, 3]);
         let b = make_set(&[1, 2]);
-        assert!(a != b);
+        assert_ne!(a, b);
     }
 
     #[test]
     fn eq_different_elements() {
         let a = make_set(&[1, 2, 3]);
         let b = make_set(&[1, 2, 4]);
-        assert!(a != b);
+        assert_ne!(a, b);
     }
 
     #[test]
     fn eq_empty_nonempty() {
         let a = make_set(&[]);
         let b = make_set(&[1]);
-        assert!(a != b);
+        assert_ne!(a, b);
     }
 
     #[test]
@@ -515,7 +530,7 @@ mod tests {
         let a = make_set(&[1, 2, 3]);
         let b = make_set(&[1, 2, 4]);
         // Different content → highly likely to differ (not guaranteed, but reliable for small sets).
-        assert!(hash_of(&a) != hash_of(&b));
+        assert_ne!(hash_of(&a), hash_of(&b));
     }
 
     // MARK: Extend<T>

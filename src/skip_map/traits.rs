@@ -254,7 +254,10 @@ impl<K: Hash, V: Hash, C: Comparator<K>, G: LevelGenerator, const N: usize> Hash
     /// assert_eq!(hash_of(&a), hash_of(&b));
     /// ```
     #[inline]
-    fn hash<H: Hasher>(&self, state: &mut H) {
+    fn hash<H>(&self, state: &mut H)
+    where
+        H: Hasher,
+    {
         self.len().hash(state);
         for (k, v) in self {
             k.hash(state);
@@ -289,7 +292,10 @@ impl<K, V, C: Comparator<K>, G: LevelGenerator, const N: usize> Extend<(K, V)>
     /// assert_eq!(map.get(&1), Some(&"updated"));
     /// ```
     #[inline]
-    fn extend<I: IntoIterator<Item = (K, V)>>(&mut self, iter: I) {
+    fn extend<I>(&mut self, iter: I)
+    where
+        I: IntoIterator<Item = (K, V)>,
+    {
         for (k, v) in iter {
             self.insert(k, v);
         }
@@ -319,7 +325,10 @@ impl<'a, K: Copy + 'a, V: Copy + 'a, C: Comparator<K>, G: LevelGenerator, const 
     /// assert_eq!(map.get(&2), Some(&20));
     /// ```
     #[inline]
-    fn extend<I: IntoIterator<Item = (&'a K, &'a V)>>(&mut self, iter: I) {
+    fn extend<I>(&mut self, iter: I)
+    where
+        I: IntoIterator<Item = (&'a K, &'a V)>,
+    {
         self.extend(iter.into_iter().map(|(&k, &v)| (k, v)));
     }
 }
@@ -346,7 +355,10 @@ impl<K, V, C: Comparator<K> + Default, G: LevelGenerator + Default, const N: usi
     /// assert_eq!(keys, [1, 2, 3]);
     /// ```
     #[inline]
-    fn from_iter<I: IntoIterator<Item = (K, V)>>(iter: I) -> Self {
+    fn from_iter<I>(iter: I) -> Self
+    where
+        I: IntoIterator<Item = (K, V)>,
+    {
         let mut map = Self::with_comparator_and_level_generator(C::default(), G::default());
         map.extend(iter);
         map
@@ -403,7 +415,10 @@ mod tests {
     use super::super::SkipMap;
     use crate::comparator::FnComparator;
 
-    fn hash_of<T: Hash>(value: &T) -> u64 {
+    fn hash_of<T>(value: &T) -> u64
+    where
+        T: Hash,
+    {
         let mut h = DefaultHasher::new();
         value.hash(&mut h);
         h.finish()

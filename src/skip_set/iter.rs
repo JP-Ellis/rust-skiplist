@@ -403,7 +403,10 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> SkipSet<T, N, C, G>
     /// assert_eq!(slice, [2, 3, 4]);
     /// ```
     #[inline]
-    pub fn range<R: RangeBounds<T>>(&self, range: R) -> Iter<'_, T, N> {
+    pub fn range<R>(&self, range: R) -> Iter<'_, T, N>
+    where
+        R: RangeBounds<T>,
+    {
         self.inner.range(range)
     }
 
@@ -453,11 +456,11 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> SkipSet<T, N, C, G>
     /// assert_eq!(remaining, [1, 3, 5, 6]);
     /// ```
     #[inline]
-    pub fn extract_if<R: RangeBounds<T>, F: FnMut(&T) -> bool>(
-        &mut self,
-        range: R,
-        pred: F,
-    ) -> ExtractIf<'_, T, C, G, R, F, N> {
+    pub fn extract_if<R, F>(&mut self, range: R, pred: F) -> ExtractIf<'_, T, C, G, R, F, N>
+    where
+        R: RangeBounds<T>,
+        F: FnMut(&T) -> bool,
+    {
         // Start just past the head sentinel (first data node).
         // SAFETY: self.inner.head_ptr() is always a valid head sentinel.
         let current = unsafe { self.inner.head_ptr().as_ref() }.next();

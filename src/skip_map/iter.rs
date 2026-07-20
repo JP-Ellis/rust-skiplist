@@ -365,7 +365,10 @@ impl<K, V, const N: usize, C: Comparator<K>, G: LevelGenerator> SkipMap<K, V, N,
                   clearest way to express the narrowing from Option to the final triple"
     )]
     #[inline]
-    pub fn range<R: RangeBounds<K>>(&self, range: R) -> Iter<'_, K, V, N> {
+    pub fn range<R>(&self, range: R) -> Iter<'_, K, V, N>
+    where
+        R: RangeBounds<K>,
+    {
         let lo = range.start_bound();
         let hi = range.end_bound();
 
@@ -447,7 +450,10 @@ impl<K, V, const N: usize, C: Comparator<K>, G: LevelGenerator> SkipMap<K, V, N,
         reason = "rebinding front/back after bound-resolution is the clearest expression"
     )]
     #[inline]
-    pub fn range_mut<R: RangeBounds<K>>(&mut self, range: R) -> IterMut<'_, K, V, N> {
+    pub fn range_mut<R>(&mut self, range: R) -> IterMut<'_, K, V, N>
+    where
+        R: RangeBounds<K>,
+    {
         let lo = range.start_bound();
         let hi = range.end_bound();
 
