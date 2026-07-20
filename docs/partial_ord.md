@@ -6,9 +6,9 @@ For the API reference, see [`PartialOrdComparator`].
 
 ## Background
 
-All ordered collections in this crate require a well-behaved _total_ order: every pair of elements must be comparable and the comparison must be consistent.  The default [`OrdComparator`] enforces this at compile time via the `T: Ord` bound.
+All ordered collections in this crate require a well-behaved _total_ order: every pair of elements must be comparable and the comparison must be consistent. The default [`OrdComparator`] enforces this at compile time via the `T: Ord` bound.
 
-Some types, most notably `f32` and `f64`, implement only [`PartialOrd`] because not all values are comparable.  In IEEE 754 arithmetic, `NaN` (Not-a-Number) is incomparable with everything, including itself: `f64::NAN < 1.0` is false, `f64::NAN > 1.0` is false, and `f64::NAN == f64::NAN` is false.
+Some types, most notably `f32` and `f64`, implement only [`PartialOrd`] because not all values are comparable. In IEEE 754 arithmetic, `NaN` (Not-a-Number) is incomparable with everything, including itself: `f64::NAN < 1.0` is false, `f64::NAN > 1.0` is false, and `f64::NAN == f64::NAN` is false.
 
 Enabling the `partial-ord` feature unlocks [`PartialOrdComparator`], which delegates to [`PartialOrd`] and **panics immediately** when a comparison returns `None` (i.e. when an incomparable value is encountered).
 
@@ -23,7 +23,7 @@ skiplist = { version = "...", features = ["partial-ord"] }
 Use [`PartialOrdComparator`] when:
 
 -   Your element type implements `PartialOrd` but not `Ord`.
--   You can **guarantee at the call site** that no incomparable values (e.g.  `NaN`) will ever be inserted or looked up.
+-   You can **guarantee at the call site** that no incomparable values (e.g. `NaN`) will ever be inserted or looked up.
 
 A common example is a domain that works with measurements that are always finite and non-NaN:
 
@@ -48,11 +48,11 @@ assert_eq!(median, Some(&4.5));
 
 ### NaN panics at runtime
 
-Inserting or looking up a `NaN` value will panic immediately.  There is no compile-time protection.  If there is any chance that a `NaN` could reach the collection, prefer `FnComparator(f64::total_cmp)` instead (see below).
+Inserting or looking up a `NaN` value will panic immediately. There is no compile-time protection. If there is any chance that a `NaN` could reach the collection, prefer `FnComparator(f64::total_cmp)` instead (see below).
 
 ### No NaN-equality guarantee
 
-Even if a `NaN` somehow entered the collection without panicking, the skip list's ordering invariants would be broken, leading to incorrect search results and potential memory unsafety.  The panic is a safety net, not a correctness guarantee.
+Even if a `NaN` somehow entered the collection without panicking, the skip list's ordering invariants would be broken, leading to incorrect search results and potential memory unsafety. The panic is a safety net, not a correctness guarantee.
 
 ## The Recommended Alternative: `FnComparator(f64::total_cmp)`
 
