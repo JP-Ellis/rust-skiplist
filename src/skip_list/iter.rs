@@ -122,7 +122,10 @@ impl<T, G: LevelGenerator, const N: usize> SkipList<T, N, G> {
     /// assert_eq!(reversed, [4, 3, 2]);
     /// ```
     #[inline]
-    pub fn range<R: RangeBounds<usize>>(&self, range: R) -> Iter<'_, T, N> {
+    pub fn range<R>(&self, range: R) -> Iter<'_, T, N>
+    where
+        R: RangeBounds<usize>,
+    {
         let start = match range.start_bound() {
             Bound::Included(&s) => s,
             Bound::Excluded(&s) => s.saturating_add(1),
@@ -187,7 +190,10 @@ impl<T, G: LevelGenerator, const N: usize> SkipList<T, N, G> {
     /// assert_eq!(collected, [1, 20, 30, 40, 5]);
     /// ```
     #[inline]
-    pub fn range_mut<R: RangeBounds<usize>>(&mut self, range: R) -> IterMut<'_, T, N> {
+    pub fn range_mut<R>(&mut self, range: R) -> IterMut<'_, T, N>
+    where
+        R: RangeBounds<usize>,
+    {
         let start = match range.start_bound() {
             Bound::Included(&s) => s,
             Bound::Excluded(&s) => s.saturating_add(1),

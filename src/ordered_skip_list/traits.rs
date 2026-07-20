@@ -245,7 +245,10 @@ impl<T: Hash, C: Comparator<T>, G: LevelGenerator, const N: usize> Hash
     /// assert_eq!(hash(&a), hash(&b));
     /// ```
     #[inline]
-    fn hash<H: Hasher>(&self, state: &mut H) {
+    fn hash<H>(&self, state: &mut H)
+    where
+        H: Hasher,
+    {
         self.len().hash(state);
         for item in self {
             item.hash(state);
@@ -271,7 +274,10 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> Extend<T>
     /// assert_eq!(list.iter().copied().collect::<Vec<_>>(), [1, 2, 3, 4]);
     /// ```
     #[inline]
-    fn extend<I: IntoIterator<Item = T>>(&mut self, iter: I) {
+    fn extend<I>(&mut self, iter: I)
+    where
+        I: IntoIterator<Item = T>,
+    {
         for item in iter {
             self.insert(item);
         }
@@ -296,7 +302,10 @@ impl<'a, T: Copy + 'a, C: Comparator<T>, G: LevelGenerator, const N: usize> Exte
     /// assert_eq!(list.iter().copied().collect::<Vec<_>>(), [10, 20, 30, 40]);
     /// ```
     #[inline]
-    fn extend<I: IntoIterator<Item = &'a T>>(&mut self, iter: I) {
+    fn extend<I>(&mut self, iter: I)
+    where
+        I: IntoIterator<Item = &'a T>,
+    {
         self.extend(iter.into_iter().copied());
     }
 }
@@ -322,7 +331,10 @@ impl<T, C: Comparator<T> + Default, G: LevelGenerator + Default, const N: usize>
     /// assert_eq!(list.iter().copied().collect::<Vec<_>>(), [1, 2, 3]);
     /// ```
     #[inline]
-    fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
+    fn from_iter<I>(iter: I) -> Self
+    where
+        I: IntoIterator<Item = T>,
+    {
         let mut list = Self::with_comparator_and_level_generator(C::default(), G::default());
         list.extend(iter);
         list

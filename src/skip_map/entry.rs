@@ -720,7 +720,10 @@ impl<'a, K, V, const N: usize, C: Comparator<K>, G: LevelGenerator> Entry<'a, K,
     /// assert_eq!(map.get(&1).map(String::as_str), Some("hello"));
     /// ```
     #[inline]
-    pub fn or_insert_with<F: FnOnce() -> V>(self, default: F) -> &'a mut V {
+    pub fn or_insert_with<F>(self, default: F) -> &'a mut V
+    where
+        F: FnOnce() -> V,
+    {
         match self {
             Self::Occupied(e) => e.into_mut(),
             Self::Vacant(e) => e.insert(default()),
@@ -741,7 +744,10 @@ impl<'a, K, V, const N: usize, C: Comparator<K>, G: LevelGenerator> Entry<'a, K,
     /// assert_eq!(map.get(&5), Some(&50));
     /// ```
     #[inline]
-    pub fn or_insert_with_key<F: FnOnce(&K) -> V>(self, default: F) -> &'a mut V {
+    pub fn or_insert_with_key<F>(self, default: F) -> &'a mut V
+    where
+        F: FnOnce(&K) -> V,
+    {
         match self {
             Self::Occupied(e) => e.into_mut(),
             Self::Vacant(e) => {
@@ -768,7 +774,10 @@ impl<'a, K, V, const N: usize, C: Comparator<K>, G: LevelGenerator> Entry<'a, K,
     /// ```
     #[inline]
     #[must_use]
-    pub fn and_modify<F: FnOnce(&mut V)>(self, f: F) -> Self {
+    pub fn and_modify<F>(self, f: F) -> Self
+    where
+        F: FnOnce(&mut V),
+    {
         match self {
             Self::Occupied(mut e) => {
                 f(e.get_mut());
