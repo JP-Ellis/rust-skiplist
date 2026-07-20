@@ -1,4 +1,5 @@
 #:schema https://json.schemastore.org/cargo.json
+#:tombi toml-version = "v1.0.0"
 
 [package]
 name = "skiplist"
@@ -86,6 +87,7 @@ partial-ord = []
   else_if_without_else = "allow"
   impl_trait_in_params = "allow"
   implicit_return = "allow"
+  inline_modules = "allow"  # upstream bug: fails to ignore #[cfg(test)] mod tests, https://github.com/rust-lang/rust-clippy/issues/17342
   min_ident_chars = "allow"
   missing_trait_methods = "allow"
   non_ascii_literal = "allow"
