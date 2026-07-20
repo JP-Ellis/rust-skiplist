@@ -21,6 +21,7 @@ env:
   RUST_BACKTRACE: '1'
   FORCE_COLOR: '1'
   NEXTEST_PROFILE: ci
+  MISE_CARGO_BINSTALL_ONLY: 'true'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -40,6 +41,7 @@ jobs:
       - examples
       - miri
       - coverage
+      - msrv
     runs-on: ubuntu-latest
 
     steps:
@@ -72,13 +74,15 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Install prek
-        uses: taiki-e/install-action@9e1e5806d4a4822de933115878265be9aaa786d9  # v2.82.2
-        with:
-          tool: prek
-
       - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+
+      - name: Install mise tools
+        uses: jdx/mise-action@e6a8b3978addb5a52f2b4cd9d91eafa7f0ab959d  # v4.2.0
+        timeout-minutes: 10
+
+      - name: Install Rust
+        uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659  # v1.17.0
 
       - name: Restore prek cache
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
@@ -87,9 +91,7 @@ jobs:
           key: prek-${{ runner.os }}-${{ hashFiles('prek.toml') }}
 
       - name: Run prek
-        env:
-          SKIP: cargo-check,cargo-clippy,cargo-fmt
-        run: prek run --all-files
+        run: mise run prek
 
   clippy:
     name: Clippy
@@ -99,21 +101,15 @@ jobs:
       - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
 
-      - name: Install Rust (stable)
-        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30  # stable
-        with:
-          components: clippy
+      - name: Install mise tools
+        uses: jdx/mise-action@e6a8b3978addb5a52f2b4cd9d91eafa7f0ab959d  # v4.2.0
+        timeout-minutes: 10
 
-      - name: Restore Rust cache
-        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4  # v2.9.1
-
-      - name: Install cargo-hack
-        uses: taiki-e/install-action@9e1e5806d4a4822de933115878265be9aaa786d9  # v2.82.2
-        with:
-          tool: cargo-hack
+      - name: Install Rust
+        uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659  # v1.17.0
 
       - name: Run clippy
-        run: cargo hack --feature-powerset clippy --all-targets -- -D warnings
+        run: mise run lint
 
   format:
     name: Format
@@ -123,13 +119,18 @@ jobs:
       - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
 
-      - name: Install Rust (nightly)
-        uses: dtolnay/rust-toolchain@efcb852328a9f50117170cc43094fb6f09eaf1ae  # nightly
-        with:
-          components: rustfmt
+      - name: Install mise tools
+        uses: jdx/mise-action@e6a8b3978addb5a52f2b4cd9d91eafa7f0ab959d  # v4.2.0
+        timeout-minutes: 10
+
+      - name: Install Rust
+        uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659  # v1.17.0
+
+      - name: Install nightly rustfmt
+        run: rustup toolchain install nightly --component rustfmt --no-self-update
 
       - name: Check formatting
-        run: cargo fmt --check
+        run: mise run format
 
   test:
     name: Test (${{ matrix.os }}, ${{ matrix.toolchain }})
@@ -147,25 +148,34 @@ jobs:
             toolchain: beta
     runs-on: ${{ matrix.os }}
 
+    env:
+      # mise exports RUSTUP_TOOLCHAIN when it activates, so the toolchain must
+      # be overridden at the mise layer or the override is silently discarded.
+      MISE_RUST_VERSION: ${{ matrix.toolchain }}
+
     steps:
       - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
 
-      - name: Install Rust (${{ matrix.toolchain }})
-        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30  # stable
-        with:
-          toolchain: ${{ matrix.toolchain }}
+      - name: Install mise tools
+        uses: jdx/mise-action@e6a8b3978addb5a52f2b4cd9d91eafa7f0ab959d  # v4.2.0
+        timeout-minutes: 10
 
-      - name: Restore Rust cache
-        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4  # v2.9.1
-
-      - name: Install cargo-hack and cargo-nextest
-        uses: taiki-e/install-action@9e1e5806d4a4822de933115878265be9aaa786d9  # v2.82.2
+      - name: Install Rust
+        uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659  # v1.17.0
         with:
-          tool: cargo-hack,cargo-nextest
+          cache-key: ${{ matrix.toolchain }}
+
+      - name: Install matrix toolchain
+        run: rustup toolchain install ${{ matrix.toolchain }} --no-self-update
+
+      - name: Report resolved toolchain
+        run: |
+          echo "Expected channel: ${{ matrix.toolchain }}"
+          mise exec -- rustc --version
 
       - name: Run tests
-        run: cargo hack --feature-powerset nextest run
+        run: mise run test
 
   benches:
     name: Benchmarks
@@ -175,14 +185,15 @@ jobs:
       - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
 
-      - name: Install Rust (stable)
-        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30  # stable
+      - name: Install mise tools
+        uses: jdx/mise-action@e6a8b3978addb5a52f2b4cd9d91eafa7f0ab959d  # v4.2.0
+        timeout-minutes: 10
 
-      - name: Restore Rust cache
-        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4  # v2.9.1
+      - name: Install Rust
+        uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659  # v1.17.0
 
       - name: Test benchmarks
-        run: cargo test --benches '/'
+        run: mise run test:benches
 
   docs:
     name: Docs
@@ -192,14 +203,15 @@ jobs:
       - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
 
-      - name: Install Rust (stable)
-        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30  # stable
+      - name: Install mise tools
+        uses: jdx/mise-action@e6a8b3978addb5a52f2b4cd9d91eafa7f0ab959d  # v4.2.0
+        timeout-minutes: 10
 
-      - name: Restore Rust cache
-        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4  # v2.9.1
+      - name: Install Rust
+        uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659  # v1.17.0
 
       - name: Test documentation examples
-        run: cargo test --doc
+        run: mise run test:docs
 
   examples:
     name: Examples
@@ -209,23 +221,15 @@ jobs:
       - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
 
-      - name: Install Rust (stable)
-        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30  # stable
+      - name: Install mise tools
+        uses: jdx/mise-action@e6a8b3978addb5a52f2b4cd9d91eafa7f0ab959d  # v4.2.0
+        timeout-minutes: 10
 
-      - name: Restore Rust cache
-        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4  # v2.9.1
+      - name: Install Rust
+        uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659  # v1.17.0
 
-      - name: Run getting_started
-        run: cargo run --example getting_started
-
-      - name: Run custom_ordering
-        run: cargo run --example custom_ordering
-
-      - name: Run float_keys
-        run: cargo run --example float_keys
-
-      - name: Run leaderboard
-        run: cargo run --example leaderboard
+      - name: Run examples
+        run: mise run examples
 
   miri:
     name: Miri
@@ -237,16 +241,39 @@ jobs:
       - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
 
-      - name: Install Rust (nightly)
-        uses: dtolnay/rust-toolchain@efcb852328a9f50117170cc43094fb6f09eaf1ae  # nightly
-        with:
-          components: miri
+      - name: Install mise tools
+        uses: jdx/mise-action@e6a8b3978addb5a52f2b4cd9d91eafa7f0ab959d  # v4.2.0
+        timeout-minutes: 10
 
-      - name: Restore Rust cache
-        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4  # v2.9.1
+      - name: Install Rust
+        uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659  # v1.17.0
+
+      - name: Install nightly miri
+        run: rustup toolchain install nightly --component miri --no-self-update
 
       - name: Run Miri
-        run: cargo miri test --all-features
+        run: mise run miri
+
+  msrv:
+    name: MSRV
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+
+      - name: Install mise tools
+        uses: jdx/mise-action@e6a8b3978addb5a52f2b4cd9d91eafa7f0ab959d  # v4.2.0
+        timeout-minutes: 10
+
+      - name: Install Rust
+        uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659  # v1.17.0
+
+      - name: Install MSRV toolchain
+        run: rustup toolchain install 1.89 --profile minimal --no-self-update
+
+      - name: Verify MSRV
+        run: mise run msrv
 
   coverage:
     name: Coverage
@@ -256,21 +283,15 @@ jobs:
       - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
 
-      - name: Install Rust (stable)
-        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30  # stable
-        with:
-          components: llvm-tools-preview
+      - name: Install mise tools
+        uses: jdx/mise-action@e6a8b3978addb5a52f2b4cd9d91eafa7f0ab959d  # v4.2.0
+        timeout-minutes: 10
 
-      - name: Restore Rust cache
-        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4  # v2.9.1
-
-      - name: Install cargo-llvm-cov and cargo-nextest
-        uses: taiki-e/install-action@9e1e5806d4a4822de933115878265be9aaa786d9  # v2.82.2
-        with:
-          tool: cargo-llvm-cov,cargo-nextest
+      - name: Install Rust
+        uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659  # v1.17.0
 
       - name: Generate coverage
-        run: cargo llvm-cov nextest --all-features --lcov --output-path coverage.lcov
+        run: mise run coverage
 
       - name: Upload coverage
         uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f  # v7.0.0
