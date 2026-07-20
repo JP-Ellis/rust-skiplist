@@ -1,0 +1,88 @@
+#:schema https://mise.jdx.dev/schema/mise.json
+
+[settings]
+experimental = true
+lockfile = true
+
+[env]
+# rustdoc requires absolute paths for these flags; {{config_root}} expands to
+# the repository root, so this works both locally and in CI.
+RUSTDOCFLAGS = "--html-in-header {{config_root}}/.cargo/katex.header.html --html-after-content {{config_root}}/.cargo/katex.script.html --html-in-header {{config_root}}/.cargo/mermaid.header.html --html-after-content {{config_root}}/.cargo/mermaid.script.html"
+
+# Replicates the rust-analyzer build environment to avoid rebuilding
+# dependencies. See rust-lang/rust-analyzer#17149.
+RUSTC_BOOTSTRAP = "1"
+
+[tools]
+"core:rust" = { version = "1.97", components = "clippy,llvm-tools" }
+"aqua:cargo-bins/cargo-binstall" = "1"
+"cargo:cargo-hack" = "0.6"
+"cargo:cargo-llvm-cov" = "0.8"
+"cargo:cargo-nextest" = "0.9"
+"cargo:prek" = "0.4"
+rumdl = "0.2"
+
+[tasks]
+  [tasks.lint]
+  description = "Lint with Clippy across all feature combinations"
+  run = "cargo hack --feature-powerset clippy --all-targets -- -D warnings"
+
+  [tasks.format]
+  description = "Check or apply formatting (nightly rustfmt + rumdl)"
+  usage = 'flag "--fix" help="Apply changes rather than checking"'
+  run = [
+    "cargo +nightly fmt {% if not usage.fix %}--check{% endif %}",
+    "rumdl check {% if usage.fix %}--fix{% endif %} .",
+  ]
+
+  [tasks.test]
+  description = "Run unit tests across all feature combinations"
+  run = "cargo hack --feature-powerset nextest run"
+
+  [tasks."test:docs"]
+  description = "Run documentation tests"
+  run = "cargo test --doc"
+
+  [tasks."test:benches"]
+  description = "Compile and smoke-test benchmarks"
+  run = "cargo test --benches '/'"
+
+  [tasks.examples]
+  description = "Run all examples"
+  run = [
+    "cargo run --example getting_started",
+    "cargo run --example custom_ordering",
+    "cargo run --example float_keys",
+    "cargo run --example leaderboard",
+  ]
+
+  [tasks.miri]
+  description = "Run Miri under Tree Borrows"
+  run = "cargo +nightly miri test --all-features"
+
+  [tasks.coverage]
+  description = "Generate LCOV coverage report"
+  run = "cargo llvm-cov nextest --all-features --lcov --output-path coverage.lcov"
+
+  [tasks.msrv]
+  description = "Verify the declared MSRV compiles the library"
+  run = "cargo +1.89 hack --feature-powerset check"
+
+  [tasks.prek]
+  description = "Run prek hooks (Rust hooks skipped; they have dedicated jobs)"
+  env = { SKIP = "cargo-check,cargo-clippy,cargo-fmt" }
+  run = "prek run --all-files"
+
+  [tasks.ci]
+  description = "Run the full CI suite locally"
+  run = [
+    { task = "format" },
+    { task = "prek" },
+    { task = "lint" },
+    { task = "test" },
+    { task = "test:docs" },
+    { task = "test:benches" },
+    { task = "examples" },
+    { task = "msrv" },
+    { task = "miri" },
+  ]

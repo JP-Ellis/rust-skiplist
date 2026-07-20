@@ -42,12 +42,12 @@ hooks = [{ id = "yamlfix", args = ["--config-file", ".yamlfix.toml"] }]
 
 [[repos]]
 repo = "https://github.com/biomejs/pre-commit"
-rev = "v2.4.6"
+rev = "v2.5.4"
 hooks = [{ id = "biome-check" }]
 
 [[repos]]
 repo = "https://github.com/tombi-toml/tombi-pre-commit"
-rev = "v0.9.3"
+rev = "v1.2.4"
 hooks = [{ id = "tombi-format" }, { id = "tombi-lint" }]
 
 [[repos]]
@@ -56,13 +56,8 @@ rev = "v1.1.11"
 hooks = [{ id = "committed" }]
 
 [[repos]]
-repo = "https://github.com/DavidAnson/markdownlint-cli2"
-rev = "v0.21.0"
-hooks = [{ id = "markdownlint-cli2", args = ["--fix"] }]
-
-[[repos]]
 repo = "https://github.com/crate-ci/typos"
-rev = "v1.44.0"
+rev = "v1.48.0"
 hooks = [{ id = "typos" }]
 
 [[repos]]
@@ -72,12 +67,19 @@ hooks = [{ id = "shellcheck", args = ["--external-sources"] }]
 
 [[repos]]
 repo = "https://github.com/scop/pre-commit-shfmt"
-rev = "v3.12.0-2"
+rev = "v3.13.1-1"
 hooks = [{ id = "shfmt" }]
 
 [[repos]]
 repo = "local"
 hooks = [
+  {
+    id = "rumdl",
+    name = "rumdl",
+    entry = "rumdl check --fix",
+    language = "system",
+    types = ["markdown"]
+  },
   {
     id = "cargo-check",
     name = "cargo check",
@@ -89,7 +91,7 @@ hooks = [
   {
     id = "cargo-clippy",
     name = "cargo clippy",
-    entry = "cargo clippy --",
+    entry = "mise run lint",
     language = "system",
     types = ["rust"],
     pass_filenames = false
@@ -97,7 +99,7 @@ hooks = [
   {
     id = "cargo-fmt",
     name = "cargo fmt",
-    entry = "cargo fmt --",
+    entry = "mise run format --fix",
     language = "system",
     types = ["rust"],
     pass_filenames = false
