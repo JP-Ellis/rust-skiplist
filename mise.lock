@@ -59,7 +59,7 @@ version = "0.9.140"
 backend = "cargo:cargo-nextest"
 
 [[tools."cargo:prek"]]
-version = "0.4.10"
+version = "0.4.11"
 backend = "cargo:prek"
 
 [[tools.rumdl]]
