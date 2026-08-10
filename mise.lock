@@ -55,11 +55,11 @@ version = "0.8.7"
 backend = "cargo:cargo-llvm-cov"
 
 [[tools."cargo:cargo-nextest"]]
-version = "0.9.140"
+version = "0.9.143"
 backend = "cargo:cargo-nextest"
 
 [[tools."cargo:prek"]]
-version = "0.4.11"
+version = "0.4.12"
 backend = "cargo:prek"
 
 [[tools.rumdl]]
