@@ -14,7 +14,7 @@ RUSTDOCFLAGS = "--html-in-header {{config_root}}/.cargo/katex.header.html --html
 RUSTC_BOOTSTRAP = "1"
 
 [tools]
-"core:rust" = { version = "1.97", components = "clippy,llvm-tools" }
+"core:rust" = { version = "1.98", components = "clippy,llvm-tools" }
 "aqua:cargo-bins/cargo-binstall" = "1.21.1"
 "cargo:cargo-hack" = "0.6"
 "cargo:cargo-llvm-cov" = "0.8"
