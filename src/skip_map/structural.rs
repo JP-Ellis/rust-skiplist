@@ -21,6 +21,10 @@ impl<K, V, const N: usize, C: Comparator<K>, G: LevelGenerator> SkipMap<K, V, N,
     ///
     /// This operation is `$O(n)$`: all n entries must be dropped.
     ///
+    /// If an entry's destructor panics, the remaining entries are kept in the
+    /// map rather than leaked, and the map stays usable; call `clear` again to
+    /// drop them.
+    ///
     /// # Examples
     ///
     /// ```rust
@@ -35,22 +39,28 @@ impl<K, V, const N: usize, C: Comparator<K>, G: LevelGenerator> SkipMap<K, V, N,
     /// ```
     #[inline]
     pub fn clear(&mut self) {
-        let max_levels = self.head_ref().level();
-        // Drop the old sentinel in-place.  `Node::drop` iterates the entire
-        // `next` chain and frees each node one at a time, so this is O(n) and
-        // non-recursive regardless of map size.  Then write a fresh sentinel
-        // into the same allocation.
+        // Detach the chain and reset the bookkeeping before running a single
+        // destructor.  An entry `Drop` that unwinds then finds the map already
+        // empty and consistent, rather than leaving `tail` pointing at a node
+        // the unwind has freed.
         //
-        // SAFETY: `self.head` is a live, exclusively-owned allocation;
-        // `drop_in_place` drops the old `Node<(K,V), N>` (and its linked chain),
-        // leaving the memory valid but uninitialized.
-        unsafe { core::ptr::drop_in_place(self.head.as_ptr()) };
-        // SAFETY: The allocation is still live after `drop_in_place`; `write`
-        // initializes it with a fresh sentinel, and no destructor runs on the
-        // `write` side.
-        unsafe { self.head.as_ptr().write(Node::new(max_levels)) };
+        // SAFETY: `self.head` is a live, exclusively-owned sentinel, and the
+        // chain hanging off it is owned by this map alone.
+        let chain = unsafe {
+            let head = self.head_mut();
+            for link in head.links_mut() {
+                *link = None;
+            }
+            head.take_next_chain()
+        };
         self.tail = None;
         self.len = 0;
+
+        let head = self.head;
+        // SAFETY: `head` is the exclusively-owned sentinel, its `next` was
+        // emptied above, and `chain` holds the nodes that hung off it, each
+        // allocated by `Box::into_raw` and referenced from nowhere else.
+        unsafe { Node::drop_chain(head, head, &mut self.len, &mut self.tail, chain) };
     }
 
     /// Moves all entries from `other` into `self`, leaving `other` empty.
@@ -152,10 +162,15 @@ impl<K, V, const N: usize, C: Comparator<K>, G: LevelGenerator> SkipMap<K, V, N,
                 //
                 // SAFETY: self.head is exclusively owned; all reachable nodes
                 // are live heap allocations with no other live references.
-                let (new_len, new_tail) =
-                    unsafe { Node::filter_rebuild(self.head, |_| true, |_| {}) };
-                self.tail = new_tail;
-                self.len = new_len;
+                unsafe {
+                    Node::filter_rebuild(
+                        self.head,
+                        &mut self.len,
+                        &mut self.tail,
+                        |_| true,
+                        |_| {},
+                    );
+                }
             }
         } else {
             // Reverse fast path: every key of other is strictly less than every
@@ -222,10 +237,15 @@ impl<K, V, const N: usize, C: Comparator<K>, G: LevelGenerator> SkipMap<K, V, N,
                     // SAFETY: self.head is exclusively owned; all reachable
                     // nodes are live heap allocations with no other live
                     // references.
-                    let (new_len, new_tail) =
-                        unsafe { Node::filter_rebuild(self.head, |_| true, |_| {}) };
-                    self.tail = new_tail;
-                    self.len = new_len;
+                    unsafe {
+                        Node::filter_rebuild(
+                            self.head,
+                            &mut self.len,
+                            &mut self.tail,
+                            |_| true,
+                            |_| {},
+                        );
+                    }
                 }
             } else {
                 // Slow path: overlapping key ranges, insert each entry individually.
@@ -335,16 +355,18 @@ impl<K, V, const N: usize, C: Comparator<K>, G: LevelGenerator> SkipMap<K, V, N,
         //
         // SAFETY: `self.head` is exclusively owned; every node reachable from
         // it is a live heap allocation with no other live references.
-        let (self_len, self_tail) = unsafe { Node::filter_rebuild(self.head, |_| true, |_| {}) };
+        unsafe { Node::filter_rebuild(self.head, &mut self.len, &mut self.tail, |_| true, |_| {}) };
         // SAFETY: `result.head` is exclusively owned; every node reachable
         // from it is a live heap allocation with no other live references.
-        let (result_len, result_tail) =
-            unsafe { Node::filter_rebuild(result.head, |_| true, |_| {}) };
-
-        self.tail = self_tail;
-        self.len = self_len;
-        result.tail = result_tail;
-        result.len = result_len;
+        unsafe {
+            Node::filter_rebuild(
+                result.head,
+                &mut result.len,
+                &mut result.tail,
+                |_| true,
+                |_| {},
+            );
+        }
 
         result
     }
@@ -403,9 +425,12 @@ impl<K, V, const N: usize, C: Comparator<K>, G: LevelGenerator> SkipMap<K, V, N,
 
 #[cfg(test)]
 mod tests {
+    use std::panic::{AssertUnwindSafe, catch_unwind};
+
     use pretty_assertions::assert_eq;
 
     use super::super::SkipMap;
+    use crate::test_util::{PanicOnDrop, bombs};
 
     // MARK: clear
 
@@ -895,5 +920,52 @@ mod tests {
                 .collect::<Vec<_>>(),
             [("cherry", 3), ("date", 4)]
         );
+    }
+
+    // MARK: panic safety
+
+    #[test]
+    fn clear_panicking_drop_leaves_map_empty() {
+        let mut map = SkipMap::<u32, PanicOnDrop>::new();
+        for bomb in bombs(16, 15) {
+            map.insert(bomb.id(), bomb);
+        }
+
+        let result = catch_unwind(AssertUnwindSafe(|| map.clear()));
+        assert!(result.is_err());
+
+        assert_eq!(map.len(), 0);
+        assert!(map.is_empty());
+        assert!(map.first_key_value().is_none());
+        assert!(map.last_key_value().is_none());
+        assert_eq!(map.iter().count(), 0);
+
+        map.insert(100, PanicOnDrop::new(100));
+        assert_eq!(map.last_key_value().map(|(k, _)| *k), Some(100));
+    }
+
+    /// The entries a panicking `clear` never reached stay in the map; they
+    /// must not be leaked, and a second `clear` must drop them.
+    #[test]
+    fn clear_panicking_drop_keeps_unreached_entries() {
+        let mut map = SkipMap::<u32, PanicOnDrop>::new();
+        for bomb in bombs(16, 7) {
+            map.insert(bomb.id(), bomb);
+        }
+
+        let result = catch_unwind(AssertUnwindSafe(|| map.clear()));
+        assert!(result.is_err());
+
+        let expected = [8, 9, 10, 11, 12, 13, 14, 15];
+        let keys: Vec<u32> = map.keys().copied().collect();
+        assert_eq!(keys, expected);
+        assert_eq!(map.len(), expected.len());
+        assert_eq!(map.last_key_value().map(|(k, _)| *k), Some(15));
+        for key in expected {
+            assert_eq!(map.get(&key).map(PanicOnDrop::id), Some(key));
+        }
+
+        map.clear();
+        assert!(map.is_empty());
     }
 }

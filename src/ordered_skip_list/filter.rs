@@ -18,6 +18,10 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
     ///
     /// This operation is `$O(n)$`: every element is visited once.
     ///
+    /// If `f` or an element's destructor panics, the elements the walk had
+    /// not yet reached are kept in the list, as is the element `f` panicked
+    /// on; the list stays usable.
+    ///
     /// # Examples
     ///
     /// ```rust
@@ -55,18 +59,21 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
         // this OrderedSkipList.  We hold &mut self so no other reference to
         // any node exists.  The closure reads the value and returns before any
         // structural mutation occurs.
-        let (new_rank, new_tail) = unsafe {
+        // `filter_rebuild` publishes the new length and tail itself, so
+        // an unwind out of the predicate or out of an element's destructor
+        // cannot skip the update.
+        unsafe {
             Node::filter_rebuild(
                 self.head,
+                &mut self.len,
+                &mut self.tail,
                 |cur| {
                     // SAFETY: cur is a live, heap-allocated data node.
                     f((*cur).value().expect("data node has a value"))
                 },
                 |_| {},
-            )
-        };
-        self.tail = new_tail;
-        self.len = new_rank;
+            );
+        }
     }
 
     /// Removes all but the first of consecutive equal elements as determined
@@ -92,6 +99,10 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
     /// relative order.
     ///
     /// This operation is `$O(n)$`.
+    ///
+    /// If `same_bucket` or an element's destructor panics, the elements the
+    /// walk had not yet reached are kept in the list, as is the element
+    /// `same_bucket` panicked on; the list stays usable.
     ///
     /// # Examples
     ///
@@ -135,9 +146,14 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
         // raw node pointers, producing non-aliasing exclusive references
         // because each node is a separately heap-allocated Box.  The closure
         // returns before any structural mutation occurs.
-        let (new_rank, new_tail) = unsafe {
+        // `filter_rebuild` publishes the new length and tail itself, so
+        // an unwind out of the predicate or out of an element's destructor
+        // cannot skip the update.
+        unsafe {
             Node::filter_rebuild(
                 self.head,
+                &mut self.len,
+                &mut self.tail,
                 |cur| {
                     let keep = match prev_kept {
                         None => true,
@@ -155,10 +171,8 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
                     keep
                 },
                 |_| {},
-            )
-        };
-        self.tail = new_tail;
-        self.len = new_rank;
+            );
+        }
     }
 
     /// Removes all but the first of consecutive equal elements.
@@ -171,6 +185,8 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
     /// duplicate values from the list.
     ///
     /// This operation is `$O(n)$`.
+    ///
+    /// Panic behaviour matches [`dedup_by`](OrderedSkipList::dedup_by).
     ///
     /// # Examples
     ///
@@ -204,6 +220,8 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
     /// elements with a duplicate key.
     ///
     /// This operation is `$O(n)$`.
+    ///
+    /// Panic behaviour matches [`dedup_by`](OrderedSkipList::dedup_by).
     ///
     /// # Examples
     ///
@@ -244,9 +262,12 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
 
 #[cfg(test)]
 mod tests {
+    use std::panic::{AssertUnwindSafe, catch_unwind};
+
     use pretty_assertions::assert_eq;
 
     use super::super::OrderedSkipList;
+    use crate::test_util::{PanicOnDrop, bombs};
 
     // MARK: retain
 
@@ -559,5 +580,89 @@ mod tests {
         list.dedup_by_key(|i| *i / 10);
         let got: Vec<i32> = list.iter().copied().collect();
         assert_eq!(got, [10, 20, 30]);
+    }
+
+    // MARK: panic safety
+
+    fn assert_survivors(list: &OrderedSkipList<PanicOnDrop>, expected: &[u32]) {
+        let ids: Vec<u32> = list.iter().map(PanicOnDrop::id).collect();
+        assert_eq!(ids, expected);
+        assert_eq!(list.len(), expected.len());
+        assert_eq!(list.first().map(PanicOnDrop::id), expected.first().copied());
+        assert_eq!(list.last().map(PanicOnDrop::id), expected.last().copied());
+        // Indexed lookup goes through the rebuilt skip links, not the `next`
+        // chain the assertions above walk.
+        for (index, id) in expected.iter().enumerate() {
+            assert_eq!(list.get_by_index(index).map(PanicOnDrop::id), Some(*id));
+        }
+        assert!(list.get_by_index(expected.len()).is_none());
+    }
+
+    fn armed_list() -> OrderedSkipList<PanicOnDrop> {
+        let mut list = OrderedSkipList::<PanicOnDrop>::new();
+        for bomb in bombs(16, 7) {
+            list.insert(bomb);
+        }
+        list
+    }
+
+    #[test]
+    fn retain_panicking_drop_keeps_unvisited_elements() {
+        let mut list = armed_list();
+
+        let result = catch_unwind(AssertUnwindSafe(|| list.retain(|_| false)));
+        assert!(result.is_err());
+
+        assert_survivors(&list, &[8, 9, 10, 11, 12, 13, 14, 15]);
+    }
+
+    #[test]
+    fn dedup_by_panicking_drop_keeps_unvisited_elements() {
+        let mut list = armed_list();
+
+        let result = catch_unwind(AssertUnwindSafe(|| list.dedup_by(|_, _| true)));
+        assert!(result.is_err());
+
+        assert_survivors(&list, &[0, 8, 9, 10, 11, 12, 13, 14, 15]);
+    }
+
+    /// A list whose elements all destruct cleanly, so the only unwind can come
+    /// from the predicate.
+    fn unarmed_list() -> OrderedSkipList<PanicOnDrop> {
+        let mut list = OrderedSkipList::<PanicOnDrop>::new();
+        for bomb in bombs(16, 16) {
+            list.insert(bomb);
+        }
+        list
+    }
+
+    #[test]
+    fn retain_panicking_predicate_keeps_unvisited_elements() {
+        let mut list = unarmed_list();
+
+        let result = catch_unwind(AssertUnwindSafe(|| {
+            list.retain(|element| {
+                assert!(element.id() != 7, "predicate panic");
+                false
+            });
+        }));
+        assert!(result.is_err());
+
+        assert_survivors(&list, &[7, 8, 9, 10, 11, 12, 13, 14, 15]);
+    }
+
+    #[test]
+    fn dedup_by_panicking_predicate_keeps_unvisited_elements() {
+        let mut list = unarmed_list();
+
+        let result = catch_unwind(AssertUnwindSafe(|| {
+            list.dedup_by(|later, _earlier| {
+                assert!(later.id() != 7, "predicate panic");
+                true
+            });
+        }));
+        assert!(result.is_err());
+
+        assert_survivors(&list, &[0, 7, 8, 9, 10, 11, 12, 13, 14, 15]);
     }
 }

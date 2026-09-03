@@ -310,9 +310,11 @@ impl<T, G: LevelGenerator, const N: usize> SkipList<T, N, G> {
         // SkipList.  We hold &mut self.  The keep closure does not structurally
         // modify the chain; the on_drop closure pops the node and extracts the
         // value before the box is dropped.
-        let (new_rank, new_tail) = unsafe {
+        unsafe {
             Node::filter_rebuild(
                 self.head,
+                &mut self.len,
+                &mut self.tail,
                 |_cur| {
                     let in_range = current_index >= start && current_index < end;
                     current_index = current_index.saturating_add(1);
@@ -321,10 +323,8 @@ impl<T, G: LevelGenerator, const N: usize> SkipList<T, N, G> {
                 |mut boxed| {
                     drained.push(boxed.take_value().expect("data node has a value"));
                 },
-            )
-        };
-        self.tail = new_tail;
-        self.len = new_rank;
+            );
+        }
 
         Drain {
             iter: drained.into_iter(),
@@ -995,18 +995,26 @@ where
         //
         // SAFETY: &'a mut SkipList is held exclusively.  All raw pointers
         // originate from its heap allocations.
-        let (_, new_tail) = unsafe { Node::filter_rebuild(self.list.head, |_| true, |_| {}) };
-        self.list.tail = new_tail;
-        // self.list.len is already correct: decremented in Iterator::next
-        // once per removed element.
+        unsafe {
+            Node::filter_rebuild(
+                self.list.head,
+                &mut self.list.len,
+                &mut self.list.tail,
+                |_| true,
+                |_| {},
+            );
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::panic::{AssertUnwindSafe, catch_unwind};
+
     use pretty_assertions::assert_eq;
 
     use super::super::SkipList;
+    use crate::test_util::{PanicOnDrop, bombs};
 
     // MARK: iter
 
@@ -2077,5 +2085,62 @@ mod tests {
             list.push_back(i);
         }
         drop(list.range(0..10));
+    }
+
+    // MARK: extract_if panic safety
+
+    /// Ids 0..=6 are extracted and dropped before the predicate unwinds on
+    /// 7, which is never removed.
+    #[test]
+    fn extract_if_panicking_predicate_keeps_list_consistent() {
+        let mut list = SkipList::<PanicOnDrop>::new();
+        for bomb in bombs(16, 16) {
+            list.push_back(bomb);
+        }
+
+        let result = catch_unwind(AssertUnwindSafe(|| {
+            for extracted in list.extract_if(|element| {
+                assert!(element.id() != 7, "predicate panic");
+                true
+            }) {
+                drop(extracted);
+            }
+        }));
+        assert!(result.is_err());
+
+        let ids: Vec<u32> = list.iter().map(PanicOnDrop::id).collect();
+        assert_eq!(ids, [7, 8, 9, 10, 11, 12, 13, 14, 15]);
+        assert_eq!(list.len(), 9);
+        assert_eq!(list.front().map(PanicOnDrop::id), Some(7));
+        assert_eq!(list.back().map(PanicOnDrop::id), Some(15));
+        for (index, id) in ids.iter().enumerate() {
+            assert_eq!(list.get(index).map(PanicOnDrop::id), Some(*id));
+        }
+    }
+
+    /// Id 7 leaves the list, then unwinds as the loop body drops it.  The
+    /// `ExtractIf` guard still republishes the length and tail.
+    #[test]
+    fn extract_if_panicking_drop_keeps_list_consistent() {
+        let mut list = SkipList::<PanicOnDrop>::new();
+        for bomb in bombs(16, 7) {
+            list.push_back(bomb);
+        }
+
+        let result = catch_unwind(AssertUnwindSafe(|| {
+            for extracted in list.extract_if(|_| true) {
+                drop(extracted);
+            }
+        }));
+        assert!(result.is_err());
+
+        let ids: Vec<u32> = list.iter().map(PanicOnDrop::id).collect();
+        assert_eq!(ids, [8, 9, 10, 11, 12, 13, 14, 15]);
+        assert_eq!(list.len(), 8);
+        assert_eq!(list.front().map(PanicOnDrop::id), Some(8));
+        assert_eq!(list.back().map(PanicOnDrop::id), Some(15));
+        for (index, id) in ids.iter().enumerate() {
+            assert_eq!(list.get(index).map(PanicOnDrop::id), Some(*id));
+        }
     }
 }

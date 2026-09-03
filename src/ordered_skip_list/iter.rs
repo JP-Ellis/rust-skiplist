@@ -312,17 +312,17 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
         // OrderedSkipList.  We hold &mut self.  The keep closure returns false
         // for every node, so all nodes are dropped via the on_drop closure that
         // extracts their values.
-        let (new_len, new_tail) = unsafe {
+        unsafe {
             Node::filter_rebuild(
                 self.head,
+                &mut self.len,
+                &mut self.tail,
                 |_cur| false,
                 |mut boxed| {
                     drained.push(boxed.take_value().expect("data node has a value"));
                 },
-            )
-        };
-        self.tail = new_tail;
-        self.len = new_len;
+            );
+        }
 
         Drain {
             iter: drained.into_iter(),
@@ -427,9 +427,13 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
         // this OrderedSkipList.  We hold &mut self so no other reference to
         // any node exists.  The keep closure reads the value before any
         // structural mutation occurs.
-        let (new_len, new_tail) = unsafe {
+        // `filter_rebuild` publishes the new length and tail itself, so an
+        // unwind out of the comparator cannot skip the update.
+        unsafe {
             Node::filter_rebuild(
                 head,
+                &mut self.len,
+                &mut self.tail,
                 |cur| {
                     if past_hi {
                         return true; // all remaining nodes are past upper bound: keep
@@ -461,10 +465,8 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
                 |mut boxed| {
                     drained.push(boxed.take_value().expect("data node has a value"));
                 },
-            )
-        };
-        self.tail = new_tail;
-        self.len = new_len;
+            );
+        }
 
         Drain {
             iter: drained.into_iter(),
@@ -1022,10 +1024,15 @@ where
         //
         // SAFETY: &'a mut OrderedSkipList is held exclusively.  All raw
         // pointers originate from its heap allocations.
-        let (_, new_tail) = unsafe { Node::filter_rebuild(self.list.head, |_| true, |_| {}) };
-        self.list.tail = new_tail;
-        // self.list.len is already correct: decremented in Iterator::next
-        // once per removed element.
+        unsafe {
+            Node::filter_rebuild(
+                self.list.head,
+                &mut self.list.len,
+                &mut self.list.tail,
+                |_| true,
+                |_| {},
+            );
+        }
     }
 }
 
@@ -1033,12 +1040,17 @@ where
 
 #[cfg(test)]
 mod tests {
-    use core::ops::Bound;
+    use core::{cell::Cell, ops::Bound};
+    use std::panic::{AssertUnwindSafe, catch_unwind};
 
     use pretty_assertions::assert_eq;
 
     use super::super::OrderedSkipList;
-    use crate::{comparator::FnComparator, level_generator::geometric::Geometric};
+    use crate::{
+        comparator::FnComparator,
+        level_generator::geometric::Geometric,
+        test_util::{PanicOnDrop, bombs},
+    };
 
     // MARK: iter
 
@@ -1769,5 +1781,106 @@ mod tests {
         let iter = list.extract_if(|_| false);
         // Lower bound is always 0 (predicate outcome unknown).
         assert_eq!(iter.size_hint().0, 0);
+    }
+
+    // MARK: panic safety
+
+    /// A comparator that panics once armed, standing in for any user `Ord` that
+    /// can fail — including `PartialOrdComparator`, which panics by design on
+    /// incomparable values.
+    #[test]
+    fn drain_range_panicking_comparator_keeps_len_consistent() {
+        thread_local! {
+            static ARMED: Cell<bool> = const { Cell::new(false) };
+        }
+
+        let comparator = FnComparator(|a: &u32, b: &u32| {
+            assert!(
+                !(ARMED.with(Cell::get) && (*a == 7 || *b == 7)),
+                "comparator panic"
+            );
+            a.cmp(b)
+        });
+
+        let mut list = OrderedSkipList::<u32, 16, _>::with_comparator(comparator);
+        for i in 0..16_u32 {
+            list.insert(i);
+        }
+
+        ARMED.with(|armed| armed.set(true));
+        let result = catch_unwind(AssertUnwindSafe(|| {
+            drop(list.drain_range(2..));
+        }));
+        ARMED.with(|armed| armed.set(false));
+        assert!(result.is_err());
+
+        // The elements the walk never reached stay in the list, and `len` must
+        // agree with them.
+        let remaining: Vec<u32> = list.iter().copied().collect();
+        assert_eq!(remaining, [0, 1, 7, 8, 9, 10, 11, 12, 13, 14, 15]);
+        assert_eq!(list.len(), remaining.len());
+        assert_eq!(list.first(), Some(&0));
+        assert_eq!(list.last(), Some(&15));
+        for (index, value) in remaining.iter().enumerate() {
+            assert_eq!(list.get_by_index(index), Some(value));
+        }
+        assert!(list.get_by_index(remaining.len()).is_none());
+    }
+
+    // MARK: extract_if panic safety
+
+    /// Ids 0..=6 are extracted and dropped before the predicate unwinds on
+    /// 7, which is never removed.
+    #[test]
+    fn extract_if_panicking_predicate_keeps_list_consistent() {
+        let mut list = OrderedSkipList::<PanicOnDrop>::new();
+        for bomb in bombs(16, 16) {
+            list.insert(bomb);
+        }
+
+        let result = catch_unwind(AssertUnwindSafe(|| {
+            for extracted in list.extract_if(|element| {
+                assert!(element.id() != 7, "predicate panic");
+                true
+            }) {
+                drop(extracted);
+            }
+        }));
+        assert!(result.is_err());
+
+        let ids: Vec<u32> = list.iter().map(PanicOnDrop::id).collect();
+        assert_eq!(ids, [7, 8, 9, 10, 11, 12, 13, 14, 15]);
+        assert_eq!(list.len(), 9);
+        assert_eq!(list.first().map(PanicOnDrop::id), Some(7));
+        assert_eq!(list.last().map(PanicOnDrop::id), Some(15));
+        for (index, id) in ids.iter().enumerate() {
+            assert_eq!(list.get_by_index(index).map(PanicOnDrop::id), Some(*id));
+        }
+    }
+
+    /// Id 7 leaves the list, then unwinds as the loop body drops it.  The
+    /// `ExtractIf` guard still republishes the length and tail.
+    #[test]
+    fn extract_if_panicking_drop_keeps_list_consistent() {
+        let mut list = OrderedSkipList::<PanicOnDrop>::new();
+        for bomb in bombs(16, 7) {
+            list.insert(bomb);
+        }
+
+        let result = catch_unwind(AssertUnwindSafe(|| {
+            for extracted in list.extract_if(|_| true) {
+                drop(extracted);
+            }
+        }));
+        assert!(result.is_err());
+
+        let ids: Vec<u32> = list.iter().map(PanicOnDrop::id).collect();
+        assert_eq!(ids, [8, 9, 10, 11, 12, 13, 14, 15]);
+        assert_eq!(list.len(), 8);
+        assert_eq!(list.first().map(PanicOnDrop::id), Some(8));
+        assert_eq!(list.last().map(PanicOnDrop::id), Some(15));
+        for (index, id) in ids.iter().enumerate() {
+            assert_eq!(list.get_by_index(index).map(PanicOnDrop::id), Some(*id));
+        }
     }
 }

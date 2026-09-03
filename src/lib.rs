@@ -87,6 +87,8 @@ pub mod ordered_skip_list;
 pub mod skip_list;
 pub mod skip_map;
 pub mod skip_set;
+#[cfg(test)]
+mod test_util;
 
 #[cfg(feature = "partial-ord")]
 pub use comparator::PartialOrdComparator;

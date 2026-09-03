@@ -105,7 +105,7 @@ impl<T: Clone, C: Comparator<T> + Clone, G: LevelGenerator + Clone, const N: usi
         // SAFETY: self.head is a valid, live head sentinel.  Every src_nn is a
         // live data node owned by self.  new_head / prev_nn are exclusively
         // owned by new_list and have no other live references.
-        let tail = unsafe {
+        unsafe {
             let mut prev_nn = new_head;
             let mut src_opt = self.head.as_ref().next();
 
@@ -119,9 +119,14 @@ impl<T: Clone, C: Comparator<T> + Clone, G: LevelGenerator + Clone, const N: usi
                 src_opt = src_node.next();
             }
 
-            Node::rebuild(new_head)
-        };
-        new_list.tail = tail;
+            Node::filter_rebuild(
+                new_head,
+                &mut new_list.len,
+                &mut new_list.tail,
+                |_| true,
+                |_| {},
+            );
+        }
 
         new_list
     }

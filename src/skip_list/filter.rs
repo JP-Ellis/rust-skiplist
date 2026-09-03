@@ -16,6 +16,10 @@ impl<T, G: LevelGenerator, const N: usize> SkipList<T, N, G> {
     ///
     /// This operation is `$O(n)$`.
     ///
+    /// If `same_bucket` or an element's destructor panics, the elements the
+    /// walk had not yet reached are kept in the list, as is the element
+    /// `same_bucket` panicked on; the list stays usable.
+    ///
     /// # Examples
     ///
     /// ```rust
@@ -58,9 +62,14 @@ impl<T, G: LevelGenerator, const N: usize> SkipList<T, N, G> {
         // pointers, producing non-aliasing exclusive references because each
         // node is a separately heap-allocated Box.  The closure returns before
         // any structural mutation occurs.
-        let (new_rank, new_tail) = unsafe {
+        // `filter_rebuild` publishes the new length and tail itself, so
+        // an unwind out of the predicate or out of an element's destructor
+        // cannot skip the update.
+        unsafe {
             Node::filter_rebuild(
                 self.head,
+                &mut self.len,
+                &mut self.tail,
                 |cur| {
                     let keep = match prev_kept {
                         None => true,
@@ -78,10 +87,8 @@ impl<T, G: LevelGenerator, const N: usize> SkipList<T, N, G> {
                     keep
                 },
                 |_| {},
-            )
-        };
-        self.tail = new_tail;
-        self.len = new_rank;
+            );
+        }
     }
 
     /// Removes all but the first of consecutive equal elements.
@@ -90,6 +97,8 @@ impl<T, G: LevelGenerator, const N: usize> SkipList<T, N, G> {
     /// compares elements using [`PartialEq`].
     ///
     /// This operation is `$O(n)$`.
+    ///
+    /// Panic behaviour matches [`dedup_by`](SkipList::dedup_by).
     ///
     /// # Examples
     ///
@@ -119,6 +128,8 @@ impl<T, G: LevelGenerator, const N: usize> SkipList<T, N, G> {
     /// compares the keys derived from each element.
     ///
     /// This operation is `$O(n)$`.
+    ///
+    /// Panic behaviour matches [`dedup_by`](SkipList::dedup_by).
     ///
     /// # Examples
     ///
@@ -164,6 +175,10 @@ impl<T, G: LevelGenerator, const N: usize> SkipList<T, N, G> {
     ///
     /// This operation is `$O(n)$`.
     ///
+    /// If `f` or an element's destructor panics, the elements the walk had
+    /// not yet reached are kept in the list, as is the element `f` panicked
+    /// on; the list stays usable.
+    ///
     /// # Examples
     ///
     /// ```rust
@@ -201,18 +216,21 @@ impl<T, G: LevelGenerator, const N: usize> SkipList<T, N, G> {
         // this SkipList.  We hold &mut self so no other reference to any node
         // exists.  The closure reads the value and returns before any
         // structural mutation occurs.
-        let (new_rank, new_tail) = unsafe {
+        // `filter_rebuild` publishes the new length and tail itself, so
+        // an unwind out of the predicate or out of an element's destructor
+        // cannot skip the update.
+        unsafe {
             Node::filter_rebuild(
                 self.head,
+                &mut self.len,
+                &mut self.tail,
                 |cur| {
                     // SAFETY: cur is a live, heap-allocated data node.
                     f((*cur).value().expect("data node has a value"))
                 },
                 |_| {},
-            )
-        };
-        self.tail = new_tail;
-        self.len = new_rank;
+            );
+        }
     }
 
     /// Retains only the elements specified by the predicate, passing a mutable
@@ -223,6 +241,10 @@ impl<T, G: LevelGenerator, const N: usize> SkipList<T, N, G> {
     /// retained elements before it returns `true`.
     ///
     /// This operation is `$O(n)$`.
+    ///
+    /// If `f` or an element's destructor panics, the elements the walk had
+    /// not yet reached are kept in the list, as is the element `f` panicked
+    /// on; the list stays usable.
     ///
     /// # Examples
     ///
@@ -268,26 +290,32 @@ impl<T, G: LevelGenerator, const N: usize> SkipList<T, N, G> {
         // this SkipList.  We hold &mut self so no other reference to any node
         // exists.  The &mut T borrow created by `value_mut()` expires before
         // `filter_rebuild` performs any structural mutation on the node.
-        let (new_rank, new_tail) = unsafe {
+        // `filter_rebuild` publishes the new length and tail itself, so
+        // an unwind out of the predicate or out of an element's destructor
+        // cannot skip the update.
+        unsafe {
             Node::filter_rebuild(
                 self.head,
+                &mut self.len,
+                &mut self.tail,
                 |cur| {
                     // SAFETY: cur is a live, heap-allocated data node.
                     f((*cur).value_mut().expect("data node has a value"))
                 },
                 |_| {},
-            )
-        };
-        self.tail = new_tail;
-        self.len = new_rank;
+            );
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::panic::{AssertUnwindSafe, catch_unwind};
+
     use pretty_assertions::assert_eq;
 
     use super::super::SkipList;
+    use crate::test_util::{PanicOnDrop, bombs};
 
     // MARK: retain
 
@@ -649,5 +677,120 @@ mod tests {
         list.dedup_by_key(|i| *i / 10);
         let got: Vec<i32> = list.iter().copied().collect();
         assert_eq!(got, [10, 20, 30]);
+    }
+
+    // MARK: panic safety
+
+    /// Elements the walk has not yet reached must survive an unwind, in order,
+    /// reachable through both the `next` chain and the rebuilt skip links.
+    fn assert_survivors(list: &SkipList<PanicOnDrop>, expected: &[u32]) {
+        let ids: Vec<u32> = list.iter().map(PanicOnDrop::id).collect();
+        assert_eq!(ids, expected);
+        assert_eq!(list.len(), expected.len());
+        assert_eq!(list.front().map(PanicOnDrop::id), expected.first().copied());
+        assert_eq!(list.back().map(PanicOnDrop::id), expected.last().copied());
+        for (index, id) in expected.iter().enumerate() {
+            assert_eq!(list.get(index).map(PanicOnDrop::id), Some(*id));
+        }
+        assert!(list.get(expected.len()).is_none());
+    }
+
+    fn armed_list() -> SkipList<PanicOnDrop> {
+        let mut list = SkipList::<PanicOnDrop>::new();
+        for bomb in bombs(16, 7) {
+            list.push_back(bomb);
+        }
+        list
+    }
+
+    #[test]
+    fn retain_panicking_drop_keeps_unvisited_elements() {
+        let mut list = armed_list();
+
+        let result = catch_unwind(AssertUnwindSafe(|| list.retain(|_| false)));
+        assert!(result.is_err());
+
+        assert_survivors(&list, &[8, 9, 10, 11, 12, 13, 14, 15]);
+    }
+
+    #[test]
+    fn retain_mut_panicking_drop_keeps_unvisited_elements() {
+        let mut list = armed_list();
+
+        let result = catch_unwind(AssertUnwindSafe(|| {
+            list.retain_mut(|_: &mut PanicOnDrop| false);
+        }));
+        assert!(result.is_err());
+
+        assert_survivors(&list, &[8, 9, 10, 11, 12, 13, 14, 15]);
+    }
+
+    #[test]
+    fn dedup_by_panicking_drop_keeps_unvisited_elements() {
+        let mut list = armed_list();
+
+        let result = catch_unwind(AssertUnwindSafe(|| list.dedup_by(|_, _| true)));
+        assert!(result.is_err());
+
+        assert_survivors(&list, &[0, 8, 9, 10, 11, 12, 13, 14, 15]);
+    }
+
+    #[test]
+    fn retain_panicking_predicate_keeps_unvisited_elements() {
+        let mut list = SkipList::<PanicOnDrop>::new();
+        for bomb in bombs(16, 16) {
+            list.push_back(bomb);
+        }
+
+        let result = catch_unwind(AssertUnwindSafe(|| {
+            list.retain(|element| {
+                assert!(element.id() != 7, "predicate panic");
+                false
+            });
+        }));
+        assert!(result.is_err());
+
+        // The element the predicate panicked on is still owned by the list.
+        assert_survivors(&list, &[7, 8, 9, 10, 11, 12, 13, 14, 15]);
+    }
+
+    /// A list whose elements all destruct cleanly, so the only unwind can come
+    /// from the predicate.
+    fn unarmed_list() -> SkipList<PanicOnDrop> {
+        let mut list = SkipList::<PanicOnDrop>::new();
+        for bomb in bombs(16, 16) {
+            list.push_back(bomb);
+        }
+        list
+    }
+
+    #[test]
+    fn retain_mut_panicking_predicate_keeps_unvisited_elements() {
+        let mut list = unarmed_list();
+
+        let result = catch_unwind(AssertUnwindSafe(|| {
+            list.retain_mut(|element: &mut PanicOnDrop| {
+                assert!(element.id() != 7, "predicate panic");
+                false
+            });
+        }));
+        assert!(result.is_err());
+
+        assert_survivors(&list, &[7, 8, 9, 10, 11, 12, 13, 14, 15]);
+    }
+
+    #[test]
+    fn dedup_by_panicking_predicate_keeps_unvisited_elements() {
+        let mut list = unarmed_list();
+
+        let result = catch_unwind(AssertUnwindSafe(|| {
+            list.dedup_by(|later, _earlier| {
+                assert!(later.id() != 7, "predicate panic");
+                true
+            });
+        }));
+        assert!(result.is_err());
+
+        assert_survivors(&list, &[0, 7, 8, 9, 10, 11, 12, 13, 14, 15]);
     }
 }

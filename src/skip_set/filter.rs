@@ -14,6 +14,10 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> SkipSet<T, N, C, G>
     ///
     /// This operation runs in `$O(n)$` time.
     ///
+    /// If `f` or an element's destructor panics, the elements the walk had
+    /// not yet reached are kept in the set, as is the element `f` panicked
+    /// on; the set stays usable.
+    ///
     /// # Examples
     ///
     /// ```rust

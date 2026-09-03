@@ -459,8 +459,7 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
     #[inline]
     pub(crate) unsafe fn rebuild_skip_links(&mut self) {
         // SAFETY: caller guarantees all nodes are valid.
-        let (_, new_tail) = unsafe { Node::filter_rebuild(self.head, |_| true, |_| {}) };
-        self.tail = new_tail;
+        unsafe { Node::filter_rebuild(self.head, &mut self.len, &mut self.tail, |_| true, |_| {}) };
     }
 }
 
