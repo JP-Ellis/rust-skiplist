@@ -13,6 +13,10 @@ impl<K, V, const N: usize, C: Comparator<K>, G: LevelGenerator> SkipMap<K, V, N,
     ///
     /// This operation runs in `$O(n)$` time: every pair is visited exactly once.
     ///
+    /// If `f` or an entry's destructor panics, the entries the walk had not
+    /// yet reached are kept in the map, as is the entry `f` panicked on; the
+    /// map stays usable.
+    ///
     /// # Examples
     ///
     /// ```rust
@@ -55,9 +59,14 @@ impl<K, V, const N: usize, C: Comparator<K>, G: LevelGenerator> SkipMap<K, V, N,
         // this SkipMap.  We hold &mut self so no other reference to any node
         // exists.  The closure reads/mutates the value and returns before any
         // structural mutation occurs.
-        let (new_rank, new_tail) = unsafe {
+        // `filter_rebuild` publishes the new length and tail itself, so
+        // an unwind out of the predicate or out of an element's destructor
+        // cannot skip the update.
+        unsafe {
             Node::filter_rebuild(
                 self.head,
+                &mut self.len,
+                &mut self.tail,
                 |cur| {
                     // SAFETY: cur is a live, heap-allocated data node; no
                     // other reference to this node exists within the closure.
@@ -65,18 +74,19 @@ impl<K, V, const N: usize, C: Comparator<K>, G: LevelGenerator> SkipMap<K, V, N,
                     f(k, v)
                 },
                 |_| {},
-            )
-        };
-        self.tail = new_tail;
-        self.len = new_rank;
+            );
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::panic::{AssertUnwindSafe, catch_unwind};
+
     use pretty_assertions::assert_eq;
 
     use super::super::SkipMap;
+    use crate::test_util::{PanicOnDrop, bombs};
 
     // MARK: retain
 
@@ -232,5 +242,53 @@ mod tests {
         map.retain(|k, _| *k > 2);
         let got: Vec<i32> = map.keys().copied().collect();
         assert_eq!(got, [4, 6, 8]);
+    }
+
+    // MARK: panic safety
+
+    #[test]
+    fn retain_panicking_drop_keeps_unvisited_entries() {
+        let mut map = SkipMap::<u32, PanicOnDrop>::new();
+        for bomb in bombs(16, 7) {
+            map.insert(bomb.id(), bomb);
+        }
+
+        let result = catch_unwind(AssertUnwindSafe(|| map.retain(|_, _| false)));
+        assert!(result.is_err());
+
+        let expected = [8, 9, 10, 11, 12, 13, 14, 15];
+        let keys: Vec<u32> = map.keys().copied().collect();
+        assert_eq!(keys, expected);
+        assert_eq!(map.len(), expected.len());
+        assert_eq!(map.first_key_value().map(|(k, _)| *k), Some(8));
+        assert_eq!(map.last_key_value().map(|(k, _)| *k), Some(15));
+        for key in expected {
+            assert_eq!(map.get(&key).map(PanicOnDrop::id), Some(key));
+        }
+    }
+
+    #[test]
+    fn retain_panicking_predicate_keeps_unvisited_entries() {
+        let mut map = SkipMap::<u32, PanicOnDrop>::new();
+        for bomb in bombs(16, 16) {
+            map.insert(bomb.id(), bomb);
+        }
+
+        let result = catch_unwind(AssertUnwindSafe(|| {
+            map.retain(|key, _value| {
+                assert!(*key != 7, "predicate panic");
+                false
+            });
+        }));
+        assert!(result.is_err());
+
+        let expected = [7, 8, 9, 10, 11, 12, 13, 14, 15];
+        let keys: Vec<u32> = map.keys().copied().collect();
+        assert_eq!(keys, expected);
+        assert_eq!(map.len(), expected.len());
+        assert_eq!(map.last_key_value().map(|(k, _)| *k), Some(15));
+        for key in expected {
+            assert_eq!(map.get(&key).map(PanicOnDrop::id), Some(key));
+        }
     }
 }

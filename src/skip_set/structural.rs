@@ -17,6 +17,10 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> SkipSet<T, N, C, G>
     ///
     /// This operation is `$O(n)$`.
     ///
+    /// If an element's destructor panics, the remaining elements are kept in
+    /// the set rather than leaked, and the set stays usable; call `clear`
+    /// again to drop them.
+    ///
     /// # Examples
     ///
     /// ```rust

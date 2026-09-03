@@ -457,36 +457,6 @@ impl<V, const N: usize> Node<V, N> {
         unsafe { Box::from_raw(self) }
     }
 
-    /// Drops all nodes following `self` and sets `self.next` to `None`.
-    ///
-    /// This is an `$O(k)$` iterative operation, where k is the number of nodes
-    /// freed.  The caller is responsible for clearing any skip links that
-    /// pointed to the freed nodes before or after this call.
-    ///
-    /// # Safety
-    ///
-    /// The caller must ensure that no live references (including non-owning
-    /// skip-link pointers that will be dereferenced) to the nodes being freed
-    /// remain after this call.
-    #[inline]
-    pub(crate) unsafe fn truncate_next(&mut self) {
-        // Same iterative pattern as `Drop for Node<V>`, applied to the tail
-        // of the chain rather than the node itself.
-        let mut current = self.next.take();
-        while let Some(ptr) = current {
-            // SAFETY: Every node reachable via `next` was heap-allocated via
-            // `Box::new` and then stored via `Box::into_raw` in
-            // `insert_after`.  We take ownership by removing the pointer from
-            // the previous node's `next` before reconstructing the `Box`, so
-            // no other owner exists.
-            let mut boxed: Box<Self> = unsafe { Box::from_raw(ptr.as_ptr()) };
-            current = boxed.next.take();
-            // Drop `boxed` here.  Because `next` was already taken, the
-            // node's own `Drop` impl will do nothing further.
-            drop(boxed);
-        }
-    }
-
     /// Joins a head node to a tail node, creating a single sequence of nodes.
     ///
     /// This method takes ownership of `head` (consuming it) and splices the
@@ -629,6 +599,57 @@ impl<V, const N: usize> Node<V, N> {
         self.next = Some(first);
     }
 
+    /// Frees `first` and every node that follows it.
+    ///
+    /// Each node's `next` is taken before the node is freed, so this is
+    /// `$O(k)$` and non-recursive in the number of nodes freed.
+    ///
+    /// Freeing a node runs its element's destructor, which may unwind.  The
+    /// nodes not yet freed are then re-attached after `attach` and every skip
+    /// link is rebuilt, so the container keeps the elements it has not
+    /// destroyed instead of leaking them.  `out_len` and `out_tail`
+    /// describe that survivor chain and are written on the unwind path
+    /// alone; the normal path frees everything and leaves both untouched.
+    ///
+    /// # Safety
+    ///
+    /// - The caller must commit the container's post-call length and tail
+    ///   before calling.  Nothing is published unless an element destructor
+    ///   unwinds, so a caller that defers the update leaves `tail` pointing
+    ///   into the region this call frees.
+    /// - `head` must be the exclusively-owned head sentinel of the container.
+    /// - `attach` must be a live node in that container with `next == None`,
+    ///   and must be the node the chain hung off before it was detached.
+    /// - `first`, and every node reachable from it, must have been allocated
+    ///   via `Box::into_raw` and detached from the container, with no other
+    ///   live reference to any of them.
+    #[inline]
+    pub(crate) unsafe fn drop_chain(
+        head: NonNull<Self>,
+        attach: NonNull<Self>,
+        out_len: &mut usize,
+        out_tail: &mut Option<NonNull<Self>>,
+        first: Option<NonNull<Self>>,
+    ) {
+        let mut walk = DropChain {
+            head,
+            attach,
+            current: first,
+            out_len,
+            out_tail,
+        };
+
+        while let Some(ptr) = walk.current {
+            // SAFETY: every node in the chain was allocated by `Box::into_raw`
+            // and detached from the container, so this `Box` is its only owner.
+            let mut boxed: Box<Self> = unsafe { Box::from_raw(ptr.as_ptr()) };
+            // Commit the advance before the element's destructor runs, and
+            // leave the node's own `next` empty so its `Drop` stops here.
+            walk.current = boxed.next.take();
+            drop(boxed);
+        }
+    }
+
     /// Filter and rebuild skip links in a single `$O(n)$` forward pass.
     ///
     /// Walks the `next` chain starting from `head` (the head sentinel).
@@ -639,9 +660,17 @@ impl<V, const N: usize> Node<V, N> {
     /// - If `keep(raw_ptr)` returns `false`, `on_drop(boxed_node)` is called
     ///   and the node is removed from the chain.
     ///
-    /// Returns `(new_len, new_tail)` where `new_len` is the count of retained
-    /// nodes and `new_tail` is the last retained node, or `None` if all nodes
-    /// were removed.
+    /// `out_len` receives the count of retained nodes and `out_tail` the last
+    /// retained node, or `None` if all nodes were removed.
+    ///
+    /// Both `keep` and `on_drop` run caller code that may unwind: `keep` is a
+    /// user predicate, and `on_drop` runs the element's destructor.  The
+    /// results are written through `out_len` and `out_tail` rather than
+    /// returned so that the walk can publish them on the unwind path too,
+    /// where a returned value would be discarded.  A panic therefore cannot
+    /// leave the container claiming nodes the walk has already freed.  Every
+    /// node the walk had not yet reached is retained, as is the node `keep`
+    /// panicked on.
     ///
     /// # Safety
     ///
@@ -653,101 +682,201 @@ impl<V, const N: usize> Node<V, N> {
     ///   insertion, removal, or pointer update).  It may read or mutate node
     ///   values before returning.
     #[expect(
-        clippy::expect_used,
-        reason = "Link::new(dist) returns Err only when dist == 0; \
-                  dist = new_rank - pred_rank and new_rank > pred_rank \
-                  whenever a predecessor is recorded, so dist >= 1 always"
-    )]
-    #[expect(
-        clippy::indexing_slicing,
-        reason = "l < node_height <= max_levels = predecessors.len() = self.level(); \
-                  l indexes both predecessors[l] and links_mut()[l] so a plain index \
-                  loop is the clearest expression"
-    )]
-    #[expect(
         clippy::multiple_unsafe_ops_per_block,
-        reason = "raw-pointer traversal, link clearing, optional pop, and link wiring \
-                  all touch provably disjoint heap nodes; grouping them avoids \
-                  unsafe-crossing raw-pointer variables"
+        reason = "raw-pointer traversal, link clearing and the optional pop all touch \
+                  provably disjoint heap nodes; grouping them avoids unsafe-crossing \
+                  raw-pointer variables"
     )]
     pub(crate) unsafe fn filter_rebuild<F, D>(
         head: NonNull<Self>,
+        out_len: &mut usize,
+        out_tail: &mut Option<NonNull<Self>>,
         mut keep: F,
         mut on_drop: D,
-    ) -> (usize, Option<NonNull<Self>>)
-    where
+    ) where
         F: FnMut(*mut Self) -> bool,
         D: FnMut(Box<Self>),
     {
         let head_ptr: *mut Self = head.as_ptr();
         // SAFETY: head is a valid, exclusively-owned head sentinel per the
         // function's safety contract.
-        let max_levels = unsafe { (*head_ptr).level() };
-        let mut predecessors: ArrayVec<(*mut Self, usize), N> =
-            iter::repeat_n((head_ptr, 0_usize), max_levels).collect();
-        let mut new_rank: usize = 0;
-        let mut new_tail: Option<NonNull<Self>> = None;
-
-        // SAFETY: head_ptr and all nodes reachable via next are live,
-        // exclusively-owned, heap-allocated Node<V> instances.  `keep` does
-        // not structurally modify the chain before returning.
-        unsafe {
+        let (max_levels, first) = unsafe {
             for link in (*head_ptr).links_mut() {
                 *link = None;
             }
+            ((*head_ptr).level(), (*head_ptr).next())
+        };
 
-            let mut current_opt = (*head_ptr).next();
-            while let Some(cur_nn) = current_opt {
-                let cur: *mut Self = cur_nn.as_ptr();
-                // Save successor before any structural mutation.
-                let next_opt = (*cur).next();
+        let mut walk = Rebuild {
+            predecessors: iter::repeat_n((head_ptr, 0_usize), max_levels).collect(),
+            rank: 0,
+            tail: None,
+            current: first,
+            out_len,
+            out_tail,
+        };
 
-                if keep(cur) {
-                    new_rank = new_rank.saturating_add(1);
-                    new_tail = Some(cur_nn);
+        while let Some(cur_nn) = walk.current {
+            let cur: *mut Self = cur_nn.as_ptr();
+            // SAFETY: cur is a live, exclusively-owned data node in the chain.
+            // Read the successor before any structural mutation.
+            let next = unsafe { (*cur).next() };
 
-                    // Clear this node's forward links; they will be re-wired.
-                    for link in (*cur).links_mut() {
-                        *link = None;
-                    }
-
-                    let height = (*cur).level();
-                    for l in 0..height {
-                        let (pred_ptr, pred_rank) = predecessors[l];
-                        let dist = new_rank.saturating_sub(pred_rank);
-                        (*pred_ptr).links_mut()[l] = Some(
-                            Link::new(NonNull::new_unchecked(cur), dist)
-                                .expect("dist >= 1 by construction"),
-                        );
-                        predecessors[l] = (cur, new_rank);
-                    }
-                } else {
-                    on_drop((*cur).pop());
-                }
-
-                current_opt = next_opt;
+            // `keep` may unwind.  Leaving `walk.current` on `cur` until it
+            // returns makes the guard retain `cur` along with the rest.
+            if keep(cur) {
+                walk.current = next;
+                // SAFETY: cur is live and still linked into the chain.
+                unsafe { walk.retain(cur_nn) };
+            } else {
+                // The element's destructor may unwind, so commit the advance
+                // before `cur` is unlinked and destroyed.
+                walk.current = next;
+                // SAFETY: cur is a live data node; `pop` detaches it from the
+                // chain and transfers ownership to the returned Box.
+                on_drop(unsafe { (*cur).pop() });
             }
         }
 
-        (new_rank, new_tail)
+        // Dropping `walk` publishes the length and tail.
     }
+}
 
-    /// Rebuilds all skip links in a single `$O(n)$` forward pass, retaining every
-    /// node.
-    ///
-    /// This is the keep-all specialisation of [`filter_rebuild`](Self::filter_rebuild).
-    /// Returns the last data node as a [`NonNull`], or `None` if the chain is empty.
+/// Incremental state of a [`Node::drop_chain`] walk.
+///
+/// Dropping the guard re-attaches the nodes the walk has not yet freed and
+/// rebuilds every skip link, so an element destructor that unwinds leaves its
+/// surviving neighbours owned by the container rather than stranded.
+struct DropChain<'a, V, const N: usize> {
+    /// Head sentinel of the container, used to rebuild the skip links.
+    head: NonNull<Node<V, N>>,
+    /// Node the survivors are re-attached after.  Its `next` is `None` for as
+    /// long as the walk runs.
+    attach: NonNull<Node<V, N>>,
+    /// Next node to free, or `None` once the chain is exhausted.
+    current: Option<NonNull<Node<V, N>>>,
+    /// Container length to publish into.
+    out_len: &'a mut usize,
+    /// Container tail to publish into.
+    out_tail: &'a mut Option<NonNull<Node<V, N>>>,
+}
+
+impl<V, const N: usize> Drop for DropChain<'_, V, N> {
+    #[expect(
+        clippy::multiple_unsafe_ops_per_block,
+        reason = "re-attaching the survivors and rebuilding the links are one recovery \
+                  step on the same chain; splitting them would obscure that"
+    )]
+    fn drop(&mut self) {
+        let Some(first) = self.current.take() else {
+            return;
+        };
+
+        // SAFETY: `first` heads a chain of live, exclusively-owned nodes whose
+        // predecessor has already been freed, and `attach.next` is None.
+        // `set_head_next` overwrites `first.prev`, so the freed predecessor is
+        // never read.  Re-attaching only rewires pointers and rebuilding only
+        // retains, so neither can unwind a second time.
+        unsafe {
+            (*self.attach.as_ptr()).set_head_next(first);
+            Node::filter_rebuild(self.head, self.out_len, self.out_tail, |_| true, |_| {});
+        }
+    }
+}
+
+/// Incremental state of a [`Node::filter_rebuild`] walk.
+///
+/// Dropping the guard retains every node the walk has not yet reached and
+/// publishes the resulting length and tail, so the `next` chain, the skip
+/// links and the container's bookkeeping agree on every exit path — including
+/// an unwind out of the predicate or out of an element's destructor.
+struct Rebuild<'a, V, const N: usize> {
+    /// Last node wired at each level, paired with its rank in the rebuilt
+    /// list.  Level `l` starts at the head sentinel with rank 0.
+    predecessors: ArrayVec<(*mut Node<V, N>, usize), N>,
+    /// Number of nodes retained so far.
+    rank: usize,
+    /// Last node retained so far.
+    tail: Option<NonNull<Node<V, N>>>,
+    /// Next node to visit, or `None` once the chain is exhausted.
+    current: Option<NonNull<Node<V, N>>>,
+    /// Container length to publish into.
+    out_len: &'a mut usize,
+    /// Container tail to publish into.
+    out_tail: &'a mut Option<NonNull<Node<V, N>>>,
+}
+
+impl<V, const N: usize> Rebuild<'_, V, N> {
+    /// Wires `cur` into the rebuilt list as the next retained node.
     ///
     /// # Safety
     ///
-    /// Same as [`filter_rebuild`](Self::filter_rebuild): `head` must be the
-    /// exclusively-owned head sentinel of a valid prev/next chain, with no
-    /// other live references to any node in the chain.
-    #[inline]
-    pub(crate) unsafe fn rebuild(head: NonNull<Self>) -> Option<NonNull<Self>> {
-        // SAFETY: forwarded from caller.
-        let (_, tail) = unsafe { Self::filter_rebuild(head, |_| true, |_| {}) };
-        tail
+    /// `cur` must be a live, exclusively-owned data node still linked into the
+    /// chain, and every pointer in `predecessors` must still be live.
+    #[expect(
+        clippy::expect_used,
+        reason = "Link::new(dist) returns Err only when dist == 0; \
+                  dist = rank - pred_rank and rank > pred_rank whenever a \
+                  predecessor is recorded, so dist >= 1 always"
+    )]
+    #[expect(
+        clippy::indexing_slicing,
+        reason = "l < node_height <= max_levels = predecessors.len() = head.level(); \
+                  l indexes both predecessors[l] and links_mut()[l] so a plain index \
+                  loop is the clearest expression"
+    )]
+    #[expect(
+        clippy::multiple_unsafe_ops_per_block,
+        reason = "link clearing and link wiring touch provably disjoint heap nodes; \
+                  grouping them avoids unsafe-crossing raw-pointer variables"
+    )]
+    unsafe fn retain(&mut self, cur: NonNull<Node<V, N>>) {
+        let ptr: *mut Node<V, N> = cur.as_ptr();
+        self.rank = self.rank.saturating_add(1);
+        self.tail = Some(cur);
+
+        // SAFETY: ptr and every recorded predecessor are live, exclusively
+        // owned, heap-allocated nodes.
+        unsafe {
+            // Clear this node's forward links; they are re-wired below.
+            for link in (*ptr).links_mut() {
+                *link = None;
+            }
+
+            let height = (*ptr).level();
+            for l in 0..height {
+                let (pred_ptr, pred_rank) = self.predecessors[l];
+                let dist = self.rank.saturating_sub(pred_rank);
+                (*pred_ptr).links_mut()[l] =
+                    Some(Link::new(cur, dist).expect("dist >= 1 by construction"));
+                self.predecessors[l] = (ptr, self.rank);
+            }
+        }
+    }
+
+    /// Retains every node the walk has not yet reached.
+    ///
+    /// # Safety
+    ///
+    /// Every node reachable from `current` must be live and exclusively owned.
+    unsafe fn retain_rest(&mut self) {
+        while let Some(cur) = self.current {
+            // SAFETY: cur is a live, exclusively-owned data node in the chain.
+            self.current = unsafe { (*cur.as_ptr()).next() };
+            // SAFETY: cur is live and still linked into the chain.
+            unsafe { self.retain(cur) };
+        }
+    }
+}
+
+impl<V, const N: usize> Drop for Rebuild<'_, V, N> {
+    fn drop(&mut self) {
+        // SAFETY: every node still reachable from `current` is live and
+        // exclusively owned by the container being rebuilt.  Retaining a node
+        // only rewires links, so this cannot unwind a second time.
+        unsafe { self.retain_rest() };
+        *self.out_len = self.rank;
+        *self.out_tail = self.tail;
     }
 }
 
@@ -1352,8 +1481,16 @@ pub(crate) mod tests {
     #[rstest]
     fn filter_rebuild_empty_list() {
         let mut head = Box::new(Node::<u8, MAX_LEVELS>::new(MAX_LEVELS));
-        let (new_len, new_tail) =
-            unsafe { Node::filter_rebuild(NonNull::from_mut(&mut *head), |_| true, |_| {}) };
+        let (mut new_len, mut new_tail) = (0, None);
+        unsafe {
+            Node::filter_rebuild(
+                NonNull::from_mut(&mut *head),
+                &mut new_len,
+                &mut new_tail,
+                |_| true,
+                |_| {},
+            );
+        }
         assert_eq!(new_len, 0);
         assert!(new_tail.is_none());
         assert!(head.next_as_ref().is_none());
@@ -1362,7 +1499,8 @@ pub(crate) mod tests {
     #[rstest]
     fn filter_rebuild_keep_all(skiplist: Result<NonNull<Node<u8, MAX_LEVELS>>>) -> Result<()> {
         let head = skiplist?;
-        let (new_len, new_tail) = unsafe { Node::filter_rebuild(head, |_| true, |_| {}) };
+        let (mut new_len, mut new_tail) = (0, None);
+        unsafe { Node::filter_rebuild(head, &mut new_len, &mut new_tail, |_| true, |_| {}) };
 
         assert_eq!(new_len, 4);
         let vals: Vec<u8> = {
@@ -1410,13 +1548,16 @@ pub(crate) mod tests {
     fn filter_rebuild_keep_none(skiplist: Result<NonNull<Node<u8, MAX_LEVELS>>>) -> Result<()> {
         let mut dropped_vals: Vec<u8> = Vec::new();
         let head = skiplist?;
-        let (new_len, new_tail) = unsafe {
+        let (mut new_len, mut new_tail) = (0, None);
+        unsafe {
             Node::filter_rebuild(
                 head,
+                &mut new_len,
+                &mut new_tail,
                 |_| false,
                 |mut b| dropped_vals.push(b.take_value().expect("data node")),
-            )
-        };
+            );
+        }
 
         assert_eq!(new_len, 0);
         assert!(new_tail.is_none());
@@ -1450,16 +1591,19 @@ pub(crate) mod tests {
     ) -> Result<()> {
         // Keep v1 (value 10) and v3 (value 30); drop v2 and v4.
         let head = skiplist?;
-        let (new_len, new_tail) = unsafe {
+        let (mut new_len, mut new_tail) = (0, None);
+        unsafe {
             Node::filter_rebuild(
                 head,
+                &mut new_len,
+                &mut new_tail,
                 |cur| {
                     let v = (*cur).value().copied();
                     v == Some(10) || v == Some(30)
                 },
                 |_| {},
-            )
-        };
+            );
+        }
 
         assert_eq!(new_len, 2);
         let vals: Vec<u8> = {
@@ -1509,6 +1653,8 @@ pub(crate) mod tests {
         unsafe {
             Node::filter_rebuild(
                 head,
+                &mut 0,
+                &mut None,
                 |cur| {
                     let v = (*cur).value().copied();
                     v == Some(20) || v == Some(40)
@@ -1534,6 +1680,8 @@ pub(crate) mod tests {
         unsafe {
             Node::filter_rebuild(
                 head,
+                &mut 0,
+                &mut None,
                 |cur| {
                     let v = (*cur).value().copied();
                     v != Some(20) && v != Some(30)
@@ -1595,7 +1743,7 @@ pub(crate) mod tests {
         //   v3.links[0]   → None             (v4 has height 0 so nothing wires into v3.links[0])
         let head = skiplist?;
         unsafe {
-            Node::filter_rebuild(head, |_| true, |_| {});
+            Node::filter_rebuild(head, &mut 0, &mut None, |_| true, |_| {});
         }
 
         let link0 = unsafe { head.as_ref() }.links()[0]
@@ -1772,90 +1920,6 @@ pub(crate) mod tests {
         Ok(())
     }
 
-    // MARK: truncate_next
-
-    #[test]
-    fn truncate_next_on_middle_node() -> Result<()> {
-        // Build head → v1(10) → v2(20) → v3(30), all height 0 (no skip links).
-        let mut head = Box::new(Node::<u8, MAX_LEVELS>::new(MAX_LEVELS));
-        unsafe {
-            Node::insert_after(NonNull::from_mut(&mut *head), Node::with_value(0, 10_u8));
-            Node::insert_after(
-                NonNull::from_mut(head.next_as_mut().expect("v1")),
-                Node::with_value(0, 20_u8),
-            );
-            Node::insert_after(
-                NonNull::from_mut(head.next_as_mut().expect("v1").next_as_mut().expect("v2")),
-                Node::with_value(0, 30_u8),
-            );
-        }
-
-        // Truncate after v1; v2 and v3 are freed.
-        // SAFETY: v1 is exclusively owned and no other references to v2/v3 exist.
-        unsafe { head.next_as_mut().expect("v1").truncate_next() };
-
-        let vals: Vec<u8> = {
-            let mut v = Vec::new();
-            let mut cur = head.next_as_ref();
-            while let Some(n) = cur {
-                v.push(*n.value().expect("data node"));
-                cur = n.next_as_ref();
-            }
-            v
-        };
-        assert_eq!(vals, [10]);
-
-        // Insta is incompatible with Miri
-        if !cfg!(miri) {
-            assert_snapshot!(
-                head.display()?,
-                @"
-                [03]: 00
-                [02]: 00
-                [01]: 00
-                [->]: 00 -> 01
-                [<-]: 00 <- 01
-
-                [00|03] None
-                [01|00] Some(10)
-                "
-            );
-        }
-        Ok(())
-    }
-
-    #[test]
-    fn truncate_next_empties_list() -> Result<()> {
-        // Build head → v1(10), height 0.
-        let mut head = Box::new(Node::<u8, MAX_LEVELS>::new(MAX_LEVELS));
-        unsafe { Node::insert_after(NonNull::from_mut(&mut *head), Node::with_value(0, 10_u8)) };
-
-        // Truncate directly on head; v1 is freed.
-        // SAFETY: head is exclusively owned and no other references to v1 exist.
-        unsafe {
-            head.truncate_next();
-        }
-
-        assert!(head.next_as_ref().is_none());
-
-        // Insta is incompatible with Miri
-        if !cfg!(miri) {
-            assert_snapshot!(
-                head.display()?,
-                @"
-                [03]: 00
-                [02]: 00
-                [01]: 00
-                [->]: 00
-                [<-]: 00
-
-                [00|03] None
-                "
-            );
-        }
-        Ok(())
-    }
-
     // MARK: take_next_chain / set_head_next
 
     #[test]
@@ -1951,9 +2015,10 @@ pub(crate) mod tests {
             cur = unsafe { n.next_as_mut() };
         }
 
+        let mut tail = None;
         // SAFETY: head is exclusively owned; all data nodes are live heap
         // allocations reachable through the next chain.
-        let tail = unsafe { Node::rebuild(head) };
+        unsafe { Node::filter_rebuild(head, &mut 0, &mut tail, |_| true, |_| {}) };
 
         assert_eq!(
             unsafe { tail.expect("non-empty").as_ref() }

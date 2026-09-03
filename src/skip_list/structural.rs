@@ -21,6 +21,10 @@ impl<T, G: LevelGenerator, const N: usize> SkipList<T, N, G> {
     ///
     /// This operation is `$O(n)$`: all n elements must be dropped.
     ///
+    /// If an element's destructor panics, the remaining elements are kept in
+    /// the list rather than leaked, and the list stays usable; call `clear`
+    /// again to drop them.
+    ///
     /// # Examples
     ///
     /// ```rust
@@ -36,22 +40,28 @@ impl<T, G: LevelGenerator, const N: usize> SkipList<T, N, G> {
     /// ```
     #[inline]
     pub fn clear(&mut self) {
-        let max_levels = self.head_ref().level();
-        // Drop the old sentinel in-place.  `Node::drop` iterates the entire
-        // `next` chain and frees each node one at a time, so this is O(n) and
-        // non-recursive regardless of list length.  Then write a fresh
-        // sentinel into the same allocation.
+        // Detach the chain and reset the bookkeeping before running a single
+        // destructor.  An element `Drop` that unwinds then finds the list
+        // already empty and consistent, rather than leaving `tail` pointing at
+        // a node the unwind has freed.
         //
-        // SAFETY: `self.head` is a live, exclusively-owned allocation;
-        // `drop_in_place` drops the old `Node<T, N>` (and its linked chain),
-        // leaving the memory valid but uninitialized.
-        unsafe { core::ptr::drop_in_place(self.head.as_ptr()) };
-        // SAFETY: The allocation is still live after `drop_in_place`; `write`
-        // initializes it with a fresh sentinel; no destructor runs on the
-        // `write` side.
-        unsafe { self.head.as_ptr().write(Node::new(max_levels)) };
+        // SAFETY: `self.head` is a live, exclusively-owned sentinel, and the
+        // chain hanging off it is owned by this list alone.
+        let chain = unsafe {
+            let head = self.head_mut();
+            for link in head.links_mut() {
+                *link = None;
+            }
+            head.take_next_chain()
+        };
         self.tail = None;
         self.len = 0;
+
+        let head = self.head;
+        // SAFETY: `head` is the exclusively-owned sentinel, its `next` was
+        // emptied above, and `chain` holds the nodes that hung off it, each
+        // allocated by `Box::into_raw` and referenced from nowhere else.
+        unsafe { Node::drop_chain(head, head, &mut self.len, &mut self.tail, chain) };
     }
 
     /// Shortens the list, keeping only the first `len` elements and dropping
@@ -62,6 +72,10 @@ impl<T, G: LevelGenerator, const N: usize> SkipList<T, N, G> {
     /// This operation is `$O(\log n + k)$` where k = `self.len() - len` is the
     /// number of elements removed: `$O(\log n)$` to locate the new tail and update
     /// the skip links, then `$O(k)$` to drop k values.
+    ///
+    /// If an element's destructor panics, the elements it had not yet reached
+    /// are kept in the list rather than leaked, so the list may still be
+    /// longer than `len`.
     ///
     /// # Examples
     ///
@@ -88,8 +102,9 @@ impl<T, G: LevelGenerator, const N: usize> SkipList<T, N, G> {
     )]
     #[expect(
         clippy::multiple_unsafe_ops_per_block,
-        reason = "link clearing and truncate_next touch provably disjoint heap nodes; \
-                  splitting across blocks would require unsafe-crossing raw-pointer variables"
+        reason = "link clearing, detaching the suffix and freeing it touch provably \
+                  disjoint heap nodes; splitting across blocks would require \
+                  unsafe-crossing raw-pointer variables"
     )]
     #[inline]
     pub fn truncate(&mut self, len: usize) {
@@ -107,6 +122,7 @@ impl<T, G: LevelGenerator, const N: usize> SkipList<T, N, G> {
         // IndexMutVisitor with target = len advances directly to the node at rank len.
         // `current` from into_parts() is the new tail node itself.
         // into_parts() releases the &mut borrow.
+        let head = self.head;
         let (new_tail_node, precursors, _) = {
             let mut visitor = IndexMutVisitor::new(self.head, len);
             visitor.traverse();
@@ -116,7 +132,7 @@ impl<T, G: LevelGenerator, const N: usize> SkipList<T, N, G> {
         // SAFETY: All raw pointers come from NonNull<Node<T, N>> captured during
         // traversal.  They originate from heap allocations owned by this SkipList.
         // No safe references to any node exist while this block runs.
-        let new_tail_ptr: *mut Node<T, N> = unsafe {
+        unsafe {
             // `current` is the node at rank len (the new tail).
             let new_tail_ptr: *mut Node<T, N> = new_tail_node.as_ptr();
 
@@ -135,15 +151,18 @@ impl<T, G: LevelGenerator, const N: usize> SkipList<T, N, G> {
                 (*precursors[l].as_ptr()).links_mut()[l] = None;
             }
 
-            (*new_tail_ptr).truncate_next();
+            // Commit the new tail and length before any element is freed:
+            // freeing runs element destructors, and one that unwinds must not
+            // leave `tail` pointing into the region it has freed.
+            self.tail = Some(new_tail_node);
+            self.len = len;
 
-            new_tail_ptr
-        };
-
-        // SAFETY: new_tail_ptr is a live, heap-allocated node owned by this
-        // SkipList; it will not be freed until the list itself is dropped.
-        self.tail = Some(unsafe { NonNull::new_unchecked(new_tail_ptr) });
-        self.len = len;
+            // Detach the removed suffix, then free it.  An element destructor
+            // that unwinds leaves the rest of the suffix re-attached after the
+            // new tail rather than leaked.
+            let suffix = (*new_tail_ptr).take_next_chain();
+            Node::drop_chain(head, new_tail_node, &mut self.len, &mut self.tail, suffix);
+        }
     }
 
     /// Splits the list at the given index, returning a new list containing
@@ -252,7 +271,13 @@ impl<T, G: LevelGenerator, const N: usize> SkipList<T, N, G> {
             // SAFETY: result.head is exclusively owned; all nodes reachable
             // via result.head.next are live heap allocations.
             unsafe {
-                result.tail = Node::rebuild(result.head);
+                Node::filter_rebuild(
+                    result.head,
+                    &mut result.len,
+                    &mut result.tail,
+                    |_| true,
+                    |_| {},
+                );
             }
 
             return result;
@@ -289,11 +314,14 @@ impl<T, G: LevelGenerator, const N: usize> SkipList<T, N, G> {
             };
             (*result.head.as_ptr()).set_head_next(first_of_tail);
 
-            self.tail = Some(NonNull::new_unchecked(pivot));
-            self.len = at;
-
-            self.tail = Node::rebuild(self.head);
-            result.tail = Node::rebuild(result.head);
+            Node::filter_rebuild(self.head, &mut self.len, &mut self.tail, |_| true, |_| {});
+            Node::filter_rebuild(
+                result.head,
+                &mut result.len,
+                &mut result.tail,
+                |_| true,
+                |_| {},
+            );
 
             result
         }
@@ -436,9 +464,12 @@ impl<T, G: LevelGenerator, const N: usize> SkipList<T, N, G> {
 
 #[cfg(test)]
 mod tests {
+    use std::panic::{AssertUnwindSafe, catch_unwind};
+
     use pretty_assertions::assert_eq;
 
     use super::super::SkipList;
+    use crate::test_util::{PanicOnDrop, bombs};
 
     // MARK: clear
 
@@ -1006,5 +1037,92 @@ mod tests {
             ");
         }
         Ok(())
+    }
+
+    // MARK: panic safety
+
+    #[test]
+    fn clear_panicking_drop_leaves_list_empty() {
+        let mut list = SkipList::<PanicOnDrop>::new();
+        for bomb in bombs(16, 15) {
+            list.push_back(bomb);
+        }
+
+        let result = catch_unwind(AssertUnwindSafe(|| list.clear()));
+        assert!(result.is_err());
+
+        assert_eq!(list.len(), 0);
+        assert!(list.is_empty());
+        assert!(list.front().is_none());
+        assert!(list.back().is_none());
+        assert_eq!(list.iter().count(), 0);
+
+        list.push_back(PanicOnDrop::new(100));
+        assert_eq!(list.back().map(PanicOnDrop::id), Some(100));
+    }
+
+    #[test]
+    fn truncate_panicking_drop_leaves_list_truncated() {
+        let mut list = SkipList::<PanicOnDrop>::new();
+        for bomb in bombs(16, 15) {
+            list.push_back(bomb);
+        }
+
+        let result = catch_unwind(AssertUnwindSafe(|| list.truncate(4)));
+        assert!(result.is_err());
+
+        let ids: Vec<u32> = list.iter().map(PanicOnDrop::id).collect();
+        assert_eq!(ids, [0, 1, 2, 3]);
+        assert_eq!(list.len(), 4);
+        assert_eq!(list.front().map(PanicOnDrop::id), Some(0));
+        assert_eq!(list.back().map(PanicOnDrop::id), Some(3));
+        assert!(list.get(4).is_none());
+
+        list.push_back(PanicOnDrop::new(100));
+        assert_eq!(list.back().map(PanicOnDrop::id), Some(100));
+    }
+
+    /// The elements a panicking `clear` never reached stay in the list; they
+    /// must not be leaked, and a second `clear` must drop them.
+    #[test]
+    fn clear_panicking_drop_keeps_unreached_elements() {
+        let mut list = SkipList::<PanicOnDrop>::new();
+        for bomb in bombs(16, 7) {
+            list.push_back(bomb);
+        }
+
+        let result = catch_unwind(AssertUnwindSafe(|| list.clear()));
+        assert!(result.is_err());
+
+        let ids: Vec<u32> = list.iter().map(PanicOnDrop::id).collect();
+        assert_eq!(ids, [8, 9, 10, 11, 12, 13, 14, 15]);
+        assert_eq!(list.len(), 8);
+        assert_eq!(list.front().map(PanicOnDrop::id), Some(8));
+        assert_eq!(list.back().map(PanicOnDrop::id), Some(15));
+        for (index, id) in ids.iter().enumerate() {
+            assert_eq!(list.get(index).map(PanicOnDrop::id), Some(*id));
+        }
+
+        list.clear();
+        assert!(list.is_empty());
+    }
+
+    #[test]
+    fn truncate_panicking_drop_keeps_unreached_elements() {
+        let mut list = SkipList::<PanicOnDrop>::new();
+        for bomb in bombs(16, 7) {
+            list.push_back(bomb);
+        }
+
+        let result = catch_unwind(AssertUnwindSafe(|| list.truncate(4)));
+        assert!(result.is_err());
+
+        let ids: Vec<u32> = list.iter().map(PanicOnDrop::id).collect();
+        assert_eq!(ids, [0, 1, 2, 3, 8, 9, 10, 11, 12, 13, 14, 15]);
+        assert_eq!(list.len(), 12);
+        assert_eq!(list.back().map(PanicOnDrop::id), Some(15));
+        for (index, id) in ids.iter().enumerate() {
+            assert_eq!(list.get(index).map(PanicOnDrop::id), Some(*id));
+        }
     }
 }

@@ -536,17 +536,17 @@ impl<K, V, const N: usize, C: Comparator<K>, G: LevelGenerator> SkipMap<K, V, N,
         // SAFETY: All raw pointers come from heap allocations owned by this
         // SkipMap.  We hold &mut self.  The keep closure returns false for every
         // node, so all nodes are dropped via the on_drop closure.
-        let (new_len, new_tail) = unsafe {
+        unsafe {
             Node::filter_rebuild(
                 self.head,
+                &mut self.len,
+                &mut self.tail,
                 |_cur| false,
                 |mut boxed| {
                     drained.push(boxed.take_value().expect("data node has a value"));
                 },
-            )
-        };
-        self.tail = new_tail;
-        self.len = new_len;
+            );
+        }
 
         Drain {
             iter: drained.into_iter(),
@@ -1655,10 +1655,15 @@ where
         //
         // SAFETY: &'a mut SkipMap is held exclusively.  All raw pointers
         // originate from its heap allocations.
-        let (_, new_tail) = unsafe { Node::filter_rebuild(self.list.head, |_| true, |_| {}) };
-        self.list.tail = new_tail;
-        // self.list.len is already correct: decremented in Iterator::next
-        // once per removed entry.
+        unsafe {
+            Node::filter_rebuild(
+                self.list.head,
+                &mut self.list.len,
+                &mut self.list.tail,
+                |_| true,
+                |_| {},
+            );
+        }
     }
 }
 
@@ -1667,11 +1672,15 @@ where
 #[cfg(test)]
 mod tests {
     use core::ops::Bound;
+    use std::panic::{AssertUnwindSafe, catch_unwind};
 
     use pretty_assertions::assert_eq;
 
     use super::super::SkipMap;
-    use crate::comparator::FnComparator;
+    use crate::{
+        comparator::FnComparator,
+        test_util::{PanicOnDrop, bombs},
+    };
 
     fn map_from<const N: usize>(pairs: [(&'static str, i32); N]) -> SkipMap<&'static str, i32> {
         let mut m = SkipMap::new();
@@ -2224,5 +2233,62 @@ mod tests {
         assert_eq!(extracted, [(3, 30), (1, 10)]);
         let remaining: Vec<_> = map.iter().map(|(&k, &v)| (k, v)).collect();
         assert_eq!(remaining, [(2, 20)]);
+    }
+
+    // MARK: extract_if panic safety
+
+    /// Keys 0..=6 are extracted and dropped before the predicate unwinds on
+    /// 7, whose entry is never removed.
+    #[test]
+    fn extract_if_panicking_predicate_keeps_map_consistent() {
+        let mut map = SkipMap::<u32, PanicOnDrop>::new();
+        for bomb in bombs(16, 16) {
+            map.insert(bomb.id(), bomb);
+        }
+
+        let result = catch_unwind(AssertUnwindSafe(|| {
+            for extracted in map.extract_if(|key, _value| {
+                assert!(*key != 7, "predicate panic");
+                true
+            }) {
+                drop(extracted);
+            }
+        }));
+        assert!(result.is_err());
+
+        let keys: Vec<u32> = map.iter().map(|(&key, _)| key).collect();
+        assert_eq!(keys, [7, 8, 9, 10, 11, 12, 13, 14, 15]);
+        assert_eq!(map.len(), 9);
+        assert_eq!(map.first_key_value().map(|(&key, _)| key), Some(7));
+        assert_eq!(map.last_key_value().map(|(&key, _)| key), Some(15));
+        for key in &keys {
+            assert_eq!(map.get(key).map(PanicOnDrop::id), Some(*key));
+        }
+    }
+
+    /// Key 7's value leaves the map, then unwinds as the loop body drops
+    /// it.  The `ExtractIf` guard still republishes the length and tail.
+    #[test]
+    fn extract_if_panicking_drop_keeps_map_consistent() {
+        let mut map = SkipMap::<u32, PanicOnDrop>::new();
+        for bomb in bombs(16, 7) {
+            map.insert(bomb.id(), bomb);
+        }
+
+        let result = catch_unwind(AssertUnwindSafe(|| {
+            for extracted in map.extract_if(|_, _| true) {
+                drop(extracted);
+            }
+        }));
+        assert!(result.is_err());
+
+        let keys: Vec<u32> = map.iter().map(|(&key, _)| key).collect();
+        assert_eq!(keys, [8, 9, 10, 11, 12, 13, 14, 15]);
+        assert_eq!(map.len(), 8);
+        assert_eq!(map.first_key_value().map(|(&key, _)| key), Some(8));
+        assert_eq!(map.last_key_value().map(|(&key, _)| key), Some(15));
+        for key in &keys {
+            assert_eq!(map.get(key).map(PanicOnDrop::id), Some(*key));
+        }
     }
 }
