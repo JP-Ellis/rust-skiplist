@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 <!-- markdownlint-disable -->
 
+## [1.1.1](https://github.com/JP-Ellis/rust-skiplist/compare/v1.1.0...v1.1.1) - _2026-09-03_
+
+### 🐛 Bug Fixes
+
+-   Preserve container invariants when user code unwinds
+
+### 🚜 Refactor
+
+-   Satisfy new clippy restriction lints
+
+### 🎨 Styling
+
+-   Apply rumdl formatting
+
+-   Tombi format
+
+### ⚙️ Miscellaneous Tasks
+
+-   Run all gates through mise tasks
+
+-   Tune clippy lints and pin toml version
+
+-   Add biome config using editorconfig
+
+-   Migrate markdown lint config to rumdl
+
+-   Adopt mise for toolchain and tooling
+
+-   _(ci)_ Update step name in docs test
+
+
 ## [1.1.0](https://github.com/JP-Ellis/rust-skiplist/compare/v1.0.0...v1.1.0) - _2026-03-14_
 
 ### 🚀 Features
