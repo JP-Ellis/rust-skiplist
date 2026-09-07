@@ -45,6 +45,9 @@
 //!
 //! **Structural:** [`len`], [`is_empty`], [`clear`], [`split_off`], [`append`].
 //!
+//! **Cursors:** [`lower_bound`], [`upper_bound`], [`lower_bound_mut`],
+//!   [`upper_bound_mut`].
+//!
 //! **Iteration:** [`iter`], [`into_iter`].
 //!
 //! # Examples
@@ -116,6 +119,10 @@ use crate::{
 };
 
 mod access;
+#[cfg(feature = "cursor")]
+pub mod cursor;
+#[cfg(feature = "cursor")]
+pub use cursor::{Cursor, CursorMut, UnorderedValueError};
 mod filter;
 mod insert_remove;
 mod iter;
