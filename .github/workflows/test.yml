@@ -82,7 +82,7 @@ jobs:
         timeout-minutes: 10
 
       - name: Install Rust
-        uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659  # v1.17.0
+        uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f  # v2.0.0
 
       - name: Restore prek cache
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
@@ -106,7 +106,7 @@ jobs:
         timeout-minutes: 10
 
       - name: Install Rust
-        uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659  # v1.17.0
+        uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f  # v2.0.0
 
       - name: Run clippy
         run: mise run lint
@@ -124,7 +124,7 @@ jobs:
         timeout-minutes: 10
 
       - name: Install Rust
-        uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659  # v1.17.0
+        uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f  # v2.0.0
 
       - name: Install nightly rustfmt
         run: rustup toolchain install nightly --component rustfmt --no-self-update
@@ -162,7 +162,7 @@ jobs:
         timeout-minutes: 10
 
       - name: Install Rust
-        uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659  # v1.17.0
+        uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f  # v2.0.0
         with:
           cache-key: ${{ matrix.toolchain }}
 
@@ -190,7 +190,7 @@ jobs:
         timeout-minutes: 10
 
       - name: Install Rust
-        uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659  # v1.17.0
+        uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f  # v2.0.0
 
       - name: Test benchmarks
         run: mise run test:benches
@@ -208,7 +208,7 @@ jobs:
         timeout-minutes: 10
 
       - name: Install Rust
-        uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659  # v1.17.0
+        uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f  # v2.0.0
 
       - name: Test documentation examples
         run: mise run test:docs
@@ -226,7 +226,7 @@ jobs:
         timeout-minutes: 10
 
       - name: Install Rust
-        uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659  # v1.17.0
+        uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f  # v2.0.0
 
       - name: Run examples
         run: mise run examples
@@ -246,7 +246,7 @@ jobs:
         timeout-minutes: 10
 
       - name: Install Rust
-        uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659  # v1.17.0
+        uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f  # v2.0.0
 
       - name: Install nightly miri
         run: rustup toolchain install nightly --component miri --no-self-update
@@ -267,7 +267,7 @@ jobs:
         timeout-minutes: 10
 
       - name: Install Rust
-        uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659  # v1.17.0
+        uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f  # v2.0.0
 
       - name: Install MSRV toolchain
         run: rustup toolchain install 1.89 --profile minimal --no-self-update
@@ -288,7 +288,7 @@ jobs:
         timeout-minutes: 10
 
       - name: Install Rust
-        uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659  # v1.17.0
+        uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f  # v2.0.0
 
       - name: Generate coverage
         run: mise run coverage
