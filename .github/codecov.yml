@@ -1,0 +1,27 @@
+---
+codecov:
+  require_ci_to_pass: true
+
+coverage:
+  precision: 2
+  round: down
+  range: 70..100
+
+  status:
+    project:
+      default:
+        target: auto
+        threshold: 1%
+        removed_code_behavior: adjust_base
+      floor:
+        target: 70%
+        threshold: 0%
+    patch:
+      default:
+        target: 70%
+        threshold: 0%
+
+comment:
+  layout: condensed_header, diff, flags, components, condensed_files
+  require_changes: true
+  behavior: default
