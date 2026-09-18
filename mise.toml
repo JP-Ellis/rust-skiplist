@@ -24,7 +24,7 @@ CARGO_BUILD_WARNINGS = "deny"
 "cargo:cargo-llvm-cov" = "0.8"
 "cargo:cargo-nextest" = "0.9"
 "cargo:prek" = "0.4"
-rumdl = "v0.2.73"
+rumdl = "v0.2.74"
 
 [tasks]
   [tasks.lint]
