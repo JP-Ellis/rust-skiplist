@@ -8,6 +8,23 @@ use crate::{
 };
 
 impl<K, V, const N: usize, C: Comparator<K>, G: LevelGenerator> SkipMap<K, V, N, C, G> {
+    /// Returns a shared reference to the comparator used by this map.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use skiplist::skip_map::SkipMap;
+    /// use skiplist::comparator::OrdComparator;
+    ///
+    /// let map = SkipMap::<i32, &str>::new();
+    /// let _cmp: &OrdComparator = map.comparator();
+    /// ```
+    #[inline]
+    #[must_use]
+    pub fn comparator(&self) -> &C {
+        &self.comparator
+    }
+
     /// Returns references to the first (smallest-key) key-value pair, or
     /// `None` if the map is empty.
     ///
@@ -275,7 +292,22 @@ mod tests {
     use pretty_assertions::assert_eq;
 
     use super::super::SkipMap;
-    use crate::comparator::FnComparator;
+    use crate::comparator::{FnComparator, OrdComparator};
+
+    // MARK: comparator
+
+    #[test]
+    fn comparator_default() {
+        let map = SkipMap::<i32, &str>::new();
+        let _cmp: &OrdComparator = map.comparator();
+    }
+
+    #[test]
+    fn comparator_custom() {
+        let map: SkipMap<i32, &str, 16, _> =
+            SkipMap::with_comparator(FnComparator(|a: &i32, b: &i32| b.cmp(a)));
+        assert_eq!(map.comparator().0(&1, &2), core::cmp::Ordering::Greater);
+    }
 
     // MARK: first_key_value
 
