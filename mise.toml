@@ -77,7 +77,7 @@ rumdl = "v0.2.73"
 
   [tasks.msrv]
   description = "Verify the declared MSRV compiles the library"
-  run = "cargo +1.89 hack --feature-powerset check"
+  run = "cargo +1.95 hack --feature-powerset check"
 
   [tasks.prek]
   description = "Run prek hooks (Rust hooks skipped; they have dedicated jobs)"
