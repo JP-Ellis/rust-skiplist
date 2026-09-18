@@ -139,6 +139,7 @@ use arrayvec::ArrayVec;
 use crate::node::link::Link;
 
 pub(crate) mod cursor_raw;
+pub(crate) mod level_array;
 pub(crate) mod link;
 pub(crate) mod visitor;
 
