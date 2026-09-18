@@ -313,7 +313,7 @@ jobs:
           cache-save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install MSRV toolchain
-        run: rustup toolchain install 1.95 --profile minimal --no-self-update
+        run: rustup toolchain install 1.96 --profile minimal --no-self-update
 
       - name: Verify MSRV
         run: mise run msrv
