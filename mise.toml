@@ -13,6 +13,10 @@ RUSTDOCFLAGS = "--html-in-header {{config_root}}/.cargo/katex.header.html --html
 # dependencies. See rust-lang/rust-analyzer#17149.
 RUSTC_BOOTSTRAP = "1"
 
+# Fail every cargo invocation on warnings (rustc lints and cargo manifest
+# lints). Applies to all tasks, so `mise run ci` matches CI.
+CARGO_BUILD_WARNINGS = "deny"
+
 [tools]
 "core:rust" = { version = "1.97", components = "clippy,llvm-tools" }
 "aqua:cargo-bins/cargo-binstall" = "1.23.0"
@@ -25,7 +29,7 @@ rumdl = "v0.2.73"
 [tasks]
   [tasks.lint]
   description = "Lint with Clippy across all feature combinations"
-  run = "cargo hack --feature-powerset clippy --all-targets -- -D warnings"
+  run = "cargo hack --feature-powerset clippy --all-targets"
 
   [tasks.format]
   description = "Check or apply formatting (nightly rustfmt + rumdl)"
@@ -58,7 +62,14 @@ rumdl = "v0.2.73"
 
   [tasks.miri]
   description = "Run Miri under Tree Borrows"
-  run = "cargo +nightly miri test --all-features"
+  # Miri's generated sysroot crate carries an unused `sysroot` dependency, so
+  # cargo's `unused_dependencies` manifest lint fails the build under
+  # `build.warnings = "deny"`. Build the sysroot with warnings allowed; the
+  # test run that follows still denies warnings for this crate.
+  run = [
+    "CARGO_BUILD_WARNINGS=allow cargo +nightly miri setup",
+    "cargo +nightly miri test --all-features",
+  ]
 
   [tasks.coverage]
   description = "Generate LCOV coverage report"
