@@ -1,5 +1,5 @@
 //! Positional write methods for [`SkipList`](super::SkipList):
-//! `insert`, `remove`, and `swap`.
+//! `insert`, `insert_mut`, `remove`, and `swap`.
 
 use core::ptr::NonNull;
 
@@ -17,7 +17,8 @@ impl<T, G: LevelGenerator, const N: usize> SkipList<T, N, G> {
     /// Inserts `value` at position `index`, shifting all elements at `index..`
     /// one position to the right.
     ///
-    /// This operation is `$O(\log n)$` expected.
+    /// This operation is `$O(\log n)$` expected.  To obtain a reference to the
+    /// inserted element, use [`insert_mut`](SkipList::insert_mut).
     ///
     /// # Panics
     ///
@@ -35,10 +36,37 @@ impl<T, G: LevelGenerator, const N: usize> SkipList<T, N, G> {
     /// assert_eq!(list.len(), 3);
     /// // list is now [1, 2, 3]
     /// ```
+    #[inline]
+    pub fn insert(&mut self, index: usize, value: T) {
+        _ = self.insert_mut(index, value);
+    }
+
+    /// Inserts `value` at position `index`, shifting all elements at `index..`
+    /// one position to the right, and returns a mutable reference to it.
+    ///
+    /// This operation is `$O(\log n)$` expected.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `index > self.len()`.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use skiplist::skip_list::SkipList;
+    ///
+    /// let mut list = SkipList::<i32>::new();
+    /// list.push_back(1);
+    /// list.push_back(3);
+    /// let r = list.insert_mut(1, 0);
+    /// *r = 2;
+    /// assert_eq!(list.iter().copied().collect::<Vec<_>>(), [1, 2, 3]);
+    /// ```
     #[expect(
         clippy::expect_used,
         reason = "Link::new distances are computed to be ≥ 1; \
                   increment_distance overflow requires > usize::MAX nodes; \
+                  the inserted node always carries a value; \
                   all expects fire only on internal invariant violations, not user input"
     )]
     #[expect(
@@ -53,7 +81,8 @@ impl<T, G: LevelGenerator, const N: usize> SkipList<T, N, G> {
                   splitting across blocks would require unsafe-crossing raw-pointer variables"
     )]
     #[inline]
-    pub fn insert(&mut self, index: usize, value: T) {
+    #[must_use = "if you don't need a reference to the value, use `SkipList::insert` instead"]
+    pub fn insert_mut(&mut self, index: usize, value: T) -> &mut T {
         assert!(
             index <= self.len,
             "insertion index (is {index}) should be <= len (is {})",
@@ -146,6 +175,11 @@ impl<T, G: LevelGenerator, const N: usize> SkipList<T, N, G> {
             self.tail = Some(new_node_nonnull);
         }
         self.len = self.len.saturating_add(1);
+
+        // SAFETY: new_node_nonnull is the node just inserted; it is live and
+        // exclusively owned by this list.  The returned &mut T is bounded by
+        // &mut self.
+        unsafe { (*new_node_nonnull.as_ptr()).value_mut() }.expect("inserted node has a value")
     }
 
     /// Removes and returns the element at position `index`.
@@ -726,5 +760,39 @@ mod tests {
             assert_eq!(list.get(i), Some(&(n - 1 - i)));
         }
         assert_eq!(list.len(), n);
+    }
+
+    // MARK: insert_mut
+
+    #[test]
+    fn insert_mut_at_front() {
+        let mut list: SkipList<i32> = [2, 3].into_iter().collect();
+        *list.insert_mut(0, 0) += 1;
+        assert_eq!(list.iter().copied().collect::<Vec<_>>(), [1, 2, 3]);
+    }
+
+    #[test]
+    fn insert_mut_in_middle() {
+        let mut list: SkipList<i32> = [1, 3].into_iter().collect();
+        let r = list.insert_mut(1, 20);
+        assert_eq!(*r, 20);
+        *r = 2;
+        assert_eq!(list.iter().copied().collect::<Vec<_>>(), [1, 2, 3]);
+        assert_eq!(list.get(1), Some(&2));
+    }
+
+    #[test]
+    fn insert_mut_at_end() {
+        let mut list: SkipList<i32> = [1, 2].into_iter().collect();
+        *list.insert_mut(2, 2) += 1;
+        assert_eq!(list.back(), Some(&3));
+        assert_eq!(list.len(), 3);
+    }
+
+    #[test]
+    #[should_panic(expected = "insertion index")]
+    fn insert_mut_out_of_bounds_panics() {
+        let mut list = SkipList::<i32>::new();
+        _ = list.insert_mut(1, 0);
     }
 }
