@@ -270,7 +270,7 @@ jobs:
         uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f  # v2.0.0
 
       - name: Install MSRV toolchain
-        run: rustup toolchain install 1.97 --profile minimal --no-self-update
+        run: rustup toolchain install 1.98 --profile minimal --no-self-update
 
       - name: Verify MSRV
         run: mise run msrv
