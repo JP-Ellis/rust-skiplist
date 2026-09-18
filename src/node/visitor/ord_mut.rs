@@ -1,11 +1,10 @@
 //! Mutable ordered visitor.
 
-use core::{cmp::Ordering, iter, marker::PhantomData, ptr::NonNull};
-
-use arrayvec::ArrayVec;
+use core::{cmp::Ordering, marker::PhantomData, ptr::NonNull};
 
 use crate::node::{
     Node,
+    level_array::LevelArray,
     visitor::{Step, Visitor, VisitorMut},
 };
 
@@ -56,7 +55,7 @@ pub(crate) struct OrdMutVisitor<'a, T, Q: ?Sized, F: Fn(&T, &Q) -> Ordering, con
     /// level `l` points to `>= target` (or has no link at that level).
     /// Pre-filled with `head` so that every level has a valid precursor even
     /// when the target is before the first real node.
-    precursors: ArrayVec<NonNull<Node<T, N>>, N>,
+    precursors: LevelArray<NonNull<Node<T, N>>, N>,
     /// Suppresses `Send`/`Sync` auto-impls and marks variance as invariant in
     /// `T` (the visitor holds raw mutable pointers into the list).
     _marker: PhantomData<*mut Node<T, N>>,
@@ -90,7 +89,7 @@ impl<'a, T, Q: ?Sized, F: Fn(&T, &Q) -> Ordering, const N: usize> OrdMutVisitor<
             // Every level starts with `head` as its precursor: the head is
             // always before every real node, so it is a valid precursor for
             // any target value.
-            precursors: iter::repeat_n(current, max_levels).collect(),
+            precursors: LevelArray::from_fn(max_levels, |_| current),
             _marker: PhantomData,
         }
     }
@@ -106,7 +105,11 @@ impl<'a, T, Q: ?Sized, F: Fn(&T, &Q) -> Ordering, const N: usize> OrdMutVisitor<
     #[expect(clippy::type_complexity, reason = "internal code")]
     pub(crate) fn into_parts(
         self,
-    ) -> (NonNull<Node<T, N>>, bool, ArrayVec<NonNull<Node<T, N>>, N>) {
+    ) -> (
+        NonNull<Node<T, N>>,
+        bool,
+        LevelArray<NonNull<Node<T, N>>, N>,
+    ) {
         (self.current, self.found, self.precursors)
     }
 }
@@ -256,7 +259,6 @@ mod tests {
         // SAFETY: pointer is valid for the duration of `head`'s lifetime.
         let value = found.map(|ptr| unsafe { ptr.as_ref() }.value().copied());
         assert_eq!(value, Some(Some(30)));
-        drop(visitor);
         unsafe { drop(Box::from_raw(head.as_ptr())) };
         Ok(())
     }
@@ -271,7 +273,6 @@ mod tests {
         assert!(visitor.found());
         let value = found.map(|ptr| unsafe { ptr.as_ref() }.value().copied());
         assert_eq!(value, Some(Some(10)));
-        drop(visitor);
         unsafe { drop(Box::from_raw(head.as_ptr())) };
         Ok(())
     }
@@ -286,7 +287,6 @@ mod tests {
         assert!(visitor.found());
         let value = found.map(|ptr| unsafe { ptr.as_ref() }.value().copied());
         assert_eq!(value, Some(Some(40)));
-        drop(visitor);
         unsafe { drop(Box::from_raw(head.as_ptr())) };
         Ok(())
     }
@@ -300,7 +300,6 @@ mod tests {
 
         assert!(!visitor.found());
         assert!(found.is_none());
-        drop(visitor);
         unsafe { drop(Box::from_raw(head.as_ptr())) };
         Ok(())
     }
@@ -314,7 +313,6 @@ mod tests {
 
         assert!(!visitor.found());
         assert!(found.is_none());
-        drop(visitor);
         unsafe { drop(Box::from_raw(head.as_ptr())) };
         Ok(())
     }
@@ -335,7 +333,6 @@ mod tests {
                 "precursor value {value:?} should be < 30"
             );
         }
-        drop(visitor);
         unsafe { drop(Box::from_raw(head.as_ptr())) };
         Ok(())
     }
@@ -359,7 +356,6 @@ mod tests {
                 Step::FoundTarget => panic!("should not find target 99"),
             }
         }
-        drop(visitor);
         unsafe { drop(Box::from_raw(head.as_ptr())) };
         Ok(())
     }
@@ -372,7 +368,6 @@ mod tests {
         visitor.traverse();
 
         assert_eq!(visitor.current(), visitor.current_mut());
-        drop(visitor);
         unsafe { drop(Box::from_raw(head.as_ptr())) };
         Ok(())
     }
@@ -387,7 +382,6 @@ mod tests {
         visitor.traverse();
 
         assert_eq!(visitor.precursors().len(), max_levels);
-        drop(visitor);
         unsafe { drop(Box::from_raw(head.as_ptr())) };
         Ok(())
     }
