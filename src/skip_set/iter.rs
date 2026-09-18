@@ -402,6 +402,17 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> SkipSet<T, N, C, G>
     /// let slice: Vec<i32> = set.range(2..=4).copied().collect();
     /// assert_eq!(slice, [2, 3, 4]);
     /// ```
+    ///
+    /// `core::range` types work anywhere a [`RangeBounds`] is accepted:
+    ///
+    /// ```rust
+    /// use core::range::RangeToInclusive;
+    /// use skiplist::skip_set::SkipSet;
+    ///
+    /// let set: SkipSet<i32> = [1, 3, 5, 7].into_iter().collect();
+    /// let low: Vec<i32> = set.range(RangeToInclusive { last: 3 }).copied().collect();
+    /// assert_eq!(low, [1, 3]);
+    /// ```
     #[inline]
     pub fn range<R>(&self, range: R) -> Iter<'_, T, N>
     where
@@ -454,6 +465,21 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> SkipSet<T, N, C, G>
     /// assert_eq!(removed, [2, 4]);
     /// let remaining: Vec<i32> = set.iter().copied().collect();
     /// assert_eq!(remaining, [1, 3, 5, 6]);
+    /// ```
+    ///
+    /// `core::range` types work anywhere a [`RangeBounds`] is accepted:
+    ///
+    /// ```rust
+    /// use core::range::RangeInclusive;
+    /// use skiplist::skip_set::SkipSet;
+    ///
+    /// let mut set: SkipSet<i32> = (1..=5).collect();
+    /// let removed: Vec<i32> = set
+    ///     .extract_if(RangeInclusive { start: 2, last: 4 }, |_| true)
+    ///     .collect();
+    /// assert_eq!(removed, [2, 3, 4]);
+    /// let remaining: Vec<i32> = set.iter().copied().collect();
+    /// assert_eq!(remaining, [1, 5]);
     /// ```
     #[inline]
     pub fn extract_if<R, F>(&mut self, range: R, pred: F) -> ExtractIf<'_, T, C, G, R, F, N>
