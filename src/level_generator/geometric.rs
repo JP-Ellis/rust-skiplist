@@ -126,15 +126,11 @@ impl Geometric {
     /// ```
     #[inline]
     pub fn new(total: usize, q: f64) -> Result<Self, GeometricError> {
-        if total == 0 {
-            return Err(GeometricError::ZeroMax);
-        }
+        (total != 0).ok_or(GeometricError::ZeroMax)?;
         let Some(total_inclusive) = i32::try_from(total).ok().and_then(|i| i.checked_add(1)) else {
             return Err(GeometricError::MaxTooLarge);
         };
-        if !(0.0 < q && q < 1.0) {
-            return Err(GeometricError::InvalidProbability);
-        }
+        (0.0 < q && q < 1.0).ok_or(GeometricError::InvalidProbability)?;
         #[expect(
             clippy::float_cmp,
             reason = "exact match on the literal 0.5 selects the bit sampler"
@@ -173,15 +169,11 @@ impl Geometric {
     /// ```
     #[inline]
     pub fn new_with_seed(total: usize, q: f64, seed: u64) -> Result<Self, GeometricError> {
-        if total == 0 {
-            return Err(GeometricError::ZeroMax);
-        }
+        (total != 0).ok_or(GeometricError::ZeroMax)?;
         let Some(total_inclusive) = i32::try_from(total).ok().and_then(|i| i.checked_add(1)) else {
             return Err(GeometricError::MaxTooLarge);
         };
-        if !(0.0 < q && q < 1.0) {
-            return Err(GeometricError::InvalidProbability);
-        }
+        (0.0 < q && q < 1.0).ok_or(GeometricError::InvalidProbability)?;
         #[expect(
             clippy::float_cmp,
             reason = "exact match on the literal 0.5 selects the bit sampler"
