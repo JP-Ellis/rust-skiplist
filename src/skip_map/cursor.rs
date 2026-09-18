@@ -554,6 +554,78 @@ impl<K, V, const N: usize, C: Comparator<K>, G: LevelGenerator> CursorMut<'_, K,
         self.insert_impl(key, value, true)
     }
 
+    /// Inserts an entry into the current gap without checking `key` against
+    /// the neighbouring keys.  The cursor is unchanged, so the new entry
+    /// becomes the right neighbour (`peek_next`).
+    ///
+    /// This skips the two comparisons performed by [`insert_after`], which
+    /// matters when inserting a run of entries already known to be sorted.
+    ///
+    /// # Safety
+    ///
+    /// `key` must compare strictly greater than the left neighbour's key and
+    /// strictly less than the right neighbour's key under the map's
+    /// comparator.  Violating this leaves the map unsorted or with duplicate
+    /// keys, after which lookup, insert, and remove return wrong results.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use skiplist::skip_map::SkipMap;
+    /// use core::ops::Bound;
+    ///
+    /// let mut map: SkipMap<i32, &str> = [(1, "a"), (10, "j")].into_iter().collect();
+    /// let sorted = [(2, "b"), (3, "c"), (4, "d")];
+    ///
+    /// let mut cur = map.lower_bound_mut(Bound::Included(&2));
+    /// for (k, v) in sorted {
+    ///     // SAFETY: `sorted` keys are ascending and lie strictly between 1 and 10.
+    ///     unsafe { cur.insert_after_unchecked(k, v) };
+    ///     cur.next();
+    /// }
+    ///
+    /// let keys: Vec<_> = map.keys().copied().collect();
+    /// assert_eq!(keys, [1, 2, 3, 4, 10]);
+    /// ```
+    ///
+    /// [`insert_after`]: CursorMut::insert_after
+    #[inline]
+    pub unsafe fn insert_after_unchecked(&mut self, key: K, value: V) {
+        self.insert_unchecked_impl(key, value, false);
+    }
+
+    /// Inserts an entry into the current gap without checking `key` against
+    /// the neighbouring keys, then advances the cursor so the new entry
+    /// becomes the left neighbour (`peek_prev`).
+    ///
+    /// # Safety
+    ///
+    /// `key` must compare strictly greater than the left neighbour's key and
+    /// strictly less than the right neighbour's key under the map's
+    /// comparator.  Violating this leaves the map unsorted or with duplicate
+    /// keys, after which lookup, insert, and remove return wrong results.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use skiplist::skip_map::SkipMap;
+    /// use core::ops::Bound;
+    ///
+    /// let mut map: SkipMap<i32, &str> = [(1, "a"), (10, "j")].into_iter().collect();
+    ///
+    /// let mut cur = map.lower_bound_mut(Bound::Included(&2));
+    /// for (k, v) in [(2, "b"), (3, "c"), (4, "d")] {
+    ///     // SAFETY: keys are ascending and lie strictly between 1 and 10.
+    ///     unsafe { cur.insert_before_unchecked(k, v) };
+    /// }
+    /// assert_eq!(cur.peek_prev().map(|(k, _)| *k), Some(4));
+    /// assert_eq!(cur.peek_next().map(|(k, _)| *k), Some(10));
+    /// ```
+    #[inline]
+    pub unsafe fn insert_before_unchecked(&mut self, key: K, value: V) {
+        self.insert_unchecked_impl(key, value, true);
+    }
+
     /// Removes the entry immediately to the **right** of the cursor and
     /// returns it.
     ///
@@ -688,7 +760,17 @@ impl<K, V, const N: usize, C: Comparator<K>, G: LevelGenerator> CursorMut<'_, K,
             }
         }
 
-        // --- Structural insert via cached precursors (rank-based) ---
+        self.insert_unchecked_impl(key, value, move_cursor);
+        Ok(())
+    }
+
+    /// Insert an entry at the current gap without comparing its key to either
+    /// neighbour.
+    ///
+    /// The caller is responsible for `key` being strictly ordered between the
+    /// neighbouring keys.  Using the cursor's rank guarantees the insert lands
+    /// at exactly this gap.
+    fn insert_unchecked_impl(&mut self, key: K, value: V, move_cursor: bool) {
         // SAFETY: list is exclusively borrowed for 'a.
         let list_mut = unsafe { &mut *self.list };
         self.raw.ensure_precursors(list_mut.head);
@@ -709,8 +791,6 @@ impl<K, V, const N: usize, C: Comparator<K>, G: LevelGenerator> CursorMut<'_, K,
             list_mut.tail = Some(new_node_nonnull);
         }
         list_mut.len = list_mut.len.saturating_add(1);
-
-        Ok(())
     }
 }
 
@@ -1098,6 +1178,40 @@ mod tests {
             assert_eq!(cur.peek_prev().map(|(k, _)| *k), Some(2));
         }
         assert_eq!(m.get(&2), Some(&"b"));
+    }
+
+    // --- CursorMut insert_after_unchecked / insert_before_unchecked ---
+
+    #[test]
+    fn insert_after_unchecked_keeps_cursor() {
+        let mut m = SkipMap::<i32, &str>::new();
+        m.insert(1, "a");
+        m.insert(3, "c");
+        {
+            let mut cur = m.lower_bound_mut(Bound::Included(&2));
+            // SAFETY: gap is between keys 1 and 3; 1 < 2 < 3.
+            unsafe { cur.insert_after_unchecked(2, "b") };
+            assert_eq!(cur.peek_prev().map(|(k, _)| *k), Some(1));
+            assert_eq!(cur.peek_next().map(|(k, _)| *k), Some(2));
+        }
+        assert_eq!(m.len(), 3);
+        assert_eq!(m.get(&2), Some(&"b"));
+        let keys: Vec<_> = m.keys().copied().collect();
+        assert_eq!(keys, [1, 2, 3]);
+    }
+
+    #[test]
+    fn insert_before_unchecked_advances_cursor_and_updates_tail() {
+        let mut m = map_1a_2b_3c();
+        {
+            let mut cur = m.upper_bound_mut(Bound::Unbounded);
+            // SAFETY: rightmost gap; 3 < 4 and there is no right neighbour.
+            unsafe { cur.insert_before_unchecked(4, "d") };
+            assert_eq!(cur.peek_prev().map(|(k, _)| *k), Some(4));
+            assert!(cur.peek_next().is_none());
+        }
+        assert_eq!(m.last_key_value(), Some((&4, &"d")));
+        assert_eq!(m.len(), 4);
     }
 
     // --- CursorMut remove_next / remove_prev ---

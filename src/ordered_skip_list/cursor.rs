@@ -599,6 +599,78 @@ impl<T, const N: usize, C: Comparator<T>, G: LevelGenerator> CursorMut<'_, T, N,
         self.insert_impl(value, true, false)
     }
 
+    /// Inserts `value` into the current gap without checking it against the
+    /// neighbouring elements.  The cursor is unchanged, so the new element
+    /// becomes the right neighbour (`peek_next`).
+    ///
+    /// This skips the two comparisons performed by [`insert_after`], which
+    /// matters when inserting a run of values already known to be sorted.
+    ///
+    /// # Safety
+    ///
+    /// `value` must compare less than or equal to the right neighbour and
+    /// greater than or equal to the left neighbour under the list's
+    /// comparator.  Violating this leaves the list unsorted, after which
+    /// search, insert, and remove return wrong results.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use skiplist::ordered_skip_list::OrderedSkipList;
+    /// use core::ops::Bound;
+    ///
+    /// let mut list: OrderedSkipList<i32> = [1, 10].into_iter().collect();
+    /// let sorted = [2, 3, 4];
+    ///
+    /// let mut cur = list.lower_bound_mut(Bound::Included(&2));
+    /// for v in sorted {
+    ///     // SAFETY: `sorted` is ascending and lies strictly between 1 and 10.
+    ///     unsafe { cur.insert_after_unchecked(v) };
+    ///     cur.next();
+    /// }
+    ///
+    /// let vals: Vec<_> = list.iter().copied().collect();
+    /// assert_eq!(vals, [1, 2, 3, 4, 10]);
+    /// ```
+    ///
+    /// [`insert_after`]: CursorMut::insert_after
+    #[inline]
+    pub unsafe fn insert_after_unchecked(&mut self, value: T) {
+        self.insert_unchecked_impl(value, false);
+    }
+
+    /// Inserts `value` into the current gap without checking it against the
+    /// neighbouring elements, then advances the cursor so the new element
+    /// becomes the left neighbour (`peek_prev`).
+    ///
+    /// # Safety
+    ///
+    /// `value` must compare less than or equal to the right neighbour and
+    /// greater than or equal to the left neighbour under the list's
+    /// comparator.  Violating this leaves the list unsorted, after which
+    /// search, insert, and remove return wrong results.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use skiplist::ordered_skip_list::OrderedSkipList;
+    /// use core::ops::Bound;
+    ///
+    /// let mut list: OrderedSkipList<i32> = [1, 10].into_iter().collect();
+    ///
+    /// let mut cur = list.lower_bound_mut(Bound::Included(&2));
+    /// for v in [2, 3, 4] {
+    ///     // SAFETY: values are ascending and lie strictly between 1 and 10.
+    ///     unsafe { cur.insert_before_unchecked(v) };
+    /// }
+    /// assert_eq!(cur.peek_prev(), Some(&4));
+    /// assert_eq!(cur.peek_next(), Some(&10));
+    /// ```
+    #[inline]
+    pub unsafe fn insert_before_unchecked(&mut self, value: T) {
+        self.insert_unchecked_impl(value, true);
+    }
+
     /// Removes the element immediately to the **right** of the cursor and
     /// returns it.
     ///
@@ -710,7 +782,8 @@ impl<T, const N: usize, C: Comparator<T>, G: LevelGenerator> CursorMut<'_, T, N,
 
     // --- Private helpers ---
 
-    /// Insert `value` at the current gap.
+    /// Insert `value` at the current gap after checking it against both
+    /// neighbours.
     ///
     /// `move_cursor = false` → `insert_after` (cursor stays left of new node).
     /// `move_cursor = true`  → `insert_before` (cursor advances to new node).
@@ -724,7 +797,6 @@ impl<T, const N: usize, C: Comparator<T>, G: LevelGenerator> CursorMut<'_, T, N,
         move_cursor: bool,
         allow_equal: bool,
     ) -> Result<(), UnorderedValueError<T>> {
-        // --- Ordering check ---
         // SAFETY: `list` is exclusively borrowed for `'a`.
         let list_ref = unsafe { &*self.list };
 
@@ -747,10 +819,18 @@ impl<T, const N: usize, C: Comparator<T>, G: LevelGenerator> CursorMut<'_, T, N,
             }
         }
 
-        // --- Structural insert via cached precursors (rank-based) ---
-        // Using the rank guarantees we insert at EXACTLY the cursor's gap,
-        // even when duplicate values are present.
+        self.insert_unchecked_impl(value, move_cursor);
+        Ok(())
+    }
 
+    /// Insert `value` at the current gap without comparing it to either
+    /// neighbour.
+    ///
+    /// The caller is responsible for `value` being correctly ordered with
+    /// respect to both neighbours.  Using the cursor's rank guarantees the
+    /// insert lands at exactly this gap, even when duplicate values are
+    /// present.
+    fn insert_unchecked_impl(&mut self, value: T, move_cursor: bool) {
         // SAFETY: `list` is exclusively borrowed for `'a`.
         let list_mut = unsafe { &mut *self.list };
         self.raw.ensure_precursors(list_mut.head);
@@ -773,8 +853,6 @@ impl<T, const N: usize, C: Comparator<T>, G: LevelGenerator> CursorMut<'_, T, N,
             list_mut.tail = Some(new_node_nonnull);
         }
         list_mut.len = list_mut.len.saturating_add(1);
-
-        Ok(())
     }
 }
 
@@ -805,8 +883,8 @@ impl<T, const N: usize, C: Comparator<T>, G: LevelGenerator> OrderedSkipList<T, 
     /// | Bound                   | Gap position                                   |
     /// |-------------------------|------------------------------------------------|
     /// | `Unbounded`             | Before the first element (leftmost gap)        |
-    /// | `Included(&q)`          | After the last element `< q`                   |
-    /// | `Excluded(&q)`          | After the last element `<= q`                  |
+    /// | `Included(&q)`          | Before the first element `>= q`                |
+    /// | `Excluded(&q)`          | Before the first element `> q`                 |
     ///
     /// This operation is `$O(\log n)$` on average.
     ///
@@ -1281,6 +1359,86 @@ mod tests {
             .expect("inserting 2 in order should succeed"); // cursor advances to new 2
         assert_eq!(cur.peek_prev(), Some(&2));
         assert_eq!(cur.peek_next(), Some(&2));
+    }
+
+    // MARK: CursorMut insert_after_unchecked / insert_before_unchecked
+
+    #[test]
+    fn insert_after_unchecked_keeps_cursor_and_wires_links() {
+        let mut l = list_123();
+        {
+            let mut cur = l.lower_bound_mut(Bound::Included(&2));
+            // SAFETY: gap is between 1 and 2; 1 <= 1 <= 2.
+            unsafe { cur.insert_after_unchecked(1) };
+            assert_eq!(cur.peek_prev(), Some(&1));
+            assert_eq!(cur.peek_next(), Some(&1));
+        }
+        assert_eq!(l.len(), 4);
+        let vals: Vec<_> = l.iter().copied().collect();
+        assert_eq!(vals, [1, 1, 2, 3]);
+        // Rank-based lookup exercises the rewired skip links.
+        assert_eq!(l.get_by_index(2), Some(&2));
+        assert_eq!(l.get_by_index(3), Some(&3));
+    }
+
+    #[test]
+    fn insert_before_unchecked_advances_cursor() {
+        let mut l = list_123();
+        let mut cur = l.lower_bound_mut(Bound::Included(&2));
+        // SAFETY: gap is between 1 and 2; 1 <= 2 <= 2.
+        unsafe { cur.insert_before_unchecked(2) };
+        assert_eq!(cur.peek_prev(), Some(&2));
+        assert_eq!(cur.peek_next(), Some(&2));
+    }
+
+    #[test]
+    fn insert_after_unchecked_at_rightmost_gap_updates_tail() {
+        let mut l = list_123();
+        {
+            let mut cur = l.upper_bound_mut(Bound::Unbounded);
+            // SAFETY: rightmost gap; 3 <= 4 and there is no right neighbour.
+            unsafe { cur.insert_after_unchecked(4) };
+        }
+        assert_eq!(l.last(), Some(&4));
+        assert_eq!(l.len(), 4);
+    }
+
+    #[test]
+    fn insert_before_unchecked_into_empty_list() {
+        let mut l = OrderedSkipList::<i32>::new();
+        {
+            let mut cur = l.lower_bound_mut(Bound::Unbounded);
+            // SAFETY: an empty list has no neighbours to order against.
+            unsafe { cur.insert_before_unchecked(7) };
+            assert_eq!(cur.peek_prev(), Some(&7));
+            assert_eq!(cur.peek_next(), None);
+        }
+        assert_eq!(l.len(), 1);
+        assert_eq!(l.first(), Some(&7));
+        assert_eq!(l.last(), Some(&7));
+    }
+
+    #[test]
+    fn insert_before_unchecked_batch_matches_checked() {
+        let mut checked: OrderedSkipList<i32> = [1, 10].into_iter().collect();
+        let mut unchecked: OrderedSkipList<i32> = [1, 10].into_iter().collect();
+        let run = [2, 3, 3, 4, 5];
+
+        let mut checked_cur = checked.lower_bound_mut(Bound::Included(&2));
+        for v in run {
+            checked_cur.insert_before(v).expect("run is sorted");
+        }
+        let mut unchecked_cur = unchecked.lower_bound_mut(Bound::Included(&2));
+        for v in run {
+            // SAFETY: `run` is ascending and lies within [1, 10].
+            unsafe { unchecked_cur.insert_before_unchecked(v) };
+        }
+
+        let a: Vec<_> = checked.iter().copied().collect();
+        let b: Vec<_> = unchecked.iter().copied().collect();
+        assert_eq!(a, b);
+        assert_eq!(unchecked.len(), 7);
+        assert_eq!(unchecked.get_by_index(4), Some(&4));
     }
 
     // MARK: CursorMut remove_next
