@@ -52,7 +52,7 @@ fn step<T, C, G, const N: usize>(
 {
     let pred = |v: &T| (mask >> (v.raw() % 32)) & 1 == 1;
     match op {
-        0 => list.extract_if(|v| pred(v)).for_each(drop),
+        0 => list.extract_if(.., |v| pred(v)).for_each(drop),
         1 => list.insert(T::mk(k)),
         2 => {
             let _ = list.get_or_insert(T::mk(k));
