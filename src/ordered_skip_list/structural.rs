@@ -77,6 +77,12 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
     /// overlap, each element of `other` is inserted individually in
     /// `$O(m \log(n+m))$` time.
     ///
+    /// The `$O(n+m)$` path compares only the boundary elements and trusts the
+    /// comparator for the rest.  A [`Comparator`] that is not a total order
+    /// can therefore leave the result unordered.
+    ///
+    /// [`Comparator`]: crate::comparator::Comparator
+    ///
     /// # Examples
     ///
     /// ```rust
