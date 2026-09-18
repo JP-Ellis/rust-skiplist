@@ -126,8 +126,10 @@
 
 #![expect(dead_code, reason = "library is still being implemented")]
 
+#[cfg(any(debug_assertions, test))]
+use core::fmt::Write;
 use core::{
-    fmt::{self, Debug, Write},
+    fmt::{self, Debug},
     iter,
     ptr::NonNull,
 };
