@@ -121,6 +121,17 @@ impl<T, G: LevelGenerator, const N: usize> SkipList<T, N, G> {
     /// let reversed: Vec<i32> = list.range(1..4).copied().rev().collect();
     /// assert_eq!(reversed, [4, 3, 2]);
     /// ```
+    ///
+    /// `core::range` types work anywhere a [`RangeBounds`] is accepted:
+    ///
+    /// ```rust
+    /// use core::range::Range;
+    /// use skiplist::skip_list::SkipList;
+    ///
+    /// let list: SkipList<i32> = (10..20).collect();
+    /// let window: Vec<i32> = list.range(Range { start: 2, end: 5 }).copied().collect();
+    /// assert_eq!(window, [12, 13, 14]);
+    /// ```
     #[inline]
     pub fn range<R>(&self, range: R) -> Iter<'_, T, N>
     where
