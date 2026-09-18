@@ -45,6 +45,10 @@ name = "skip_set"
 harness = false
 name = "skip_map"
 
+[[bench]]
+harness = false
+name = "level_generator"
+
 [dependencies]
 arrayvec = { version = "0.7", default-features = false }
 rand = "0.10"
