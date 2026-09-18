@@ -1,5 +1,6 @@
 //! End-of-list write methods for [`SkipList`](super::SkipList):
-//! `push_front`, `push_back`, `pop_front`, and `pop_back`.
+//! `push_front`, `push_back`, `pop_front`, `pop_back`, `pop_front_if`,
+//! and `pop_back_if`.
 
 use core::ptr::NonNull;
 
@@ -356,6 +357,60 @@ impl<T, G: LevelGenerator, const N: usize> SkipList<T, N, G> {
         self.len = self.len.saturating_sub(1);
         value
     }
+
+    /// Removes and returns the first element if `pred` returns `true` for it.
+    ///
+    /// The predicate receives a mutable reference, so it may modify the
+    /// element; a modification made when `pred` returns `false` is kept.
+    /// Returns `None` without calling `pred` when the list is empty.
+    ///
+    /// This operation is `$O(1)$` when the predicate rejects, and
+    /// `$O(\log n)$` expected when it accepts (the cost of [`pop_front`]).
+    ///
+    /// [`pop_front`]: SkipList::pop_front
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use skiplist::skip_list::SkipList;
+    ///
+    /// let mut list: SkipList<i32> = [1, 2, 3].into_iter().collect();
+    /// assert_eq!(list.pop_front_if(|x| *x == 1), Some(1));
+    /// assert_eq!(list.pop_front_if(|x| *x == 1), None);
+    /// assert_eq!(list.front(), Some(&2));
+    /// ```
+    #[inline]
+    pub fn pop_front_if(&mut self, pred: impl FnOnce(&mut T) -> bool) -> Option<T> {
+        let front = self.front_mut()?;
+        if pred(front) { self.pop_front() } else { None }
+    }
+
+    /// Removes and returns the last element if `pred` returns `true` for it.
+    ///
+    /// The predicate receives a mutable reference, so it may modify the
+    /// element; a modification made when `pred` returns `false` is kept.
+    /// Returns `None` without calling `pred` when the list is empty.
+    ///
+    /// This operation is `$O(1)$` when the predicate rejects, and
+    /// `$O(\log n)$` expected when it accepts (the cost of [`pop_back`]).
+    ///
+    /// [`pop_back`]: SkipList::pop_back
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use skiplist::skip_list::SkipList;
+    ///
+    /// let mut list: SkipList<i32> = [1, 2, 3].into_iter().collect();
+    /// assert_eq!(list.pop_back_if(|x| *x == 3), Some(3));
+    /// assert_eq!(list.pop_back_if(|x| *x == 3), None);
+    /// assert_eq!(list.back(), Some(&2));
+    /// ```
+    #[inline]
+    pub fn pop_back_if(&mut self, pred: impl FnOnce(&mut T) -> bool) -> Option<T> {
+        let back = self.back_mut()?;
+        if pred(back) { self.pop_back() } else { None }
+    }
 }
 
 #[cfg(test)]
@@ -610,5 +665,95 @@ mod tests {
         assert_eq!(list.pop_back(), None);
         assert_eq!(list.pop_front(), None);
         assert_eq!(list.len(), 0);
+    }
+
+    // MARK: pop_front_if
+
+    #[test]
+    fn pop_front_if_empty_does_not_call_pred() {
+        let mut list = SkipList::<i32>::new();
+        let mut called = false;
+        assert_eq!(
+            list.pop_front_if(|_| {
+                called = true;
+                true
+            }),
+            None
+        );
+        assert!(!called);
+    }
+
+    #[test]
+    fn pop_front_if_true_pops() {
+        let mut list: SkipList<i32> = [1, 2, 3].into_iter().collect();
+        assert_eq!(list.pop_front_if(|x| *x == 1), Some(1));
+        assert_eq!(list.len(), 2);
+        assert_eq!(list.front(), Some(&2));
+    }
+
+    #[test]
+    fn pop_front_if_false_keeps() {
+        let mut list: SkipList<i32> = [1, 2, 3].into_iter().collect();
+        assert_eq!(list.pop_front_if(|x| *x == 99), None);
+        assert_eq!(list.len(), 3);
+        assert_eq!(list.front(), Some(&1));
+    }
+
+    #[test]
+    fn pop_front_if_mutation_persists_on_false() {
+        let mut list: SkipList<i32> = [1, 2, 3].into_iter().collect();
+        assert_eq!(
+            list.pop_front_if(|x| {
+                *x += 10;
+                false
+            }),
+            None
+        );
+        assert_eq!(list.front(), Some(&11));
+    }
+
+    // MARK: pop_back_if
+
+    #[test]
+    fn pop_back_if_empty_does_not_call_pred() {
+        let mut list = SkipList::<i32>::new();
+        let mut called = false;
+        assert_eq!(
+            list.pop_back_if(|_| {
+                called = true;
+                true
+            }),
+            None
+        );
+        assert!(!called);
+    }
+
+    #[test]
+    fn pop_back_if_true_pops() {
+        let mut list: SkipList<i32> = [1, 2, 3].into_iter().collect();
+        assert_eq!(list.pop_back_if(|x| *x == 3), Some(3));
+        assert_eq!(list.len(), 2);
+        assert_eq!(list.back(), Some(&2));
+    }
+
+    #[test]
+    fn pop_back_if_false_keeps() {
+        let mut list: SkipList<i32> = [1, 2, 3].into_iter().collect();
+        assert_eq!(list.pop_back_if(|x| *x == 99), None);
+        assert_eq!(list.len(), 3);
+        assert_eq!(list.back(), Some(&3));
+    }
+
+    #[test]
+    fn pop_back_if_mutation_persists_on_false() {
+        let mut list: SkipList<i32> = [1, 2, 3].into_iter().collect();
+        assert_eq!(
+            list.pop_back_if(|x| {
+                *x += 10;
+                false
+            }),
+            None
+        );
+        assert_eq!(list.back(), Some(&13));
     }
 }
