@@ -37,6 +37,16 @@ impl fmt::Display for GeometricError {
 
 impl Error for GeometricError {}
 
+/// How [`Geometric::level`] draws a sample.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Sampler {
+    /// `q == 0.5` exactly: the level is the index of the lowest set bit of a
+    /// random `u64`, redrawn when zero or above `total`.
+    Bisect,
+    /// Any other `q`: invert the truncated geometric CDF.
+    Inverse,
+}
+
 /// A level generator using a geometric distribution.
 ///
 /// Each new element is assigned a random level drawn from a truncated geometric
@@ -53,6 +63,10 @@ impl Error for GeometricError {}
 /// Use [`Geometric::new`] to configure the number of levels and the promotion
 /// probability, or [`Geometric::default`] for the standard 16-level, `$q =
 /// 0.5$` configuration.
+///
+/// When `q` is exactly `0.5` (the default), levels are sampled by bit position
+/// instead of by inverting the CDF. The distribution is identical; the draw
+/// avoids floating-point work.
 ///
 /// # Examples
 ///
@@ -77,6 +91,8 @@ pub struct Geometric {
     q: f64,
     /// The random number generator.
     rng: SmallRng,
+    /// The sampling strategy, chosen once from `q` at construction.
+    sampler: Sampler,
 }
 
 impl Geometric {
@@ -119,11 +135,21 @@ impl Geometric {
         if !(0.0 < q && q < 1.0) {
             return Err(GeometricError::InvalidProbability);
         }
+        #[expect(
+            clippy::float_cmp,
+            reason = "exact match on the literal 0.5 selects the bit sampler"
+        )]
+        let sampler = if q == 0.5 {
+            Sampler::Bisect
+        } else {
+            Sampler::Inverse
+        };
         Ok(Geometric {
             total,
             total_inclusive,
             q,
             rng: SmallRng::from_rng(&mut rand::rng()),
+            sampler,
         })
     }
 
@@ -156,12 +182,74 @@ impl Geometric {
         if !(0.0 < q && q < 1.0) {
             return Err(GeometricError::InvalidProbability);
         }
+        #[expect(
+            clippy::float_cmp,
+            reason = "exact match on the literal 0.5 selects the bit sampler"
+        )]
+        let sampler = if q == 0.5 {
+            Sampler::Bisect
+        } else {
+            Sampler::Inverse
+        };
         Ok(Geometric {
             total,
             total_inclusive,
             q,
             rng: SmallRng::seed_from_u64(seed),
+            sampler,
         })
+    }
+
+    /// Inverts the CDF of the truncated geometric distribution.
+    #[inline]
+    #[expect(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        reason = "CDF domain is [0, total] so the cast is safe after clamping"
+    )]
+    #[expect(clippy::as_conversions, reason = "No other way to do this")]
+    fn level_inverse(&mut self) -> usize {
+        // Invert the CDF of the truncated geometric distribution:
+        //
+        //   CDF(n) = (q^n - 1) / (q^t - 1)
+        //
+        // where t is the _exclusive_ upper bound (i.e., total + 1).
+        //
+        // Solving for n given a uniform variate u in [0, 1]:
+        //
+        //   n = floor( log_q( 1 + (q^t - 1) * u ) )
+        //
+        // where q = 1 - p and t is the total number of levels.
+        let u = self.rng.random::<f64>();
+        ((1.0 + (self.q.powi(self.total_inclusive) - 1.0) * u)
+            .log(self.q)
+            .floor() as usize)
+            // When q^total underflows to 0.0 due to floating-point precision,
+            // the formula can produce values > total.  This ensures that we
+            // never return a level greater than total.
+            .min(self.total)
+    }
+
+    /// Samples by bit position.
+    ///
+    /// For `q = 1/2` the truncated distribution is
+    /// `P(n) = 2^-(n+1) / (1 - 2^-(total+1))` on `0..=total`.  The lowest set
+    /// bit of a uniform `u64` has `P(n) = 2^-(n+1)`; redrawing when the word
+    /// is zero or the bit index exceeds `total` yields the truncated law
+    /// exactly for `total <= 63`.  For larger `total`, levels `64..=total`
+    /// have zero probability and the total-variation gap is below `2^-64`.
+    /// Expected draws per call: `1 / (1 - 2^-(total+1))`.
+    #[inline]
+    fn level_bisect(&mut self) -> usize {
+        loop {
+            let word: u64 = self.rng.next_u64();
+            if let Some(bit) = word.lowest_one()
+                && let Ok(level) = usize::try_from(bit)
+                && level <= self.total
+            {
+                return level;
+            }
+        }
     }
 }
 
@@ -206,37 +294,18 @@ impl LevelGenerator for Geometric {
     /// most probable outcome (the node gets no skip links and participates only
     /// in the base layer); `total` is the least probable.
     #[inline]
-    #[expect(
-        clippy::cast_possible_truncation,
-        clippy::cast_sign_loss,
-        reason = "CDF domain is [0, total] so the cast is safe after clamping"
-    )]
-    #[expect(clippy::as_conversions, reason = "No other way to do this")]
     fn level(&mut self) -> usize {
-        // Invert the CDF of the truncated geometric distribution:
-        //
-        //   CDF(n) = (q^n - 1) / (q^t - 1)
-        //
-        // where t is the _exclusive_ upper bound (i.e., total + 1).
-        //
-        // Solving for n given a uniform variate u in [0, 1]:
-        //
-        //   n = floor( log_q( 1 + (q^t - 1) * u ) )
-        //
-        // where q = 1 - p and t is the total number of levels.
-        let u = self.rng.random::<f64>();
-        ((1.0 + (self.q.powi(self.total_inclusive) - 1.0) * u)
-            .log(self.q)
-            .floor() as usize)
-            // When q^total underflows to 0.0 due to floating-point precision,
-            // the formula can produce values > total.  This ensures that we
-            // never return a level greater than total.
-            .min(self.total)
+        match self.sampler {
+            Sampler::Bisect => self.level_bisect(),
+            Sampler::Inverse => self.level_inverse(),
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
+    #![expect(clippy::indexing_slicing, reason = "test code")]
+
     use anyhow::{Result, anyhow};
     use pretty_assertions::assert_eq;
     use rstest::rstest;
@@ -416,6 +485,71 @@ mod tests {
             );
         }
 
+        Ok(())
+    }
+
+    // MARK: bisect sampler
+
+    #[test]
+    fn q_half_selects_bisect() -> Result<()> {
+        let bisect = Geometric::new_with_seed(16, 0.5, 42)?;
+        assert_eq!(bisect.sampler, super::Sampler::Bisect);
+        let inverse = Geometric::new_with_seed(16, 0.25, 42)?;
+        assert_eq!(inverse.sampler, super::Sampler::Inverse);
+        Ok(())
+    }
+
+    #[rstest]
+    fn bisect_never_exceeds_total(#[values(1, 4, 16, 64, 70)] n: usize) -> Result<()> {
+        const SAMPLES: usize = if cfg!(miri) { 50 } else { 1_000_000 };
+        let mut generator = Geometric::new_with_seed(n, 0.5, 42)?;
+        for _ in 0..SAMPLES {
+            let level = generator.level_bisect();
+            assert!(level <= n, "level {level} exceeds total {n}");
+        }
+        Ok(())
+    }
+
+    /// The two samplers must produce the same truncated distribution at
+    /// q = 1/2.  Compare per-level frequencies where counts are large enough
+    /// for the relative error to be meaningful.
+    ///
+    /// Level `k` collects about `SAMPLES / 2^(k+1)` draws, so the relative
+    /// standard error of the difference between two bins of `MIN_COUNT` is
+    /// `sqrt(2 / MIN_COUNT)`; at 20,000 that is 1%, five times inside the
+    /// tolerance, and six bins still qualify at `total = 16`.
+    #[rstest]
+    fn bisect_matches_inverse_distribution(#[values(1, 4, 16, 64)] n: usize) -> Result<()> {
+        const SAMPLES: usize = if cfg!(miri) { 50 } else { 2_000_000 };
+        const MIN_COUNT: u32 = 20_000;
+        const TOLERANCE: f64 = 0.05;
+
+        let mut bisect = Geometric::new_with_seed(n, 0.5, 7)?;
+        let mut inverse = Geometric::new_with_seed(n, 0.5, 11)?;
+        let mut bisect_counts = vec![0_u32; n.strict_add(1)];
+        let mut inverse_counts = vec![0_u32; n.strict_add(1)];
+        for _ in 0..SAMPLES {
+            let b = bisect.level_bisect();
+            bisect_counts[b] = bisect_counts[b].strict_add(1);
+            let i = inverse.level_inverse();
+            inverse_counts[i] = inverse_counts[i].strict_add(1);
+        }
+
+        if cfg!(miri) {
+            return Ok(());
+        }
+
+        for (k, (&b, &i)) in bisect_counts.iter().zip(&inverse_counts).enumerate() {
+            if b < MIN_COUNT || i < MIN_COUNT {
+                break;
+            }
+            let relative_err = (f64::from(b) - f64::from(i)).abs() / f64::from(i);
+            assert!(
+                relative_err < TOLERANCE,
+                "level {k}: bisect={b}, inverse={i}, err {:.1}%",
+                relative_err * 100.0
+            );
+        }
         Ok(())
     }
 }
