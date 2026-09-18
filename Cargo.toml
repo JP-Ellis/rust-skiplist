@@ -7,8 +7,6 @@ version = "1.1.1"
 description = "Skiplist implementation in Rust for fast insertion and removal, including a normal skiplist, ordered skiplist, and skipmap."
 
 documentation = "https://docs.rs/skiplist"
-readme = "README.md"
-homepage = "https://github.com/JP-Ellis/rust-skiplist"
 repository = "https://github.com/JP-Ellis/rust-skiplist"
 license = "MIT"
 keywords = ["collection", "skiplist", "sorted"]
@@ -82,7 +80,7 @@ partial-ord = []
   suspicious = { level = "warn", priority = -1 }
 
   arbitrary_source_item_ordering = "allow"
-  blanket-clippy-restriction-lints = "allow"
+  blanket_clippy_restriction_lints = "allow"
   default_numeric_fallback = "allow"
   else_if_without_else = "allow"
   impl_trait_in_params = "allow"
@@ -108,9 +106,9 @@ partial-ord = []
   unused_trait_names = "allow"
 
   [lints.rust]
-  future-incompatible = "warn"
+  future_incompatible = "warn"
   missing_docs = "warn"
   warnings = "warn"
 
   [lints.rustdoc]
-  missing-crate-level-docs = "warn"
+  missing_crate_level_docs = "warn"
