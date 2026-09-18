@@ -1120,7 +1120,7 @@ impl<K, V, const N: usize, C: Comparator<K>, G: LevelGenerator> SkipMap<K, V, N,
 
 #[cfg(test)]
 mod tests {
-    use pretty_assertions::assert_eq;
+    use pretty_assertions::{assert_eq, assert_matches};
 
     use super::super::SkipMap;
     use crate::skip_map::entry::Entry;
@@ -1131,13 +1131,13 @@ mod tests {
     fn entry_occupied_on_existing_key() {
         let mut map = SkipMap::<i32, &str>::new();
         map.insert(1, "a");
-        assert!(matches!(map.entry(1), Entry::Occupied(_)));
+        assert_matches!(map.entry(1), Entry::Occupied(_));
     }
 
     #[test]
     fn entry_vacant_on_missing_key() {
         let mut map = SkipMap::<i32, &str>::new();
-        assert!(matches!(map.entry(1), Entry::Vacant(_)));
+        assert_matches!(map.entry(1), Entry::Vacant(_));
     }
 
     // MARK: OccupiedEntry::key / get / get_mut / into_mut
