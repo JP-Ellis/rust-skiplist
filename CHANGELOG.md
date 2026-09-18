@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 <!-- markdownlint-disable -->
 
+## [1.2.0](https://github.com/JP-Ellis/rust-skiplist/compare/v1.1.1...v1.2.0) - _2026-09-18_
+
+### 🚀 Features
+
+-   Add unchecked cursor inserts
+
+-   Add cursor API for ordered types
+
+### 🚜 Refactor
+
+-   Make cursor modules private
+
+### ⚙️ Miscellaneous Tasks
+
+-   Add codecov config with tolerance
+
+
 ## [1.1.1](https://github.com/JP-Ellis/rust-skiplist/compare/v1.1.0...v1.1.1) - _2026-09-03_
 
 ### 🐛 Bug Fixes
