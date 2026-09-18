@@ -325,10 +325,6 @@ impl<T: fmt::Debug, const N: usize, C: Comparator<T>, G: LevelGenerator> fmt::De
 /// let vals: Vec<_> = list.iter().copied().collect();
 /// assert_eq!(vals, [1, 3, 5]);
 /// ```
-#[expect(
-    clippy::module_name_repetitions,
-    reason = "CursorMut lives in the cursor module; the repetition is intentional for clarity"
-)]
 pub struct CursorMut<
     'a,
     T,

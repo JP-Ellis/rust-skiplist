@@ -107,7 +107,7 @@
 
 mod access;
 #[cfg(feature = "cursor")]
-pub mod cursor;
+mod cursor;
 #[cfg(feature = "cursor")]
 pub use cursor::{Cursor, CursorMut, UnorderedKeyError};
 mod entry;

@@ -45,9 +45,12 @@
 //!
 //! **Structural:** [`len`], [`is_empty`], [`clear`], [`split_off`], [`append`].
 //!
-//! **Cursors:** [`lower_bound`], [`upper_bound`], [`lower_bound_mut`],
-//!   [`upper_bound_mut`].
-//!
+#![cfg_attr(
+    feature = "cursor",
+    doc = "**Cursors:** [`lower_bound`], [`upper_bound`], [`lower_bound_mut`],"
+)]
+#![cfg_attr(feature = "cursor", doc = "  [`upper_bound_mut`].")]
+#![cfg_attr(feature = "cursor", doc = "")]
 //! **Iteration:** [`iter`], [`into_iter`].
 //!
 //! # Examples
@@ -109,6 +112,22 @@
 //! [`append`]: OrderedSkipList::append
 //! [`iter`]: OrderedSkipList::iter
 //! [`into_iter`]: OrderedSkipList::into_iter
+#![cfg_attr(
+    feature = "cursor",
+    doc = "[`lower_bound`]: OrderedSkipList::lower_bound"
+)]
+#![cfg_attr(
+    feature = "cursor",
+    doc = "[`upper_bound`]: OrderedSkipList::upper_bound"
+)]
+#![cfg_attr(
+    feature = "cursor",
+    doc = "[`lower_bound_mut`]: OrderedSkipList::lower_bound_mut"
+)]
+#![cfg_attr(
+    feature = "cursor",
+    doc = "[`upper_bound_mut`]: OrderedSkipList::upper_bound_mut"
+)]
 
 use core::ptr::NonNull;
 
@@ -120,7 +139,7 @@ use crate::{
 
 mod access;
 #[cfg(feature = "cursor")]
-pub mod cursor;
+mod cursor;
 #[cfg(feature = "cursor")]
 pub use cursor::{Cursor, CursorMut, UnorderedValueError};
 mod filter;

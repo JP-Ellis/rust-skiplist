@@ -7,7 +7,7 @@
 > skiplist = { version = "...", features = ["cursor"] }
 > ```
 
-This page explains the gap cursor model, how `lower_bound` and `upper_bound` position a cursor, and how to use cursors for common tasks. For the complete method list, see the individual reference pages: [`ordered_skip_list::cursor`], [`skip_set::cursor`], and [`skip_map::cursor`].
+This page explains the gap cursor model, how `lower_bound` and `upper_bound` position a cursor, and how to use cursors for common tasks. For the complete method list, see the `Cursor` and `CursorMut` reference pages under [`ordered_skip_list`], [`skip_set`], and [`skip_map`].
 
 ## The gap cursor model
 
@@ -233,8 +233,8 @@ assert_eq!(map.get(&3), Some(&30)); // unchanged
 
 The cursor API is modelled on the `BTreeMap` cursor design tracked in [rust-lang/rust#107540](https://github.com/rust-lang/rust/issues/107540), which has not yet been stabilised in the Rust standard library as of this writing. Because the design space is still open, this implementation is likewise marked **unstable**: the API may change in a future minor release. Breaking changes will be noted in the changelog.
 
-[`ordered_skip_list::cursor`]: crate::ordered_skip_list::cursor
-[`skip_set::cursor`]: crate::skip_set::cursor
-[`skip_map::cursor`]: crate::skip_map::cursor
-[`CursorMut`]: crate::ordered_skip_list::cursor::CursorMut
+[`ordered_skip_list`]: crate::ordered_skip_list
+[`skip_set`]: crate::skip_set
+[`skip_map`]: crate::skip_map
+[`CursorMut`]: crate::ordered_skip_list::CursorMut
 [`SkipMap`]: crate::SkipMap
