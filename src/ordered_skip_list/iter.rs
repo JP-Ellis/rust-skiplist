@@ -474,14 +474,15 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
         }
     }
 
-    /// Creates a lazy iterator that removes and yields every element for
-    /// which `pred` returns `true`.
+    /// Creates an iterator that removes and yields the elements that fall
+    /// within `range` and for which `pred` returns `true`.
     ///
-    /// Elements for which `pred` returns `false` are kept in the list.
-    /// The predicate receives a `&mut T` so it may inspect or mutate the
-    /// element before deciding whether to extract it.  Note, however, that
-    /// mutating an element in a way that changes its sort position may violate
-    /// the ordering invariant.
+    /// Elements outside `range`, and elements for which `pred` returns
+    /// `false`, are kept in the list.  The predicate is never called for
+    /// elements outside the range.  It receives a `&mut T` so it may inspect
+    /// or mutate the element before deciding whether to extract it.  Note,
+    /// however, that mutating an element in a way that changes its sort
+    /// position may violate the ordering invariant.
     ///
     /// If the `ExtractIf` iterator is dropped before being fully consumed,
     /// the predicate is **not** called for the remaining elements; they all
@@ -500,20 +501,23 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
     ///     list.insert(i);
     /// }
     ///
-    /// let evens: Vec<i32> = list.extract_if(|x| *x % 2 == 0).collect();
-    /// assert_eq!(evens, [2, 4]);
+    /// let extracted: Vec<i32> = list.extract_if(2..=4, |x| *x != 3).collect();
+    /// assert_eq!(extracted, [2, 4]);
     /// let remaining: Vec<i32> = list.iter().copied().collect();
     /// assert_eq!(remaining, [1, 3, 5]);
     /// ```
     #[inline]
-    pub fn extract_if<F>(&mut self, pred: F) -> ExtractIf<'_, T, C, G, F, N>
+    pub fn extract_if<R, F>(&mut self, range: R, pred: F) -> ExtractIf<'_, T, C, G, R, F, N>
     where
+        R: RangeBounds<T>,
         F: FnMut(&mut T) -> bool,
     {
         // SAFETY: self.head is a valid, exclusively-owned head sentinel.
         let current = unsafe { self.head.as_ref().next() };
         ExtractIf {
             current,
+            range,
+            past_hi: false,
             any_removed: false,
             list: self,
             pred,
@@ -847,6 +851,7 @@ impl<T> FusedIterator for Drain<'_, T> {}
 /// This struct is created by the [`OrderedSkipList::extract_if`] method.  The
 /// predicate is called once per element, in sorted order.  Elements for which
 /// it returns `true` are removed and yielded; all others remain in place.
+/// Only elements that fall within `range` are offered to the predicate.
 ///
 /// If the iterator is dropped before being fully consumed the predicate is
 /// **not** called for the remaining elements; they all stay in the list and
@@ -864,7 +869,7 @@ impl<T> FusedIterator for Drain<'_, T> {}
 ///     list.insert(i);
 /// }
 ///
-/// let evens: Vec<i32> = list.extract_if(|x| *x % 2 == 0).collect();
+/// let evens: Vec<i32> = list.extract_if(.., |x| *x % 2 == 0).collect();
 /// assert_eq!(evens, [2, 4]);
 /// let remaining: Vec<i32> = list.iter().copied().collect();
 /// assert_eq!(remaining, [1, 3, 5]);
@@ -875,6 +880,7 @@ pub struct ExtractIf<
     T,
     C: Comparator<T> = OrdComparator,
     G: LevelGenerator = Geometric,
+    R: RangeBounds<T> = core::ops::RangeFull,
     F = fn(&mut T) -> bool,
     const N: usize = 16,
 > where
@@ -886,6 +892,12 @@ pub struct ExtractIf<
     /// Raw pointer to the next node to visit, or None when the iterator has
     /// been exhausted.
     current: Option<NonNull<Node<T, N>>>,
+    /// Range restriction: elements below the lower bound are skipped, elements
+    /// above the upper bound stop the iterator.
+    range: R,
+    /// Set once an element past the upper bound has been seen; every later
+    /// `next` returns `None` without touching the list.
+    past_hi: bool,
     /// Set to true the first time an element is removed. Used to skip the `$O(n)$`
     /// skip-link rebuild in [`Drop::drop`] when nothing was removed.
     any_removed: bool,
@@ -893,29 +905,42 @@ pub struct ExtractIf<
     pred: F,
 }
 
-// SAFETY: ExtractIf<'a, T, C, G, F, N> yields owned T values and holds
+// SAFETY: ExtractIf<'a, T, C, G, R, F, N> yields owned T values and holds
 // &'a mut OrderedSkipList<T, N, C, G>.  Sending it to another thread requires
-// T: Send, C: Send, G: Send, and F: Send.
-unsafe impl<T: Send, C: Comparator<T> + Send, G: LevelGenerator + Send, F: Send, const N: usize>
-    Send for ExtractIf<'_, T, C, G, F, N>
+// T: Send, C: Send, G: Send, R: Send, and F: Send.
+unsafe impl<
+    T: Send,
+    C: Comparator<T> + Send,
+    G: LevelGenerator + Send,
+    R: RangeBounds<T> + Send,
+    F: Send,
+    const N: usize,
+> Send for ExtractIf<'_, T, C, G, R, F, N>
 where
     F: FnMut(&mut T) -> bool,
 {
 }
 
-// SAFETY: Sharing &ExtractIf requires T: Sync, C: Sync, G: Sync, F: Sync.
-// Advancing the iterator requires &mut ExtractIf, preventing concurrent
-// mutation.
-unsafe impl<T: Sync, C: Comparator<T> + Sync, G: LevelGenerator + Sync, F: Sync, const N: usize>
-    Sync for ExtractIf<'_, T, C, G, F, N>
+// SAFETY: Sharing &ExtractIf requires T: Sync, C: Sync, G: Sync, R: Sync,
+// F: Sync.  Advancing the iterator requires &mut ExtractIf, preventing
+// concurrent mutation.
+unsafe impl<
+    T: Sync,
+    C: Comparator<T> + Sync,
+    G: LevelGenerator + Sync,
+    R: RangeBounds<T> + Sync,
+    F: Sync,
+    const N: usize,
+> Sync for ExtractIf<'_, T, C, G, R, F, N>
 where
     F: FnMut(&mut T) -> bool,
 {
 }
 
-impl<T: fmt::Debug, C: Comparator<T>, G: LevelGenerator, F, const N: usize> fmt::Debug
-    for ExtractIf<'_, T, C, G, F, N>
+impl<T: fmt::Debug, C: Comparator<T>, G: LevelGenerator, R, F, const N: usize> fmt::Debug
+    for ExtractIf<'_, T, C, G, R, F, N>
 where
+    R: RangeBounds<T>,
     F: FnMut(&mut T) -> bool,
 {
     #[inline]
@@ -938,9 +963,10 @@ where
     }
 }
 
-impl<T, C: Comparator<T>, G: LevelGenerator, F, const N: usize> Iterator
-    for ExtractIf<'_, T, C, G, F, N>
+impl<T, C: Comparator<T>, G: LevelGenerator, R, F, const N: usize> Iterator
+    for ExtractIf<'_, T, C, G, R, F, N>
 where
+    R: RangeBounds<T>,
     F: FnMut(&mut T) -> bool,
 {
     type Item = T;
@@ -948,9 +974,9 @@ where
     #[expect(
         clippy::unwrap_in_result,
         clippy::expect_used,
-        reason = "`value_mut()` and `take_value()` return None only for the head \
-              sentinel, which is never reachable via the data-node walk; the \
-              expect fires only on invariant violations"
+        reason = "`value()`, `value_mut()` and `take_value()` return None only for \
+              the head sentinel, which is never reachable via the data-node walk; \
+              the expect fires only on invariant violations"
     )]
     #[expect(
         clippy::multiple_unsafe_ops_per_block,
@@ -961,16 +987,47 @@ where
     #[inline]
     fn next(&mut self) -> Option<T> {
         loop {
+            if self.past_hi {
+                return None;
+            }
             let current_nn = self.current?;
-            // SAFETY: current_nn was derived from a heap-allocated Node<T>
-            // owned by the OrderedSkipList that created this ExtractIf.  We
-            // hold &'a mut OrderedSkipList exclusively for the iterator's
-            // lifetime, ensuring every node remains allocated and non-aliased.
-            // We capture next_opt before any mutation of the current node.
-            unsafe {
-                let current: *mut Node<T, N> = current_nn.as_ptr();
-                let next_opt = (*current).next();
+            let current: *mut Node<T, N> = current_nn.as_ptr();
 
+            // Phase 1: classify the element against the range.  The shared
+            // borrow ends before the mutable borrow in phase 2.
+            let (next_opt, after_lo, in_hi) = {
+                // SAFETY: current_nn was derived from a heap-allocated Node<T>
+                // owned by the OrderedSkipList that created this ExtractIf.
+                // We hold &'a mut OrderedSkipList exclusively.
+                let value: &T = unsafe { (*current).value() }.expect("data node has value");
+                // SAFETY: same provenance as `value`; current is still valid.
+                let next_opt = unsafe { (*current).next() };
+                let cmp = &self.list.comparator;
+                let after_lo = match self.range.start_bound() {
+                    Bound::Unbounded => true,
+                    Bound::Included(lo) => cmp.compare(value, lo) != Ordering::Less,
+                    Bound::Excluded(lo) => cmp.compare(value, lo) == Ordering::Greater,
+                };
+                let in_hi = match self.range.end_bound() {
+                    Bound::Unbounded => true,
+                    Bound::Included(hi) => cmp.compare(value, hi) != Ordering::Greater,
+                    Bound::Excluded(hi) => cmp.compare(value, hi) == Ordering::Less,
+                };
+                (next_opt, after_lo, in_hi)
+            };
+
+            if !after_lo {
+                self.current = next_opt;
+                continue;
+            }
+            if !in_hi {
+                self.past_hi = true;
+                return None;
+            }
+
+            // Phase 2: in range; consult the predicate and maybe remove.
+            // SAFETY: as above.  next_opt was captured before any mutation.
+            unsafe {
                 let value_ref = (*current).value_mut().expect("data node has value");
                 if (self.pred)(value_ref) {
                     self.current = next_opt;
@@ -999,16 +1056,18 @@ where
     }
 }
 
-impl<T, C: Comparator<T>, G: LevelGenerator, F, const N: usize> FusedIterator
-    for ExtractIf<'_, T, C, G, F, N>
+impl<T, C: Comparator<T>, G: LevelGenerator, R, F, const N: usize> FusedIterator
+    for ExtractIf<'_, T, C, G, R, F, N>
 where
+    R: RangeBounds<T>,
     F: FnMut(&mut T) -> bool,
 {
 }
 
-impl<T, C: Comparator<T>, G: LevelGenerator, F, const N: usize> Drop
-    for ExtractIf<'_, T, C, G, F, N>
+impl<T, C: Comparator<T>, G: LevelGenerator, R, F, const N: usize> Drop
+    for ExtractIf<'_, T, C, G, R, F, N>
 where
+    R: RangeBounds<T>,
     F: FnMut(&mut T) -> bool,
 {
     #[inline]
@@ -1696,7 +1755,7 @@ mod tests {
         for i in 1..=5_i32 {
             list.insert(i);
         }
-        let removed: Vec<i32> = list.extract_if(|_| false).collect();
+        let removed: Vec<i32> = list.extract_if(.., |_| false).collect();
         assert_eq!(removed, []);
         let remaining: Vec<i32> = list.iter().copied().collect();
         assert_eq!(remaining, [1, 2, 3, 4, 5]);
@@ -1708,7 +1767,7 @@ mod tests {
         for i in 1..=5_i32 {
             list.insert(i);
         }
-        let removed: Vec<i32> = list.extract_if(|_| true).collect();
+        let removed: Vec<i32> = list.extract_if(.., |_| true).collect();
         assert_eq!(removed, [1, 2, 3, 4, 5]);
         assert!(list.is_empty());
     }
@@ -1723,7 +1782,7 @@ mod tests {
         for i in 1..=5_i32 {
             list.insert(i);
         }
-        let evens: Vec<i32> = list.extract_if(|x| *x % 2 == 0).collect();
+        let evens: Vec<i32> = list.extract_if(.., |x| *x % 2 == 0).collect();
         assert_eq!(evens, [2, 4]);
         let remaining: Vec<i32> = list.iter().copied().collect();
         assert_eq!(remaining, [1, 3, 5]);
@@ -1741,7 +1800,7 @@ mod tests {
         }
         {
             // Only consume the first yielded element, then drop.
-            let mut iter = list.extract_if(|x| *x % 2 == 0);
+            let mut iter = list.extract_if(.., |x| *x % 2 == 0);
             assert_eq!(iter.next(), Some(2)); // remove 2
             // iter drops here; predicate not called for 3, 4, 5
         }
@@ -1757,7 +1816,7 @@ mod tests {
             list.insert(i);
         }
         {
-            let mut iter = list.extract_if(|x| *x == 2);
+            let mut iter = list.extract_if(.., |x| *x == 2);
             assert_eq!(iter.next(), Some(2));
         }
         let collected: Vec<i32> = list.iter().copied().collect();
@@ -1768,7 +1827,7 @@ mod tests {
     #[test]
     fn extract_if_empty_list() {
         let mut list = OrderedSkipList::<i32>::new();
-        let removed: Vec<i32> = list.extract_if(|_| true).collect();
+        let removed: Vec<i32> = list.extract_if(.., |_| true).collect();
         assert_eq!(removed, []);
     }
 
@@ -1778,9 +1837,86 @@ mod tests {
         for i in 1..=5_i32 {
             list.insert(i);
         }
-        let iter = list.extract_if(|_| false);
+        let iter = list.extract_if(.., |_| false);
         // Lower bound is always 0 (predicate outcome unknown).
         assert_eq!(iter.size_hint().0, 0);
+    }
+
+    #[test]
+    fn extract_if_range_half_open() {
+        let mut list: OrderedSkipList<i32> = (1..=6).collect();
+        let removed: Vec<i32> = list.extract_if(2..5, |_| true).collect();
+        assert_eq!(removed, [2, 3, 4]);
+        assert_eq!(list.iter().copied().collect::<Vec<_>>(), [1, 5, 6]);
+    }
+
+    #[test]
+    fn extract_if_range_inclusive() {
+        let mut list: OrderedSkipList<i32> = (1..=6).collect();
+        let removed: Vec<i32> = list.extract_if(2..=5, |_| true).collect();
+        assert_eq!(removed, [2, 3, 4, 5]);
+        assert_eq!(list.len(), 2);
+    }
+
+    #[test]
+    fn extract_if_range_excluded_lower_bound() {
+        use core::ops::Bound;
+        let mut list: OrderedSkipList<i32> = (1..=6).collect();
+        let removed: Vec<i32> = list
+            .extract_if((Bound::Excluded(2), Bound::Unbounded), |_| true)
+            .collect();
+        assert_eq!(removed, [3, 4, 5, 6]);
+        assert_eq!(list.iter().copied().collect::<Vec<_>>(), [1, 2]);
+    }
+
+    #[test]
+    fn extract_if_range_below_contents() {
+        let mut list: OrderedSkipList<i32> = (10..=12).collect();
+        let removed: Vec<i32> = list.extract_if(..5, |_| true).collect();
+        assert!(removed.is_empty());
+        assert_eq!(list.len(), 3);
+    }
+
+    #[test]
+    fn extract_if_range_above_contents() {
+        let mut list: OrderedSkipList<i32> = (10..=12).collect();
+        let removed: Vec<i32> = list.extract_if(20.., |_| true).collect();
+        assert!(removed.is_empty());
+        assert_eq!(list.len(), 3);
+    }
+
+    #[test]
+    fn extract_if_range_empty() {
+        let mut list: OrderedSkipList<i32> = (1..=6).collect();
+        let removed: Vec<i32> = list.extract_if(3..3, |_| true).collect();
+        assert!(removed.is_empty());
+        assert_eq!(list.len(), 6);
+    }
+
+    #[test]
+    fn extract_if_range_duplicates_straddle_bounds() {
+        // Duplicates equal to a bound are treated uniformly by the bound kind.
+        let mut list: OrderedSkipList<i32> = [1, 2, 2, 2, 3, 3, 4].into_iter().collect();
+        let removed: Vec<i32> = list.extract_if(2..3, |_| true).collect();
+        assert_eq!(removed, [2, 2, 2]);
+        assert_eq!(list.iter().copied().collect::<Vec<_>>(), [1, 3, 3, 4]);
+
+        let removed_upper: Vec<i32> = list.extract_if(..=3, |_| true).collect();
+        assert_eq!(removed_upper, [1, 3, 3]);
+        assert_eq!(list.iter().copied().collect::<Vec<_>>(), [4]);
+    }
+
+    #[test]
+    fn extract_if_range_stops_at_upper_bound() {
+        let mut list: OrderedSkipList<i32> = (1..=6).collect();
+        let mut seen = Vec::new();
+        let _removed: Vec<i32> = list
+            .extract_if(..=3, |x| {
+                seen.push(*x);
+                true
+            })
+            .collect();
+        assert_eq!(seen, [1, 2, 3]);
     }
 
     // MARK: panic safety
@@ -1839,7 +1975,7 @@ mod tests {
         }
 
         let result = catch_unwind(AssertUnwindSafe(|| {
-            for extracted in list.extract_if(|element| {
+            for extracted in list.extract_if(.., |element| {
                 assert!(element.id() != 7, "predicate panic");
                 true
             }) {
@@ -1868,7 +2004,7 @@ mod tests {
         }
 
         let result = catch_unwind(AssertUnwindSafe(|| {
-            for extracted in list.extract_if(|_| true) {
+            for extracted in list.extract_if(.., |_| true) {
                 drop(extracted);
             }
         }));
