@@ -45,6 +45,10 @@ name = "skip_set"
 harness = false
 name = "skip_map"
 
+[[bench]]
+harness = false
+name = "level_generator"
+
 [dependencies]
 rand = "0.10"
 
