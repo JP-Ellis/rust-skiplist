@@ -1,11 +1,10 @@
 //! Mutable ordered visitor with rank/distance tracking.
 
-use core::{cmp::Ordering, iter, marker::PhantomData, ptr::NonNull};
-
-use arrayvec::ArrayVec;
+use core::{cmp::Ordering, marker::PhantomData, ptr::NonNull};
 
 use crate::node::{
     Node,
+    level_array::LevelArray,
     visitor::{Step, Visitor, VisitorMut},
 };
 
@@ -60,14 +59,14 @@ pub(crate) struct OrdIndexMutVisitor<'a, T, Q: ?Sized, F: Fn(&T, &Q) -> Ordering
     /// level `l` points to `>= target` (or has no link at that level).
     /// Pre-filled with `head` so that every level has a valid precursor even
     /// when the target is before the first real node.
-    precursors: ArrayVec<NonNull<Node<T, N>>, N>,
+    precursors: LevelArray<NonNull<Node<T, N>>, N>,
     /// Current rank during traversal (1-based: 0 = head sentinel, 1 = first
     /// data node). Incremented by `link.distance()` when following a skip
     /// link and by 1 when stepping via the sequential `next` pointer.
     rank: usize,
     /// Internal rank at the time each level's precursor was recorded.
     /// Pre-filled with 0 (rank of the head sentinel).
-    precursor_distances: ArrayVec<usize, N>,
+    precursor_distances: LevelArray<usize, N>,
     /// Suppresses `Send`/`Sync` auto-impls and marks variance as invariant
     /// in `T` (the visitor holds raw mutable pointers into the list).
     _marker: PhantomData<*mut Node<T, N>>,
@@ -101,9 +100,9 @@ impl<'a, T, Q: ?Sized, F: Fn(&T, &Q) -> Ordering, const N: usize>
             found: false,
             target,
             cmp,
-            precursors: iter::repeat_n(current, max_levels).collect(),
+            precursors: LevelArray::from_fn(max_levels, |_| current),
             rank: 0,
-            precursor_distances: iter::repeat_n(0_usize, max_levels).collect(),
+            precursor_distances: LevelArray::from_fn(max_levels, |_| 0_usize),
             _marker: PhantomData,
         }
     }
@@ -156,8 +155,8 @@ impl<'a, T, Q: ?Sized, F: Fn(&T, &Q) -> Ordering, const N: usize>
     ) -> (
         NonNull<Node<T, N>>,
         bool,
-        ArrayVec<NonNull<Node<T, N>>, N>,
-        ArrayVec<usize, N>,
+        LevelArray<NonNull<Node<T, N>>, N>,
+        LevelArray<usize, N>,
     ) {
         (
             self.current,
@@ -320,7 +319,6 @@ mod tests {
         // SAFETY: pointer is valid for the duration of `head`'s lifetime.
         let value = found.map(|ptr| unsafe { ptr.as_ref() }.value().copied());
         assert_eq!(value, Some(Some(30)));
-        drop(visitor);
         unsafe { drop(Box::from_raw(head.as_ptr())) };
         Ok(())
     }
@@ -335,7 +333,6 @@ mod tests {
         assert!(visitor.found());
         let value = found.map(|ptr| unsafe { ptr.as_ref() }.value().copied());
         assert_eq!(value, Some(Some(10)));
-        drop(visitor);
         unsafe { drop(Box::from_raw(head.as_ptr())) };
         Ok(())
     }
@@ -350,7 +347,6 @@ mod tests {
         assert!(visitor.found());
         let value = found.map(|ptr| unsafe { ptr.as_ref() }.value().copied());
         assert_eq!(value, Some(Some(40)));
-        drop(visitor);
         unsafe { drop(Box::from_raw(head.as_ptr())) };
         Ok(())
     }
@@ -364,7 +360,6 @@ mod tests {
 
         assert!(!visitor.found());
         assert!(found.is_none());
-        drop(visitor);
         unsafe { drop(Box::from_raw(head.as_ptr())) };
         Ok(())
     }
@@ -378,7 +373,6 @@ mod tests {
 
         assert!(!visitor.found());
         assert!(found.is_none());
-        drop(visitor);
         unsafe { drop(Box::from_raw(head.as_ptr())) };
         Ok(())
     }
@@ -392,7 +386,6 @@ mod tests {
 
         assert!(visitor.found());
         assert_eq!(visitor.rank(), 0);
-        drop(visitor);
         unsafe { drop(Box::from_raw(head.as_ptr())) };
         Ok(())
     }
@@ -405,7 +398,6 @@ mod tests {
 
         assert!(visitor.found());
         assert_eq!(visitor.rank(), 1);
-        drop(visitor);
         unsafe { drop(Box::from_raw(head.as_ptr())) };
         Ok(())
     }
@@ -418,7 +410,6 @@ mod tests {
 
         assert!(visitor.found());
         assert_eq!(visitor.rank(), 2);
-        drop(visitor);
         unsafe { drop(Box::from_raw(head.as_ptr())) };
         Ok(())
     }
@@ -431,7 +422,6 @@ mod tests {
 
         assert!(visitor.found());
         assert_eq!(visitor.rank(), 3);
-        drop(visitor);
         unsafe { drop(Box::from_raw(head.as_ptr())) };
         Ok(())
     }
@@ -453,7 +443,6 @@ mod tests {
                 "precursor value {value:?} should be < 30"
             );
         }
-        drop(visitor);
         unsafe { drop(Box::from_raw(head.as_ptr())) };
         Ok(())
     }
@@ -481,7 +470,6 @@ mod tests {
                 "precursor_distance {dist} should be <= found internal rank {internal_rank}"
             );
         }
-        drop(visitor);
         unsafe { drop(Box::from_raw(head.as_ptr())) };
         Ok(())
     }
@@ -505,7 +493,6 @@ mod tests {
                 Step::FoundTarget => panic!("should not find target 99"),
             }
         }
-        drop(visitor);
         unsafe { drop(Box::from_raw(head.as_ptr())) };
         Ok(())
     }
@@ -518,7 +505,6 @@ mod tests {
         visitor.traverse();
 
         assert_eq!(visitor.current(), visitor.current_mut());
-        drop(visitor);
         unsafe { drop(Box::from_raw(head.as_ptr())) };
         Ok(())
     }
@@ -534,7 +520,6 @@ mod tests {
 
         assert_eq!(visitor.precursors().len(), max_levels);
         assert_eq!(visitor.precursor_distances().len(), max_levels);
-        drop(visitor);
         unsafe { drop(Box::from_raw(head.as_ptr())) };
         Ok(())
     }

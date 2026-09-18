@@ -3,9 +3,7 @@
 //! This module provides the [`Entry`] enum and the [`OccupiedEntry`] and
 //! [`VacantEntry`] types that enable in-place, conditional insertion.
 
-use core::{fmt, iter, mem, ptr::NonNull};
-
-use arrayvec::ArrayVec;
+use core::{fmt, mem, ptr::NonNull};
 
 use super::SkipMap;
 use crate::{
@@ -13,6 +11,7 @@ use crate::{
     level_generator::{LevelGenerator, geometric::Geometric},
     node::{
         Node,
+        level_array::LevelArray,
         link::Link,
         visitor::{OrdIndexMutVisitor, Visitor},
     },
@@ -49,7 +48,7 @@ pub struct OccupiedEntry<
     node: NonNull<Node<(K, V), N>>,
     /// Precursor nodes at each skip level, used when splicing out or
     /// re-wiring links during removal.
-    precursors: ArrayVec<NonNull<Node<(K, V), N>>, N>,
+    precursors: LevelArray<NonNull<Node<(K, V), N>>, N>,
     /// Exclusive mutable borrow of the owning map.
     map: &'a mut SkipMap<K, V, N, C, G>,
 }
@@ -389,10 +388,10 @@ pub struct VacantEntry<
     current_rank: usize,
     /// Precursor node at each skip level: the insertion point for
     /// wiring the new node's skip links.
-    precursors: ArrayVec<NonNull<Node<(K, V), N>>, N>,
+    precursors: LevelArray<NonNull<Node<(K, V), N>>, N>,
     /// Rank (distance from head) of each precursor node at the time
     /// of traversal; used to compute accurate skip-link distances.
-    precursor_distances: ArrayVec<usize, N>,
+    precursor_distances: LevelArray<usize, N>,
     /// Exclusive mutable borrow of the owning map.
     map: &'a mut SkipMap<K, V, N, C, G>,
 }
@@ -535,7 +534,7 @@ impl<'a, K, V, const N: usize, C: Comparator<K>, G: LevelGenerator> VacantEntry<
         value: V,
     ) -> (
         NonNull<Node<(K, V), N>>,
-        ArrayVec<NonNull<Node<(K, V), N>>, N>,
+        LevelArray<NonNull<Node<(K, V), N>>, N>,
         &'a mut SkipMap<K, V, N, C, G>,
     ) {
         let Self {
@@ -1027,7 +1026,7 @@ impl<K, V, const N: usize, C: Comparator<K>, G: LevelGenerator> SkipMap<K, V, N,
         // the first node with distance 1, and for l >= first_height head's
         // link spans over it (or is absent).  The splice logic in
         // remove_entry handles both cases correctly with head as the precursor.
-        let precursors = iter::repeat_n(self.head, max_levels).collect();
+        let precursors = LevelArray::from_fn(max_levels, |_| self.head);
         Some(OccupiedEntry {
             node,
             precursors,
@@ -1072,8 +1071,7 @@ impl<K, V, const N: usize, C: Comparator<K>, G: LevelGenerator> SkipMap<K, V, N,
 
         // Initialise all precursor entries to head; the single traversal
         // below overwrites them all.
-        let mut precursors: ArrayVec<NonNull<Node<(K, V), N>>, N> =
-            iter::repeat_n(self.head, max_levels).collect();
+        let mut precursors = LevelArray::from_fn(max_levels, |_| self.head);
         let mut current = self.head;
 
         // Traverse all levels from the highest to the lowest, advancing

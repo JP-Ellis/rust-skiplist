@@ -128,17 +128,15 @@
 
 use core::{
     fmt::{self, Debug, Write},
-    iter,
     ptr::NonNull,
 };
 #[cfg(any(debug_assertions, test))]
 use std::collections::HashMap;
 
-use arrayvec::ArrayVec;
-
-use crate::node::link::Link;
+use crate::node::{level_array::LevelArray, link::Link};
 
 pub(crate) mod cursor_raw;
+pub(crate) mod level_array;
 pub(crate) mod link;
 pub(crate) mod visitor;
 
@@ -182,7 +180,7 @@ pub(crate) struct Node<V, const N: usize> {
     ///
     /// Uses a fixed-capacity inline array (no separate heap allocation) for
     /// better cache locality and fewer allocations per node.
-    links: ArrayVec<Option<Link<V, N>>, N>,
+    links: LevelArray<Option<Link<V, N>>, N>,
     /// The value of the node.
     value: Option<V>,
 }
@@ -194,8 +192,7 @@ impl<V, const N: usize> Node<V, N> {
     /// # Parameters
     ///
     /// * `max_levels` - The number of skip-link slots to initialise. Must be
-    ///   `<= N`. Passing a value greater than `N` panics in debug builds
-    ///   and truncates silently in release builds.
+    ///   `<= N`; a larger value panics.
     #[inline]
     #[must_use]
     pub(crate) fn new(max_levels: usize) -> Self {
@@ -206,7 +203,7 @@ impl<V, const N: usize> Node<V, N> {
         Self {
             next: None,
             prev: None,
-            links: iter::repeat_with(|| None).take(max_levels).collect(),
+            links: LevelArray::from_fn(max_levels, |_| None),
             value: None,
         }
     }
@@ -226,7 +223,7 @@ impl<V, const N: usize> Node<V, N> {
         Self {
             next: None,
             prev: None,
-            links: iter::repeat_with(|| None).take(height).collect(),
+            links: LevelArray::from_fn(height, |_| None),
             value: Some(value),
         }
     }
@@ -709,7 +706,7 @@ impl<V, const N: usize> Node<V, N> {
         };
 
         let mut walk = Rebuild {
-            predecessors: iter::repeat_n((head_ptr, 0_usize), max_levels).collect(),
+            predecessors: LevelArray::from_fn(max_levels, |_| (head_ptr, 0_usize)),
             rank: 0,
             tail: None,
             current: first,
@@ -966,7 +963,7 @@ impl<V, const N: usize> Drop for DropChain<'_, V, N> {
 struct Rebuild<'a, V, const N: usize> {
     /// Last node wired at each level, paired with its rank in the rebuilt
     /// list.  Level `l` starts at the head sentinel with rank 0.
-    predecessors: ArrayVec<(*mut Node<V, N>, usize), N>,
+    predecessors: LevelArray<(*mut Node<V, N>, usize), N>,
     /// Number of nodes retained so far.
     rank: usize,
     /// Last node retained so far.
@@ -1348,6 +1345,20 @@ pub(crate) mod tests {
     use crate::node::{Node, NodeType, link::Link};
 
     pub(crate) const MAX_LEVELS: usize = 3;
+
+    // MARK: layout
+
+    #[test]
+    fn node_size_is_unchanged_by_level_array() {
+        // prev + next + value + links + height, with Option<Link> niche-packed.
+        // 16 slots of Option<Link<u64, 16>> (16 bytes each) = 256 bytes.
+        let links = 16 * core::mem::size_of::<Option<Link<u64, 16>>>();
+        let base = 2 * core::mem::size_of::<Option<NonNull<Node<u64, 16>>>>()
+            + core::mem::size_of::<Option<u64>>();
+        // The u8 height pads to the pointer alignment.
+        assert_eq!(core::mem::size_of::<Node<u64, 16>>(), base + links + 8);
+        assert_eq!(core::mem::size_of::<Option<Link<u64, 16>>>(), 16);
+    }
 
     // MARK: new
 
