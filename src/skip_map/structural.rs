@@ -78,6 +78,12 @@ impl<K, V, const N: usize, C: Comparator<K>, G: LevelGenerator> SkipMap<K, V, N,
     /// `self.last_key == other.first_key`), each entry of `other` is inserted
     /// individually in `$O(m \log(n+m))$` time.
     ///
+    /// The `$O(n+m)$` path compares only the boundary keys and trusts the
+    /// comparator for the rest.  A [`Comparator`] that is not a total order
+    /// can therefore leave the result unordered.
+    ///
+    /// [`Comparator`]: crate::comparator::Comparator
+    ///
     /// # Examples
     ///
     /// ```rust
