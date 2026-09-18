@@ -14,11 +14,11 @@
 
 use core::{fmt, marker::PhantomData, ops::Bound};
 
-pub use crate::ordered_skip_list::cursor::UnorderedValueError;
+pub use crate::ordered_skip_list::UnorderedValueError;
 use crate::{
     comparator::{Comparator, ComparatorKey, OrdComparator},
     level_generator::{LevelGenerator, geometric::Geometric},
-    ordered_skip_list::cursor::{Cursor as OslCursor, CursorMut as OslCursorMut},
+    ordered_skip_list::{Cursor as OslCursor, CursorMut as OslCursorMut},
     skip_set::SkipSet,
 };
 
@@ -189,7 +189,6 @@ impl<T: fmt::Debug, const N: usize, C: Comparator<T>, G: LevelGenerator> fmt::De
 ///
 /// ```rust
 /// use skiplist::skip_set::SkipSet;
-/// use skiplist::skip_set::cursor::UnorderedValueError;
 /// use core::ops::Bound;
 ///
 /// let mut set: SkipSet<i32> = [1, 3].into_iter().collect();
@@ -199,10 +198,6 @@ impl<T: fmt::Debug, const N: usize, C: Comparator<T>, G: LevelGenerator> fmt::De
 /// }
 /// assert!(set.contains(&2));
 /// ```
-#[expect(
-    clippy::module_name_repetitions,
-    reason = "CursorMut lives in the cursor module; the repetition is intentional for clarity"
-)]
 pub struct CursorMut<
     'a,
     T,
@@ -386,7 +381,6 @@ impl<'a, T, const N: usize, C: Comparator<T>, G: LevelGenerator> CursorMut<'a, T
     ///
     /// ```rust
     /// use skiplist::skip_set::SkipSet;
-    /// use skiplist::skip_set::cursor::UnorderedValueError;
     /// use core::ops::Bound;
     ///
     /// let mut set: SkipSet<i32> = [1, 3].into_iter().collect();

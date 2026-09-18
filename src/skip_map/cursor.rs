@@ -292,10 +292,6 @@ impl<K: fmt::Debug, V: fmt::Debug, const N: usize, C: Comparator<K>, G: LevelGen
 /// }
 /// assert_eq!(map.get(&2), Some(&"b"));
 /// ```
-#[expect(
-    clippy::module_name_repetitions,
-    reason = "CursorMut lives in the cursor module; the repetition is intentional for clarity"
-)]
 pub struct CursorMut<
     'a,
     K,
