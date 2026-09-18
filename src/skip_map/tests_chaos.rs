@@ -46,7 +46,7 @@ fn step<K, C, G, const N: usize>(
 {
     let pred = |key: &K| (mask >> (key.raw() % 32)) & 1 == 1;
     match op {
-        0 => map.extract_if(|key, _| pred(key)).for_each(drop),
+        0 => map.extract_if(.., |key, _| pred(key)).for_each(drop),
         1 => drop(map.insert(K::mk(k), k2)),
         2 => drop(map.remove(&K::mk(k))),
         3 => drop(map.remove_entry(&K::mk(k))),
