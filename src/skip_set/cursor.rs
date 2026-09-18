@@ -402,6 +402,82 @@ impl<'a, T, const N: usize, C: Comparator<T>, G: LevelGenerator> CursorMut<'a, T
         self.inner.insert_before_strict(value)
     }
 
+    /// Inserts `value` into the current gap without checking it against the
+    /// neighbouring elements.  The cursor is unchanged, so the new element
+    /// becomes the right neighbour (`peek_next`).
+    ///
+    /// This skips the two comparisons performed by [`insert_after`], which
+    /// matters when inserting a run of values already known to be sorted.
+    ///
+    /// # Safety
+    ///
+    /// `value` must compare strictly greater than the left neighbour and
+    /// strictly less than the right neighbour under the set's comparator.
+    /// Violating this leaves the set unsorted or with duplicates, after which
+    /// lookup, insert, and remove return wrong results.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use skiplist::skip_set::SkipSet;
+    /// use core::ops::Bound;
+    ///
+    /// let mut set: SkipSet<i32> = [1, 10].into_iter().collect();
+    /// let sorted = [2, 3, 4];
+    ///
+    /// let mut cur = set.lower_bound_mut(Bound::Included(&2));
+    /// for v in sorted {
+    ///     // SAFETY: `sorted` is strictly ascending and lies strictly between 1 and 10.
+    ///     unsafe { cur.insert_after_unchecked(v) };
+    ///     cur.next();
+    /// }
+    ///
+    /// let vals: Vec<_> = set.iter().copied().collect();
+    /// assert_eq!(vals, [1, 2, 3, 4, 10]);
+    /// ```
+    ///
+    /// [`insert_after`]: CursorMut::insert_after
+    #[inline]
+    pub unsafe fn insert_after_unchecked(&mut self, value: T) {
+        // SAFETY: the caller upholds strict ordering, which is stronger than
+        // the non-strict ordering the inner list requires.
+        unsafe { self.inner.insert_after_unchecked(value) };
+    }
+
+    /// Inserts `value` into the current gap without checking it against the
+    /// neighbouring elements, then advances the cursor so the new element
+    /// becomes the left neighbour (`peek_prev`).
+    ///
+    /// # Safety
+    ///
+    /// `value` must compare strictly greater than the left neighbour and
+    /// strictly less than the right neighbour under the set's comparator.
+    /// Violating this leaves the set unsorted or with duplicates, after which
+    /// lookup, insert, and remove return wrong results.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use skiplist::skip_set::SkipSet;
+    /// use core::ops::Bound;
+    ///
+    /// let mut set: SkipSet<i32> = [1, 10].into_iter().collect();
+    ///
+    /// let mut cur = set.lower_bound_mut(Bound::Included(&2));
+    /// for v in [2, 3, 4] {
+    ///     // SAFETY: values are strictly ascending and lie strictly between 1 and 10.
+    ///     unsafe { cur.insert_before_unchecked(v) };
+    /// }
+    /// assert_eq!(cur.peek_prev(), Some(&4));
+    /// assert_eq!(cur.peek_next(), Some(&10));
+    /// ```
+    #[inline]
+    pub unsafe fn insert_before_unchecked(&mut self, value: T) {
+        // SAFETY: the caller upholds strict ordering, which is stronger than
+        // the non-strict ordering the inner list requires.
+        unsafe { self.inner.insert_before_unchecked(value) };
+    }
+
     /// Removes the element immediately to the **right** of the cursor and
     /// returns it.
     ///
@@ -713,6 +789,38 @@ mod tests {
         let mut cur = s.upper_bound_mut(Bound::Included(&2));
         // gap after 2, before 3; left neighbour = 2
         assert_eq!(cur.insert_before(2), Err(UnorderedValueError(2)));
+    }
+
+    // --- CursorMut insert_after_unchecked / insert_before_unchecked ---
+
+    #[test]
+    fn insert_after_unchecked_keeps_cursor() {
+        let mut s: SkipSet<i32> = [1, 3].into_iter().collect();
+        {
+            let mut cur = s.lower_bound_mut(Bound::Included(&2));
+            // SAFETY: gap is between 1 and 3; 1 < 2 < 3.
+            unsafe { cur.insert_after_unchecked(2) };
+            assert_eq!(cur.peek_prev(), Some(&1));
+            assert_eq!(cur.peek_next(), Some(&2));
+        }
+        assert_eq!(s.len(), 3);
+        assert!(s.contains(&2));
+        let vals: Vec<_> = s.iter().copied().collect();
+        assert_eq!(vals, [1, 2, 3]);
+    }
+
+    #[test]
+    fn insert_before_unchecked_advances_cursor_and_updates_tail() {
+        let mut s = set_123();
+        {
+            let mut cur = s.upper_bound_mut(Bound::Unbounded);
+            // SAFETY: rightmost gap; 3 < 4 and there is no right neighbour.
+            unsafe { cur.insert_before_unchecked(4) };
+            assert_eq!(cur.peek_prev(), Some(&4));
+            assert_eq!(cur.peek_next(), None);
+        }
+        assert_eq!(s.last(), Some(&4));
+        assert_eq!(s.len(), 4);
     }
 
     // --- CursorMut remove_next / remove_prev ---

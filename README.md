@@ -91,7 +91,7 @@ assert_eq!(cur.peek_next(), Some(&5)); // smallest element >= 5
 
 > [!NOTE]
 >
-> The cursor API is modelled on the `BTreeMap` and `LinkedList` cursor design from RFC 2570 and [rust-lang/rust#107540](https://github.com/rust-lang/rust/issues/107540), which has not yet been stabilised in the standard library. This implementation is likewise **unstable**: the API may change in a future minor release. See the [cursor documentation on docs.rs](https://docs.rs/skiplist/latest/skiplist/docs/cursor/index.html) for the full guide.
+> The cursor API is modelled on the `BTreeMap` cursor design tracked in [rust-lang/rust#107540](https://github.com/rust-lang/rust/issues/107540), which has not yet been stabilised in the standard library. This implementation is likewise **unstable**: the API may change in a future minor release. See the [cursor documentation on docs.rs](https://docs.rs/skiplist/latest/skiplist/docs/cursor/index.html) for the full guide.
 
 ## Basic usage
 

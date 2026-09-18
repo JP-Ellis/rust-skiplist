@@ -43,7 +43,7 @@ An element-based cursor (like a slice iterator) points _at_ a node. Inserting be
 
 A gap-based cursor sidesteps the problem entirely. The cursor's position is defined by what is on either side of it. Inserting next to the cursor does not change where the cursor sits: `insert_after` keeps the new element on the right and the cursor unchanged; `insert_before` inserts on the left and advances the cursor so the new element becomes the new left neighbour. Removing the right neighbour also leaves the cursor at the same gap; removing the left neighbour retreats it.
 
-This is the same design as the `BTreeMap` cursors introduced in the Rust standard library (see [RFC 2570](https://github.com/rust-lang/rfcs/blob/master/text/2570-linked-list-cursors.md) and [BTree cursors tracking issue](https://github.com/rust-lang/rust/issues/107540)).
+This is the same design as the unstable `BTreeMap` cursors in the Rust standard library (`btree_cursors`, [rust-lang/rust#107540](https://github.com/rust-lang/rust/issues/107540)). The standard library's `LinkedList` cursors from [RFC 2570](https://github.com/rust-lang/rfcs/blob/master/text/2570-linked-list-cursors.md) are element-based; the gap model was adopted for `BTreeMap` because an ordered collection has no natural answer to "which way does an element cursor move when its element is removed".
 
 ## Positioning a cursor: `lower_bound` vs `upper_bound`
 
@@ -159,6 +159,29 @@ assert_eq!(vals, [1, 2, 3, 4, 5, 10]);
 # }
 ```
 
+When the input is already known to be sorted, the two neighbour comparisons per `insert_after` are wasted. `insert_before_unchecked` skips them and advances the cursor in one call, at the cost of an `unsafe` block whose obligation is the ordering itself:
+
+```rust
+# #[cfg(feature = "cursor")] {
+use skiplist::ordered_skip_list::OrderedSkipList;
+use core::ops::Bound;
+
+let mut list: OrderedSkipList<i32> = [1, 10].into_iter().collect();
+let to_insert = [2, 3, 4, 5];
+
+let mut cur = list.lower_bound_mut(Bound::Included(&2));
+for v in to_insert {
+    // SAFETY: `to_insert` is ascending and every value lies in (1, 10).
+    unsafe { cur.insert_before_unchecked(v) };
+}
+
+let vals: Vec<_> = list.iter().copied().collect();
+assert_eq!(vals, [1, 2, 3, 4, 5, 10]);
+# }
+```
+
+Inserting an out-of-order value this way does not cause undefined behaviour, but it leaves the list unsorted, so every subsequent search returns wrong results. The methods are marked `unsafe` to match the standard library's `insert_after_unchecked` / `insert_before_unchecked`.
+
 ### Drain a range with a mutable cursor
 
 `remove_next` removes the right neighbour and leaves the cursor in place. Repeat until `peek_next` is outside the range:
@@ -208,7 +231,7 @@ assert_eq!(map.get(&3), Some(&30)); // unchanged
 
 ## Stability note
 
-The cursor API is modelled on the `BTreeMap` and `LinkedList` cursor design from [RFC 2570](https://github.com/rust-lang/rfcs/pull/2570) and the [BTreeMap cursor tracking issue](https://github.com/rust-lang/rust/issues/107540), which has not yet been stabilised in the Rust standard library as of this writing. Because the design space is still open, this implementation is likewise marked **unstable**: the API may change in a future minor release. Breaking changes will be noted in the changelog.
+The cursor API is modelled on the `BTreeMap` cursor design tracked in [rust-lang/rust#107540](https://github.com/rust-lang/rust/issues/107540), which has not yet been stabilised in the Rust standard library as of this writing. Because the design space is still open, this implementation is likewise marked **unstable**: the API may change in a future minor release. Breaking changes will be noted in the changelog.
 
 [`ordered_skip_list::cursor`]: crate::ordered_skip_list::cursor
 [`skip_set::cursor`]: crate::skip_set::cursor
