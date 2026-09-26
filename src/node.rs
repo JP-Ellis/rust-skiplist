@@ -424,11 +424,6 @@ impl<V, const N: usize> Node<V, N> {
     /// 3. **Links**: This method does not update the skip links of the node or
     ///    the surrounding nodes. The caller must update those links afterwards
     ///    so that no dangling link pointers remain.
-    #[expect(
-        clippy::unnecessary_box_returns,
-        reason = "pop() recovers the existing Box allocation created by insert_after(); \
-                  returning Box<Self> signals heap ownership to callers"
-    )]
     #[inline]
     pub(crate) unsafe fn pop(&mut self) -> Box<Self> {
         let _node_type = self.node_type();
@@ -776,11 +771,6 @@ impl<V, const N: usize> Node<V, N> {
     #[expect(
         clippy::multiple_unsafe_ops_per_block,
         reason = "link surgery touches provably disjoint pred and target nodes"
-    )]
-    #[expect(
-        clippy::unnecessary_box_returns,
-        reason = "pop() yields a Box<Self>; returning it transfers the ownership \
-                  token rather than immediately dropping it"
     )]
     pub(crate) unsafe fn splice_out(
         target: NonNull<Self>,
