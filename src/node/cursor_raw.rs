@@ -11,10 +11,9 @@
 
 use core::{cmp::Ordering, ptr::NonNull};
 
-use arrayvec::ArrayVec;
-
 use crate::node::{
     Node,
+    level_array::LevelArray,
     visitor::{IndexMutVisitor, Visitor},
 };
 
@@ -48,10 +47,10 @@ pub(crate) struct RawCursorMut<V, const N: usize> {
     /// the next structural modification.
     #[expect(
         clippy::type_complexity,
-        reason = "two parallel ArrayVecs form the precursor cache; a named type would \
+        reason = "two parallel LevelArrays form the precursor cache; a named type would \
                   not reduce complexity at the call sites"
     )]
-    pub(crate) precursors: Option<(ArrayVec<NonNull<Node<V, N>>, N>, ArrayVec<usize, N>)>,
+    pub(crate) precursors: Option<(LevelArray<NonNull<Node<V, N>>, N>, LevelArray<usize, N>)>,
 }
 
 // MARK: Internal gap-finding helper
