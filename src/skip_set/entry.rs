@@ -463,7 +463,7 @@ impl<T: fmt::Debug, C: Comparator<T> + ComparatorKey<T, T>, G: LevelGenerator, c
 
 #[cfg(test)]
 mod tests {
-    use pretty_assertions::assert_eq;
+    use pretty_assertions::{assert_eq, assert_matches};
 
     use super::Entry;
     use crate::{comparator::FnComparator, skip_set::SkipSet};
@@ -481,31 +481,31 @@ mod tests {
     #[test]
     fn entry_vacant_on_empty_set() {
         let mut set = SkipSet::<i32>::new();
-        assert!(matches!(set.entry(1), Entry::Vacant(_)));
+        assert_matches!(set.entry(1), Entry::Vacant(_));
     }
 
     #[test]
     fn entry_vacant_when_absent() {
         let mut set = make_set(&[1, 3]);
-        assert!(matches!(set.entry(2), Entry::Vacant(_)));
+        assert_matches!(set.entry(2), Entry::Vacant(_));
     }
 
     #[test]
     fn entry_occupied_when_present() {
         let mut set = make_set(&[1, 2, 3]);
-        assert!(matches!(set.entry(2), Entry::Occupied(_)));
+        assert_matches!(set.entry(2), Entry::Occupied(_));
     }
 
     #[test]
     fn entry_occupied_first() {
         let mut set = make_set(&[1, 2, 3]);
-        assert!(matches!(set.entry(1), Entry::Occupied(_)));
+        assert_matches!(set.entry(1), Entry::Occupied(_));
     }
 
     #[test]
     fn entry_occupied_last() {
         let mut set = make_set(&[1, 2, 3]);
-        assert!(matches!(set.entry(3), Entry::Occupied(_)));
+        assert_matches!(set.entry(3), Entry::Occupied(_));
     }
 
     #[test]
@@ -514,7 +514,7 @@ mod tests {
             SkipSet::with_comparator(FnComparator(|a: &i32, b: &i32| b.cmp(a)));
         set.insert(3);
         set.insert(1);
-        assert!(matches!(set.entry(2), Entry::Vacant(_)));
+        assert_matches!(set.entry(2), Entry::Vacant(_));
     }
 
     #[test]
@@ -523,7 +523,7 @@ mod tests {
             SkipSet::with_comparator(FnComparator(|a: &i32, b: &i32| b.cmp(a)));
         set.insert(3);
         set.insert(1);
-        assert!(matches!(set.entry(3), Entry::Occupied(_)));
+        assert_matches!(set.entry(3), Entry::Occupied(_));
     }
 
     // MARK: Entry::key
