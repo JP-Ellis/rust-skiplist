@@ -695,7 +695,7 @@ impl<T, const N: usize, C: Comparator<T>, G: LevelGenerator> CursorMut<'_, T, N,
     #[inline]
     pub fn remove_next(&mut self) -> Option<T> {
         // SAFETY: `list` is exclusively borrowed for `'a`.
-        let list_mut = unsafe { &mut *self.list };
+        let list_mut = unsafe { self.list.as_mut_unchecked() };
         let (mut boxed, target_ptr) = self.raw.splice_out_next(list_mut.head)?;
 
         if list_mut.tail == Some(target_ptr) {
@@ -756,7 +756,7 @@ impl<T, const N: usize, C: Comparator<T>, G: LevelGenerator> CursorMut<'_, T, N,
         // Capture target pointer before splice_out invalidates it.
         let removed_ptr = self.raw.current;
         // SAFETY: `list` is exclusively borrowed for `'a`.
-        let list_mut = unsafe { &mut *self.list };
+        let list_mut = unsafe { self.list.as_mut_unchecked() };
         let (mut boxed, predecessor) =
             RawCursorMut::splice_out_at_rank(target_rank, list_mut.head)?;
 
@@ -794,7 +794,7 @@ impl<T, const N: usize, C: Comparator<T>, G: LevelGenerator> CursorMut<'_, T, N,
         allow_equal: bool,
     ) -> Result<(), UnorderedValueError<T>> {
         // SAFETY: `list` is exclusively borrowed for `'a`.
-        let list_ref = unsafe { &*self.list };
+        let list_ref = unsafe { self.list.as_ref_unchecked() };
 
         // Left neighbour: must be < value (strict) or <= value (allow_equal).
         // SAFETY: `current` is valid.
@@ -828,7 +828,7 @@ impl<T, const N: usize, C: Comparator<T>, G: LevelGenerator> CursorMut<'_, T, N,
     /// present.
     fn insert_unchecked_impl(&mut self, value: T, move_cursor: bool) {
         // SAFETY: `list` is exclusively borrowed for `'a`.
-        let list_mut = unsafe { &mut *self.list };
+        let list_mut = unsafe { self.list.as_mut_unchecked() };
         self.raw.ensure_precursors(list_mut.head);
         let height = list_mut.generator.level();
         let new_rank = self.raw.current_rank.saturating_add(1);
