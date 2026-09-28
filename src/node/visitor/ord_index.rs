@@ -174,7 +174,7 @@ mod tests {
     use core::ptr::NonNull;
 
     use anyhow::Result;
-    use pretty_assertions::assert_eq;
+    use pretty_assertions::{assert_eq, assert_matches};
     use rstest::rstest;
 
     use super::OrdIndexVisitor;
@@ -335,7 +335,7 @@ mod tests {
         visitor.traverse();
         assert!(visitor.found());
 
-        assert!(matches!(visitor.step(), Step::FoundTarget));
+        assert_matches!(visitor.step(), Step::FoundTarget);
         unsafe { drop(Box::from_raw(head.as_ptr())) };
         Ok(())
     }

@@ -134,7 +134,7 @@ mod tests {
     use std::{num::NonZeroUsize, ptr::NonNull};
 
     use anyhow::{Result, anyhow};
-    use pretty_assertions::assert_eq;
+    use pretty_assertions::{assert_eq, assert_matches};
 
     use super::{Link, LinkError};
     use crate::node::Node;
@@ -177,10 +177,7 @@ mod tests {
     fn link_decrement_distance_underflow() -> Result<()> {
         let node: Node<i32, 3> = Node::new(3);
         let mut link = Link::new(NonNull::from(&node), 1)?;
-        assert!(matches!(
-            link.decrement_distance(),
-            Err(LinkError::DistanceUnderflow)
-        ));
+        assert_matches!(link.decrement_distance(), Err(LinkError::DistanceUnderflow));
         Ok(())
     }
 
@@ -188,10 +185,7 @@ mod tests {
     fn link_increment_distance_overflow() -> Result<()> {
         let node: Node<i32, 3> = Node::new(3);
         let mut link = Link::new(NonNull::from(&node), usize::MAX)?;
-        assert!(matches!(
-            link.increment_distance(),
-            Err(LinkError::DistanceOverflow)
-        ));
+        assert_matches!(link.increment_distance(), Err(LinkError::DistanceOverflow));
         Ok(())
     }
 }

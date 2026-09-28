@@ -1505,7 +1505,7 @@ pub(crate) mod tests {
         let detached_node = unsafe { v2.pop() };
 
         assert_eq!(detached_node.value, Some(20));
-        assert!(matches!(detached_node.node_type(), NodeType::Detached));
+        assert_matches!(detached_node.node_type(), NodeType::Detached);
 
         // Insta is incompatible with Miri
         if !cfg!(miri) {

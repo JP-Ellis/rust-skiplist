@@ -48,6 +48,12 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> SkipSet<T, N, C, G>
     /// according to the comparator), and `$O(m \log(n+m))$` when the ranges
     /// overlap.
     ///
+    /// The `$O(n+m)$` path compares only the boundary elements and trusts the
+    /// comparator for the rest.  A [`Comparator`] that is not a total order
+    /// can therefore leave the result unordered.
+    ///
+    /// [`Comparator`]: crate::comparator::Comparator
+    ///
     /// # Examples
     ///
     /// ```rust
