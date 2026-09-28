@@ -554,12 +554,14 @@ impl<K, V, const N: usize, C: Comparator<K>, G: LevelGenerator> SkipMap<K, V, N,
         }
     }
 
-    /// Creates a lazy iterator that removes and yields every key-value pair
-    /// for which `pred(&key, &mut value)` returns `true`.
+    /// Creates an iterator that removes and yields the `(key, value)` pairs
+    /// whose keys fall within `range` and for which `pred(&key, &mut value)`
+    /// returns `true`.
     ///
-    /// Pairs for which `pred` returns `false` are kept in the map.  The
-    /// predicate receives a shared reference to the key and a mutable reference
-    /// to the value.
+    /// Pairs outside `range`, and pairs for which `pred` returns `false`, are
+    /// kept in the map.  The predicate is never called for keys outside the
+    /// range.  It receives a shared reference to the key and a mutable
+    /// reference to the value.
     ///
     /// If the `ExtractIf` iterator is dropped before being fully consumed,
     /// the predicate is **not** called for the remaining entries; they all
@@ -578,21 +580,24 @@ impl<K, V, const N: usize, C: Comparator<K>, G: LevelGenerator> SkipMap<K, V, N,
     ///     map.insert(k, v);
     /// }
     ///
-    /// let extracted: Vec<_> = map.extract_if(|_k, v| matches!(*v, 20 | 40)).collect();
+    /// let extracted: Vec<_> = map.extract_if(2..=4, |_k, v| *v != 30).collect();
     /// assert_eq!(extracted, [(2, 20), (4, 40)]);
     ///
     /// let remaining: Vec<_> = map.iter().map(|(k, v)| (*k, *v)).collect();
     /// assert_eq!(remaining, [(1, 10), (3, 30), (5, 50)]);
     /// ```
     #[inline]
-    pub fn extract_if<F>(&mut self, pred: F) -> ExtractIf<'_, K, V, C, G, F, N>
+    pub fn extract_if<R, F>(&mut self, range: R, pred: F) -> ExtractIf<'_, K, V, C, G, R, F, N>
     where
+        R: RangeBounds<K>,
         F: FnMut(&K, &mut V) -> bool,
     {
         // SAFETY: self.head is a valid, exclusively-owned head sentinel.
         let current = unsafe { self.head.as_ref().next() };
         ExtractIf {
             current,
+            range,
+            past_hi: false,
             any_removed: false,
             list: self,
             pred,
@@ -1470,7 +1475,8 @@ impl<K, V> FusedIterator for Drain<'_, K, V> {}
 ///
 /// This struct is created by the [`SkipMap::extract_if`] method.  The
 /// predicate is called once per entry in key order.  Entries for which it
-/// returns `true` are removed and yielded; all others remain in place.
+/// returns `true` are removed and yielded; all others remain in place.  Only
+/// entries whose keys fall within `range` are offered to the predicate.
 ///
 /// If the iterator is dropped before being fully consumed the predicate is
 /// **not** called for the remaining entries; they all stay in the map.
@@ -1487,7 +1493,7 @@ impl<K, V> FusedIterator for Drain<'_, K, V> {}
 ///     map.insert(k, v);
 /// }
 ///
-/// let extracted: Vec<_> = map.extract_if(|_k, v| *v % 20 == 0).collect();
+/// let extracted: Vec<_> = map.extract_if(.., |_k, v| *v % 20 == 0).collect();
 /// assert_eq!(extracted, [(2, 20), (4, 40)]);
 /// ```
 #[must_use = "iterators are lazy and do nothing unless consumed"]
@@ -1497,6 +1503,7 @@ pub struct ExtractIf<
     V,
     C: Comparator<K> = OrdComparator,
     G: LevelGenerator = Geometric,
+    R: RangeBounds<K> = core::ops::RangeFull,
     F = fn(&K, &mut V) -> bool,
     const N: usize = 16,
 > where
@@ -1507,6 +1514,12 @@ pub struct ExtractIf<
     list: &'a mut SkipMap<K, V, N, C, G>,
     /// Raw pointer to the next node to visit, or `None` when exhausted.
     current: Option<NonNull<Node<(K, V), N>>>,
+    /// Range restriction: keys below the lower bound are skipped, keys above
+    /// the upper bound stop the iterator.
+    range: R,
+    /// Set once a key past the upper bound has been seen; every later `next`
+    /// returns `None` without touching the map.
+    past_hi: bool,
     /// Set to `true` the first time an entry is removed.  Used to skip the
     /// `$O(n)$` skip-link rebuild in `Drop::drop` when nothing was removed.
     any_removed: bool,
@@ -1516,38 +1529,41 @@ pub struct ExtractIf<
 
 // SAFETY: ExtractIf yields owned (K, V) pairs and holds &'a mut SkipMap.
 // Sending it to another thread requires K: Send, V: Send, C: Send, G: Send,
-// and F: Send.
+// R: Send, and F: Send.
 unsafe impl<
     K: Send,
     V: Send,
     C: Comparator<K> + Send,
     G: LevelGenerator + Send,
+    R: RangeBounds<K> + Send,
     F: Send,
     const N: usize,
-> Send for ExtractIf<'_, K, V, C, G, F, N>
+> Send for ExtractIf<'_, K, V, C, G, R, F, N>
 where
     F: FnMut(&K, &mut V) -> bool,
 {
 }
 
 // SAFETY: Sharing &ExtractIf requires K: Sync, V: Sync, C: Sync, G: Sync,
-// and F: Sync.  Advancing the iterator requires &mut ExtractIf.
+// R: Sync, and F: Sync.  Advancing the iterator requires &mut ExtractIf.
 unsafe impl<
     K: Sync,
     V: Sync,
     C: Comparator<K> + Sync,
     G: LevelGenerator + Sync,
+    R: RangeBounds<K> + Sync,
     F: Sync,
     const N: usize,
-> Sync for ExtractIf<'_, K, V, C, G, F, N>
+> Sync for ExtractIf<'_, K, V, C, G, R, F, N>
 where
     F: FnMut(&K, &mut V) -> bool,
 {
 }
 
-impl<K: fmt::Debug, V: fmt::Debug, C: Comparator<K>, G: LevelGenerator, F, const N: usize>
-    fmt::Debug for ExtractIf<'_, K, V, C, G, F, N>
+impl<K: fmt::Debug, V: fmt::Debug, C: Comparator<K>, G: LevelGenerator, R, F, const N: usize>
+    fmt::Debug for ExtractIf<'_, K, V, C, G, R, F, N>
 where
+    R: RangeBounds<K>,
     F: FnMut(&K, &mut V) -> bool,
 {
     #[inline]
@@ -1569,9 +1585,10 @@ where
     }
 }
 
-impl<K, V, C: Comparator<K>, G: LevelGenerator, F, const N: usize> Iterator
-    for ExtractIf<'_, K, V, C, G, F, N>
+impl<K, V, C: Comparator<K>, G: LevelGenerator, R, F, const N: usize> Iterator
+    for ExtractIf<'_, K, V, C, G, R, F, N>
 where
+    R: RangeBounds<K>,
     F: FnMut(&K, &mut V) -> bool,
 {
     type Item = (K, V);
@@ -1579,9 +1596,9 @@ where
     #[expect(
         clippy::unwrap_in_result,
         clippy::expect_used,
-        reason = "`value_mut()` and `take_value()` return None only for the head \
-              sentinel, which is never reachable via the data-node walk; the \
-              expect fires only on invariant violations"
+        reason = "`value()`, `value_mut()` and `take_value()` return None only for \
+              the head sentinel, which is never reachable via the data-node walk; \
+              the expect fires only on invariant violations"
     )]
     #[expect(
         clippy::multiple_unsafe_ops_per_block,
@@ -1592,16 +1609,51 @@ where
     #[inline]
     fn next(&mut self) -> Option<(K, V)> {
         loop {
+            if self.past_hi {
+                return None;
+            }
             let current_nn = self.current?;
-            // SAFETY: current_nn was derived from a heap-allocated Node<(K,V)>
-            // owned by the SkipMap that created this ExtractIf.  We hold
-            // &'a mut SkipMap exclusively for the iterator's lifetime,
-            // ensuring every node remains allocated and non-aliased.
-            // We capture next_opt before any mutation of the current node.
-            unsafe {
-                let current: *mut Node<(K, V), N> = current_nn.as_ptr();
-                let next_opt = (*current).next();
+            let current: *mut Node<(K, V), N> = current_nn.as_ptr();
 
+            // Phase 1: classify the key against the range.  The shared borrow
+            // of the key ends before the mutable borrow in phase 2.
+            let (next_opt, after_lo, in_hi) = {
+                // SAFETY: current_nn was derived from a heap-allocated
+                // Node<(K,V)> owned by the SkipMap that created this
+                // ExtractIf.  We hold &'a mut SkipMap exclusively.
+                let key: &K = &unsafe { (*current).value() }
+                    .expect("data node has value")
+                    .0;
+                // SAFETY: same provenance as `key`; current is still valid.
+                let next_opt = unsafe { (*current).next() };
+                let cmp = &self.list.comparator;
+                let after_lo = match self.range.start_bound() {
+                    Bound::Unbounded => true,
+                    Bound::Included(lo) => cmp.compare(key, lo) != Ordering::Less,
+                    Bound::Excluded(lo) => cmp.compare(key, lo) == Ordering::Greater,
+                };
+                let in_hi = match self.range.end_bound() {
+                    Bound::Unbounded => true,
+                    Bound::Included(hi) => cmp.compare(key, hi) != Ordering::Greater,
+                    Bound::Excluded(hi) => cmp.compare(key, hi) == Ordering::Less,
+                };
+                (next_opt, after_lo, in_hi)
+            };
+
+            if !after_lo {
+                self.current = next_opt;
+                continue;
+            }
+            if !in_hi {
+                self.past_hi = true;
+                return None;
+            }
+
+            // Phase 2: in range; consult the predicate and maybe remove.
+            // SAFETY: as above; every node remains allocated and non-aliased
+            // for the iterator's lifetime.  next_opt was captured before any
+            // mutation of the current node.
+            unsafe {
                 let kv_ref = (*current).value_mut().expect("data node has value");
                 if (self.pred)(&kv_ref.0, &mut kv_ref.1) {
                     self.current = next_opt;
@@ -1630,16 +1682,18 @@ where
     }
 }
 
-impl<K, V, C: Comparator<K>, G: LevelGenerator, F, const N: usize> FusedIterator
-    for ExtractIf<'_, K, V, C, G, F, N>
+impl<K, V, C: Comparator<K>, G: LevelGenerator, R, F, const N: usize> FusedIterator
+    for ExtractIf<'_, K, V, C, G, R, F, N>
 where
+    R: RangeBounds<K>,
     F: FnMut(&K, &mut V) -> bool,
 {
 }
 
-impl<K, V, C: Comparator<K>, G: LevelGenerator, F, const N: usize> Drop
-    for ExtractIf<'_, K, V, C, G, F, N>
+impl<K, V, C: Comparator<K>, G: LevelGenerator, R, F, const N: usize> Drop
+    for ExtractIf<'_, K, V, C, G, R, F, N>
 where
+    R: RangeBounds<K>,
     F: FnMut(&K, &mut V) -> bool,
 {
     #[inline]
@@ -2156,7 +2210,7 @@ mod tests {
     #[test]
     fn extract_if_none_match() {
         let mut map = imap_from([(1, 10), (2, 20), (3, 30)]);
-        let extracted: Vec<_> = map.extract_if(|_k, _v| false).collect();
+        let extracted: Vec<_> = map.extract_if(.., |_k, _v| false).collect();
         assert!(extracted.is_empty());
         assert_eq!(map.len(), 3);
         let pairs: Vec<_> = map.iter().map(|(&k, &v)| (k, v)).collect();
@@ -2166,7 +2220,7 @@ mod tests {
     #[test]
     fn extract_if_all_match() {
         let mut map = imap_from([(1, 10), (2, 20), (3, 30)]);
-        let extracted: Vec<_> = map.extract_if(|_k, _v| true).collect();
+        let extracted: Vec<_> = map.extract_if(.., |_k, _v| true).collect();
         assert_eq!(extracted, [(1, 10), (2, 20), (3, 30)]);
         assert!(map.is_empty());
     }
@@ -2174,7 +2228,7 @@ mod tests {
     #[test]
     fn extract_if_by_value() {
         let mut map = imap_from([(1, 10), (2, 20), (3, 30), (4, 40), (5, 50)]);
-        let extracted: Vec<_> = map.extract_if(|_k, v| matches!(*v, 20 | 40)).collect();
+        let extracted: Vec<_> = map.extract_if(.., |_k, v| matches!(*v, 20 | 40)).collect();
         assert_eq!(extracted, [(2, 20), (4, 40)]);
         let remaining: Vec<_> = map.iter().map(|(&k, &v)| (k, v)).collect();
         assert_eq!(remaining, [(1, 10), (3, 30), (5, 50)]);
@@ -2183,7 +2237,7 @@ mod tests {
     #[test]
     fn extract_if_by_key() {
         let mut map = imap_from([(1, 10), (2, 20), (3, 30), (4, 40)]);
-        let extracted: Vec<_> = map.extract_if(|k, _v| k & 1 == 0).collect();
+        let extracted: Vec<_> = map.extract_if(.., |k, _v| k & 1 == 0).collect();
         assert_eq!(extracted, [(2, 20), (4, 40)]);
         let remaining: Vec<_> = map.iter().map(|(&k, &v)| (k, v)).collect();
         assert_eq!(remaining, [(1, 10), (3, 30)]);
@@ -2194,7 +2248,7 @@ mod tests {
         let mut map = imap_from([(1, 10), (2, 20), (3, 30)]);
         // Increment all values; only extract those > 15 after increment.
         let extracted: Vec<_> = map
-            .extract_if(|_k, v| {
+            .extract_if(.., |_k, v| {
                 *v += 5;
                 *v > 25
             })
@@ -2209,7 +2263,7 @@ mod tests {
     fn extract_if_partial_drop() {
         let mut map = imap_from([(1, 10), (2, 20), (3, 30), (4, 40), (5, 50)]);
         {
-            let mut iter = map.extract_if(|_k, _v| true);
+            let mut iter = map.extract_if(.., |_k, _v| true);
             let first = iter.next();
             assert_eq!(first, Some((1, 10)));
             // Drop iter here; remaining entries stay in the map.
@@ -2228,11 +2282,91 @@ mod tests {
         map.insert(2, 20);
         map.insert(3, 30);
         // Stored as [3, 2, 1] (reverse order)
-        let extracted: Vec<_> = map.extract_if(|k, _v| k & 1 != 0).collect();
+        let extracted: Vec<_> = map.extract_if(.., |k, _v| k & 1 != 0).collect();
         // Odd keys in traversal order (3 then 1)
         assert_eq!(extracted, [(3, 30), (1, 10)]);
         let remaining: Vec<_> = map.iter().map(|(&k, &v)| (k, v)).collect();
         assert_eq!(remaining, [(2, 20)]);
+    }
+
+    #[test]
+    fn extract_if_range_half_open() {
+        let mut map: SkipMap<i32, i32> = (1..=6).map(|k| (k, k * 10)).collect();
+        let extracted: Vec<_> = map.extract_if(2..5, |_k, _v| true).collect();
+        assert_eq!(extracted, [(2, 20), (3, 30), (4, 40)]);
+        let remaining: Vec<_> = map.keys().copied().collect();
+        assert_eq!(remaining, [1, 5, 6]);
+    }
+
+    #[test]
+    fn extract_if_range_inclusive() {
+        let mut map: SkipMap<i32, i32> = (1..=6).map(|k| (k, k * 10)).collect();
+        let extracted: Vec<_> = map.extract_if(2..=5, |_k, _v| true).collect();
+        assert_eq!(extracted, [(2, 20), (3, 30), (4, 40), (5, 50)]);
+        assert_eq!(map.len(), 2);
+    }
+
+    #[test]
+    fn extract_if_range_excluded_lower_bound() {
+        use core::ops::Bound;
+        let mut map: SkipMap<i32, i32> = (1..=6).map(|k| (k, k * 10)).collect();
+        let extracted: Vec<_> = map
+            .extract_if((Bound::Excluded(2), Bound::Unbounded), |_k, _v| true)
+            .collect();
+        assert_eq!(extracted, [(3, 30), (4, 40), (5, 50), (6, 60)]);
+        let remaining: Vec<_> = map.keys().copied().collect();
+        assert_eq!(remaining, [1, 2]);
+    }
+
+    #[test]
+    fn extract_if_range_below_contents() {
+        let mut map: SkipMap<i32, i32> = (10..=12).map(|k| (k, k)).collect();
+        let extracted: Vec<_> = map.extract_if(..5, |_k, _v| true).collect();
+        assert!(extracted.is_empty());
+        assert_eq!(map.len(), 3);
+    }
+
+    #[test]
+    fn extract_if_range_above_contents() {
+        let mut map: SkipMap<i32, i32> = (10..=12).map(|k| (k, k)).collect();
+        let extracted: Vec<_> = map.extract_if(20.., |_k, _v| true).collect();
+        assert!(extracted.is_empty());
+        assert_eq!(map.len(), 3);
+    }
+
+    #[test]
+    fn extract_if_range_empty() {
+        let mut map: SkipMap<i32, i32> = (1..=6).map(|k| (k, k * 10)).collect();
+        let extracted: Vec<_> = map.extract_if(3..3, |_k, _v| true).collect();
+        assert!(extracted.is_empty());
+        assert_eq!(map.len(), 6);
+    }
+
+    #[test]
+    #[expect(
+        clippy::integer_division_remainder_used,
+        reason = "test intent is clearest with %"
+    )]
+    fn extract_if_range_with_predicate() {
+        let mut map: SkipMap<i32, i32> = (1..=8).map(|k| (k, k)).collect();
+        let extracted: Vec<_> = map.extract_if(2..7, |k, _v| k % 2 == 0).collect();
+        assert_eq!(extracted, [(2, 2), (4, 4), (6, 6)]);
+        let remaining: Vec<_> = map.keys().copied().collect();
+        assert_eq!(remaining, [1, 3, 5, 7, 8]);
+    }
+
+    #[test]
+    fn extract_if_range_stops_at_upper_bound() {
+        // The predicate must not be called for keys past the upper bound.
+        let mut map: SkipMap<i32, i32> = (1..=6).map(|k| (k, k)).collect();
+        let mut seen = Vec::new();
+        let _extracted: Vec<_> = map
+            .extract_if(..=3, |k, _v| {
+                seen.push(*k);
+                true
+            })
+            .collect();
+        assert_eq!(seen, [1, 2, 3]);
     }
 
     // MARK: extract_if panic safety
@@ -2247,7 +2381,7 @@ mod tests {
         }
 
         let result = catch_unwind(AssertUnwindSafe(|| {
-            for extracted in map.extract_if(|key, _value| {
+            for extracted in map.extract_if(.., |key, _value| {
                 assert!(*key != 7, "predicate panic");
                 true
             }) {
@@ -2276,7 +2410,7 @@ mod tests {
         }
 
         let result = catch_unwind(AssertUnwindSafe(|| {
-            for extracted in map.extract_if(|_, _| true) {
+            for extracted in map.extract_if(.., |_, _| true) {
                 drop(extracted);
             }
         }));
