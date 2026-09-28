@@ -1,6 +1,6 @@
 //! End-of-list write methods for [`SkipList`](super::SkipList):
-//! `push_front`, `push_back`, `pop_front`, `pop_back`, `pop_front_if`,
-//! and `pop_back_if`.
+//! `push_front`, `push_front_mut`, `push_back`, `push_back_mut`, `pop_front`,
+//! `pop_back`, `pop_front_if`, and `pop_back_if`.
 
 use core::ptr::NonNull;
 
@@ -19,6 +19,8 @@ impl<T, G: LevelGenerator, const N: usize> SkipList<T, N, G> {
     ///
     /// The new element becomes the element at index 0, shifting all existing
     /// elements one position to the right.  This operation is `$O(\log n)$`.
+    /// To obtain a reference to the inserted element, use
+    /// [`push_front_mut`](SkipList::push_front_mut).
     ///
     /// # Examples
     ///
@@ -29,12 +31,35 @@ impl<T, G: LevelGenerator, const N: usize> SkipList<T, N, G> {
     /// list.push_front(1);
     /// list.push_front(2);
     /// assert_eq!(list.len(), 2);
+    /// assert_eq!(list.front(), Some(&2));
+    /// ```
+    #[inline]
+    pub fn push_front(&mut self, value: T) {
+        _ = self.push_front_mut(value);
+    }
+
+    /// Inserts `value` at the front of the list and returns a mutable
+    /// reference to it.
+    ///
+    /// The new element becomes the element at index 0, shifting all existing
+    /// elements one position to the right.  This operation is `$O(\log n)$`.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use skiplist::skip_list::SkipList;
+    ///
+    /// let mut list = SkipList::<i32>::new();
+    /// let r = list.push_front_mut(1);
+    /// *r += 10;
+    /// assert_eq!(list.front(), Some(&11));
     /// ```
     #[expect(
         clippy::expect_used,
         clippy::missing_panics_doc,
         reason = "insert_after guarantees head.next is Some; Link::new(_, 1) and \
-                  increment_distance cannot fail under any reachable condition"
+                  increment_distance cannot fail under any reachable condition; \
+                  the inserted node always carries a value"
     )]
     #[expect(
         clippy::indexing_slicing,
@@ -47,7 +72,8 @@ impl<T, G: LevelGenerator, const N: usize> SkipList<T, N, G> {
                   batching the operations avoids repeating the same SAFETY preamble"
     )]
     #[inline]
-    pub fn push_front(&mut self, value: T) {
+    #[must_use = "if you don't need a reference to the value, use `SkipList::push_front` instead"]
+    pub fn push_front_mut(&mut self, value: T) -> &mut T {
         // height ∈ [0, total]: number of skip links to allocate.
         let height = self.generator.level();
         let max_levels = self.head_ref().level();
@@ -104,12 +130,19 @@ impl<T, G: LevelGenerator, const N: usize> SkipList<T, N, G> {
             self.tail = Some(new_node_ptr);
         }
         self.len = self.len.saturating_add(1);
+
+        // SAFETY: new_node_ptr is the node just inserted; it is live and
+        // exclusively owned by this list.  The returned &mut T is bounded by
+        // &mut self.
+        unsafe { (*new_node_ptr.as_ptr()).value_mut() }.expect("inserted node has a value")
     }
 
     /// Appends `value` to the back of the list.
     ///
     /// The new element becomes the element at index `self.len()`, placed after
     /// all existing elements.  This operation is `$O(\log n)$` expected.
+    /// To obtain a reference to the inserted element, use
+    /// [`push_back_mut`](SkipList::push_back_mut).
     ///
     /// # Examples
     ///
@@ -120,13 +153,36 @@ impl<T, G: LevelGenerator, const N: usize> SkipList<T, N, G> {
     /// list.push_back(1);
     /// list.push_back(2);
     /// assert_eq!(list.len(), 2);
+    /// assert_eq!(list.back(), Some(&2));
+    /// ```
+    #[inline]
+    pub fn push_back(&mut self, value: T) {
+        _ = self.push_back_mut(value);
+    }
+
+    /// Appends `value` to the back of the list and returns a mutable
+    /// reference to it.
+    ///
+    /// The new element becomes the element at index `self.len()`, placed after
+    /// all existing elements.  This operation is `$O(\log n)$` expected.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use skiplist::skip_list::SkipList;
+    ///
+    /// let mut list = SkipList::<i32>::new();
+    /// let r = list.push_back_mut(1);
+    /// *r += 10;
+    /// assert_eq!(list.back(), Some(&11));
     /// ```
     #[expect(
         clippy::expect_used,
         clippy::missing_panics_doc,
         reason = "insert_after guarantees the tail's next is Some immediately after; \
                   distance equals new_rank − pred_rank where pred_rank ≤ self.len < new_rank \
-                  so distance ≥ 1 always; overflow requires > usize::MAX nodes"
+                  so distance ≥ 1 always; overflow requires > usize::MAX nodes; \
+                  the inserted node always carries a value"
     )]
     #[expect(
         clippy::indexing_slicing,
@@ -139,7 +195,8 @@ impl<T, G: LevelGenerator, const N: usize> SkipList<T, N, G> {
                   splitting across blocks would require unsafe-crossing raw-pointer variables"
     )]
     #[inline]
-    pub fn push_back(&mut self, value: T) {
+    #[must_use = "if you don't need a reference to the value, use `SkipList::push_back` instead"]
+    pub fn push_back_mut(&mut self, value: T) -> &mut T {
         // height ∈ [0, total]: number of skip links to allocate.
         let height = self.generator.level();
 
@@ -190,6 +247,11 @@ impl<T, G: LevelGenerator, const N: usize> SkipList<T, N, G> {
 
         self.tail = Some(new_node_nonnull);
         self.len = self.len.saturating_add(1);
+
+        // SAFETY: new_node_nonnull is the node just inserted; it is live and
+        // exclusively owned by this list.  The returned &mut T is bounded by
+        // &mut self.
+        unsafe { (*new_node_nonnull.as_ptr()).value_mut() }.expect("inserted node has a value")
     }
 
     /// Removes and returns the first element, or `None` if the list is empty.
@@ -755,5 +817,41 @@ mod tests {
             None
         );
         assert_eq!(list.back(), Some(&13));
+    }
+
+    // MARK: push_front_mut / push_back_mut
+
+    #[test]
+    fn push_front_mut_returns_inserted() {
+        let mut list = SkipList::<i32>::new();
+        let r = list.push_front_mut(5);
+        assert_eq!(*r, 5);
+        *r = 6;
+        assert_eq!(list.front(), Some(&6));
+        assert_eq!(list.len(), 1);
+    }
+
+    #[test]
+    fn push_front_mut_preserves_order() {
+        let mut list: SkipList<i32> = [2, 3].into_iter().collect();
+        *list.push_front_mut(0) += 1;
+        assert_eq!(list.iter().copied().collect::<Vec<_>>(), [1, 2, 3]);
+    }
+
+    #[test]
+    fn push_back_mut_returns_inserted() {
+        let mut list = SkipList::<i32>::new();
+        let r = list.push_back_mut(5);
+        assert_eq!(*r, 5);
+        *r = 6;
+        assert_eq!(list.back(), Some(&6));
+        assert_eq!(list.len(), 1);
+    }
+
+    #[test]
+    fn push_back_mut_preserves_order() {
+        let mut list: SkipList<i32> = [1, 2].into_iter().collect();
+        *list.push_back_mut(2) += 1;
+        assert_eq!(list.iter().copied().collect::<Vec<_>>(), [1, 2, 3]);
     }
 }
