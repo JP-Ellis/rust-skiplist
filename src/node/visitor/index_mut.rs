@@ -1,11 +1,10 @@
 //! Mutable index-based visitor.
 
-use core::{iter, marker::PhantomData, ptr::NonNull};
-
-use arrayvec::ArrayVec;
+use core::{marker::PhantomData, ptr::NonNull};
 
 use crate::node::{
     Node,
+    level_array::LevelArray,
     visitor::{Step, Visitor, VisitorMut},
 };
 
@@ -46,12 +45,12 @@ pub(crate) struct IndexMutVisitor<T, const N: usize> {
     /// level `l` points to `>= target` (or has no link at that level).
     /// Pre-filled with `head` so that every level has a valid precursor even
     /// when the target is before the first real node.
-    precursors: ArrayVec<NonNull<Node<T, N>>, N>,
+    precursors: LevelArray<NonNull<Node<T, N>>, N>,
     /// For each level `l`: the cumulative distance already traversed at level
     /// `l` when the precursor at that level was recorded.  Together with the
     /// precursor's link distance this is sufficient to compute the new link
     /// distances after insertion or removal.
-    precursor_distances: ArrayVec<usize, N>,
+    precursor_distances: LevelArray<usize, N>,
     /// Variance marker: acts like `*mut Node<T, N>`, invariant in `T`,
     /// not automatically `Send`/`Sync`.
     _marker: PhantomData<*mut Node<T, N>>,
@@ -88,8 +87,8 @@ impl<T, const N: usize> IndexMutVisitor<T, N> {
             // Every level starts with `head` as its precursor: the head is
             // always before every real node, so it is a valid precursor for
             // any target index.
-            precursors: iter::repeat_n(current, max_levels).collect(),
-            precursor_distances: iter::repeat_n(0, max_levels).collect(),
+            precursors: LevelArray::from_fn(max_levels, |_| current),
+            precursor_distances: LevelArray::from_fn(max_levels, |_| 0_usize),
             _marker: PhantomData,
         }
     }
@@ -116,8 +115,8 @@ impl<T, const N: usize> IndexMutVisitor<T, N> {
         self,
     ) -> (
         NonNull<Node<T, N>>,
-        ArrayVec<NonNull<Node<T, N>>, N>,
-        ArrayVec<usize, N>,
+        LevelArray<NonNull<Node<T, N>>, N>,
+        LevelArray<usize, N>,
     ) {
         (self.current, self.precursors, self.precursor_distances)
     }
