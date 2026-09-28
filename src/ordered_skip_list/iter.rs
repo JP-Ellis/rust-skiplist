@@ -206,6 +206,17 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
     /// let reversed: Vec<i32> = list.range(2..=4).copied().rev().collect();
     /// assert_eq!(reversed, [4, 3, 2]);
     /// ```
+    ///
+    /// `core::range` types work anywhere a [`RangeBounds`] is accepted:
+    ///
+    /// ```rust
+    /// use core::range::RangeInclusive;
+    /// use skiplist::ordered_skip_list::OrderedSkipList;
+    ///
+    /// let list: OrderedSkipList<i32> = [1, 3, 5, 7, 9].into_iter().collect();
+    /// let mid: Vec<i32> = list.range(RangeInclusive { start: 3, last: 7 }).copied().collect();
+    /// assert_eq!(mid, [3, 5, 7]);
+    /// ```
     #[expect(
         clippy::panic,
         reason = "mirrors BTreeMap::range / BTreeSet::range: panics on invalid range bounds, \
@@ -363,6 +374,18 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
     /// assert_eq!(mid, [2, 3, 4]);
     /// let remaining: Vec<i32> = list.iter().copied().collect();
     /// assert_eq!(remaining, [1, 5]);
+    /// ```
+    ///
+    /// `core::range` types work anywhere a [`RangeBounds`] is accepted:
+    ///
+    /// ```rust
+    /// use core::range::RangeFrom;
+    /// use skiplist::ordered_skip_list::OrderedSkipList;
+    ///
+    /// let mut list: OrderedSkipList<i32> = [1, 3, 5, 7, 9].into_iter().collect();
+    /// let tail: Vec<i32> = list.drain_range(RangeFrom { start: 5 }).collect();
+    /// assert_eq!(tail, [5, 7, 9]);
+    /// assert_eq!(list.iter().copied().collect::<Vec<_>>(), [1, 3]);
     /// ```
     #[expect(
         clippy::panic,

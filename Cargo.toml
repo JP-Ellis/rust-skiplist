@@ -13,7 +13,7 @@ keywords = ["collection", "skiplist", "sorted"]
 categories = ["data-structures"]
 
 edition = "2024"
-rust-version = "1.95"
+rust-version = "1.96"
 
   [package.metadata]
     [package.metadata.docs.rs]

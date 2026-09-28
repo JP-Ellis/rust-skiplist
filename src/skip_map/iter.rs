@@ -354,6 +354,17 @@ impl<K, V, const N: usize, C: Comparator<K>, G: LevelGenerator> SkipMap<K, V, N,
     /// let slice: Vec<_> = map.range(2..=4).collect();
     /// assert_eq!(slice, [(&2, &"b"), (&3, &"c"), (&4, &"d")]);
     /// ```
+    ///
+    /// `core::range` types work anywhere a [`RangeBounds`] is accepted:
+    ///
+    /// ```rust
+    /// use core::range::Range;
+    /// use skiplist::skip_map::SkipMap;
+    ///
+    /// let map: SkipMap<i32, &str> = [(1, "a"), (2, "b"), (3, "c")].into_iter().collect();
+    /// let keys: Vec<i32> = map.range(Range { start: 2, end: 4 }).map(|(k, _)| *k).collect();
+    /// assert_eq!(keys, [2, 3]);
+    /// ```
     #[expect(
         clippy::panic,
         reason = "mirrors BTreeMap::range: panics on invalid range bounds, \
