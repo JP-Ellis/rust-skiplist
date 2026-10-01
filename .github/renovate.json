@@ -13,7 +13,8 @@
   "automerge": true,
   "packageRules": [
     {
-      "matchPackageNames": ["rust", "rust-lang/rust"],
+      "description": "rust-toolchain.toml and mise.toml pin the same toolchain under different dependency names. Grouping them lands both pins in one PR; separately, each PR leaves the two pins disagreeing.",
+      "matchDepNames": ["rust", "core:rust"],
       "groupName": "rust toolchain"
     }
   ]
