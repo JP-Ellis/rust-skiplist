@@ -2,7 +2,6 @@
 
 [settings]
 experimental = true
-lockfile = true
 
 [env]
 # rustdoc requires absolute paths for these flags; {{config_root}} expands to
