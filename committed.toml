@@ -4,7 +4,8 @@
 ## See <https://github.com/crate-ci/committed/blob/master/docs/reference.md>
 
 style = "conventional"
-line_length = 80
+line_length = 100
+subject_length = 80
 merge_commit = false
 no_fixup = false
 subject_capitalized = false
