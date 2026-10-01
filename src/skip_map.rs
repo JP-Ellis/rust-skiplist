@@ -30,7 +30,7 @@
 //!
 //! **Access:** [`get`], [`get_mut`], [`get_key_value`], [`get_by_index`],
 //!   [`contains_key`], [`first_key_value`], [`last_key_value`], [`rank`],
-//!   [`comparator`], [`entry`].
+//!   [`entry`].
 //!
 //! **Insertion:** [`insert`], [`merge`].
 //!
@@ -80,7 +80,6 @@
 //! [`first_key_value`]: SkipMap::first_key_value
 //! [`last_key_value`]: SkipMap::last_key_value
 //! [`rank`]: SkipMap::rank
-//! [`comparator`]: SkipMap::comparator
 //! [`entry`]: SkipMap::entry
 //! [`insert`]: SkipMap::insert
 //! [`merge`]: SkipMap::merge
