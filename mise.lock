@@ -46,6 +46,18 @@ url = "https://github.com/cargo-bins/cargo-binstall/releases/download/v1.24.0/ca
 url_api = "https://api.github.com/repos/cargo-bins/cargo-binstall/releases/assets/590638843"
 provenance = "github-attestations"
 
+[[tools."aqua:j178/prek"]]
+version = "0.5.4"
+backend = "aqua:j178/prek"
+
+[[tools."aqua:nextest-rs/nextest/cargo-nextest"]]
+version = "0.9.146"
+backend = "aqua:nextest-rs/nextest/cargo-nextest"
+
+[[tools."aqua:taiki-e/cargo-llvm-cov"]]
+version = "0.8.7"
+backend = "aqua:taiki-e/cargo-llvm-cov"
+
 [[tools."cargo:cargo-hack"]]
 version = "0.6.45"
 backend = "cargo:cargo-hack"
@@ -61,6 +73,10 @@ backend = "cargo:cargo-nextest"
 [[tools."cargo:prek"]]
 version = "0.4.14"
 backend = "cargo:prek"
+
+[[tools."github:taiki-e/cargo-hack"]]
+version = "0.6.45"
+backend = "github:taiki-e/cargo-hack"
 
 [[tools.rumdl]]
 version = "v0.2.77"
