@@ -18,7 +18,7 @@ RUSTC_BOOTSTRAP = "1"
 CARGO_BUILD_WARNINGS = "deny"
 
 [tools]
-"core:rust" = { version = "1.97", components = "clippy,llvm-tools" }
+"core:rust" = { version = "1.99", components = "clippy,llvm-tools" }
 "aqua:cargo-bins/cargo-binstall" = "1.24.0"
 "cargo:cargo-hack" = "0.6"
 "cargo:cargo-llvm-cov" = "0.8"

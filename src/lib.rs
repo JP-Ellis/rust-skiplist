@@ -101,18 +101,4 @@ pub use skip_list::SkipList;
 pub use skip_map::SkipMap;
 pub use skip_set::SkipSet;
 
-/// Convenience re-exports for glob import.
-///
-/// ```rust
-/// use skiplist::prelude::*;
-/// ```
-pub mod prelude {
-    #[cfg(feature = "partial-ord")]
-    pub use crate::PartialOrdComparator;
-    pub use crate::{
-        Comparator, ComparatorKey, FnComparator, Geometric, LevelGenerator, OrdComparator,
-        OrderedSkipList, SkipList, SkipMap, SkipSet,
-    };
-    #[cfg(feature = "cursor")]
-    pub use crate::{ordered_skip_list::UnorderedValueError, skip_map::UnorderedKeyError};
-}
+pub mod prelude;

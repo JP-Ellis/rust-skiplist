@@ -1958,7 +1958,7 @@ mod tests {
     fn range_no_elements_in_gap() {
         let map = imap_from([(1, 10), (5, 50)]);
         let pairs: Vec<_> = map.range(2..=4).map(|(&k, &v)| (k, v)).collect();
-        assert!(pairs.is_empty());
+        assert_eq!(pairs, []);
     }
 
     #[test]
@@ -2122,7 +2122,7 @@ mod tests {
     fn drain_empty() {
         let mut map = SkipMap::<i32, i32>::new();
         let drained: Vec<_> = map.drain().collect();
-        assert!(drained.is_empty());
+        assert_eq!(drained, []);
         assert!(map.is_empty());
     }
 
@@ -2157,7 +2157,7 @@ mod tests {
     fn extract_if_none_match() {
         let mut map = imap_from([(1, 10), (2, 20), (3, 30)]);
         let extracted: Vec<_> = map.extract_if(|_k, _v| false).collect();
-        assert!(extracted.is_empty());
+        assert_eq!(extracted, []);
         assert_eq!(map.len(), 3);
         let pairs: Vec<_> = map.iter().map(|(&k, &v)| (k, v)).collect();
         assert_eq!(pairs, [(1, 10), (2, 20), (3, 30)]);

@@ -9,6 +9,10 @@
 //! [`cursor`] | Gap cursor model, `lower_bound`/`upper_bound` semantics, how-to guides (requires `cursor` feature) |
 //! [`internals`] | Node ownership, pointer provenance, `NonNull`-over-`Box` rationale (for contributors) |
 //! [`partial_ord`] | The `partial-ord` feature, NaN caveats, `total_cmp` alternative |
+#![expect(
+    clippy::inline_modules,
+    reason = "each page is an empty module whose docs come from include_str!"
+)]
 
 #[expect(
     missing_docs,

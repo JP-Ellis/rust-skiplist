@@ -531,7 +531,7 @@ mod tests {
     fn iter_empty() {
         let set = make_set(&[]);
         let v: Vec<i32> = set.iter().copied().collect();
-        assert!(v.is_empty());
+        assert_eq!(v, []);
     }
 
     #[test]
@@ -588,7 +588,7 @@ mod tests {
     #[test]
     fn range_empty() {
         let set = make_set(&[1, 2, 3]);
-        assert!(set.range(5..10).copied().collect::<Vec<i32>>().is_empty());
+        assert_eq!(set.range(5..10).copied().collect::<Vec<i32>>(), []);
     }
 
     // MARK: drain
@@ -597,7 +597,7 @@ mod tests {
     fn drain_empty() {
         let mut set = make_set(&[]);
         let v: Vec<i32> = set.drain().collect();
-        assert!(v.is_empty());
+        assert_eq!(v, []);
         assert!(set.is_empty());
     }
 
@@ -639,7 +639,7 @@ mod tests {
     fn into_iter_empty() {
         let set = make_set(&[]);
         let v: Vec<i32> = set.into_iter().collect();
-        assert!(v.is_empty());
+        assert_eq!(v, []);
     }
 
     #[test]
@@ -684,7 +684,7 @@ mod tests {
     fn extract_if_empty_set() {
         let mut set = make_set(&[]);
         let removed: Vec<i32> = set.extract_if(.., |_| true).collect();
-        assert!(removed.is_empty());
+        assert_eq!(removed, []);
         assert!(set.is_empty());
     }
 
@@ -692,7 +692,7 @@ mod tests {
     fn extract_if_none_match() {
         let mut set = make_set(&[1, 2, 3]);
         let removed: Vec<i32> = set.extract_if(.., |_| false).collect();
-        assert!(removed.is_empty());
+        assert_eq!(removed, []);
         assert_eq!(to_vec(&set), [1, 2, 3]);
     }
 
@@ -770,7 +770,7 @@ mod tests {
     fn extract_if_range_empty_yields_nothing() {
         let mut set = make_set(&[1, 2, 3]);
         let removed: Vec<i32> = set.extract_if(10..20, |_| true).collect();
-        assert!(removed.is_empty());
+        assert_eq!(removed, []);
         assert_eq!(to_vec(&set), [1, 2, 3]);
     }
 
