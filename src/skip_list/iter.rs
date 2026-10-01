@@ -1585,7 +1585,7 @@ mod tests {
             list.push_back(i);
         }
         let got: Vec<i32> = list.drain(2..2).collect();
-        assert!(got.is_empty());
+        assert_eq!(got, []);
         assert_eq!(list.len(), 5);
         let remaining: Vec<i32> = list.iter().copied().collect();
         assert_eq!(remaining, [1, 2, 3, 4, 5]);
@@ -1752,7 +1752,7 @@ mod tests {
     fn extract_if_empty() {
         let mut list = SkipList::<i32>::new();
         let extracted: Vec<i32> = list.extract_if(|_| true).collect();
-        assert!(extracted.is_empty());
+        assert_eq!(extracted, []);
         assert!(list.is_empty());
     }
 
@@ -1763,7 +1763,7 @@ mod tests {
             list.push_back(i);
         }
         let extracted: Vec<i32> = list.extract_if(|_| false).collect();
-        assert!(extracted.is_empty());
+        assert_eq!(extracted, []);
         assert_eq!(list.len(), 5);
         let remaining: Vec<i32> = list.iter().copied().collect();
         assert_eq!(remaining, [1, 2, 3, 4, 5]);
@@ -1952,7 +1952,7 @@ mod tests {
     fn range_empty_list() {
         let list = SkipList::<i32>::new();
         let v: Vec<i32> = list.range(0..0).copied().collect();
-        assert!(v.is_empty());
+        assert_eq!(v, []);
     }
 
     #[test]
@@ -1962,7 +1962,7 @@ mod tests {
             list.push_back(i);
         }
         let v: Vec<i32> = list.range(2..2).copied().collect();
-        assert!(v.is_empty());
+        assert_eq!(v, []);
     }
 
     #[test]

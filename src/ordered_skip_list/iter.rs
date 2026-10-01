@@ -1524,7 +1524,7 @@ mod tests {
     fn drain_range_empty_list() {
         let mut list = OrderedSkipList::<i32>::new();
         let drained: Vec<i32> = list.drain_range(1..=3).collect();
-        assert!(drained.is_empty());
+        assert_eq!(drained, []);
         assert!(list.is_empty());
     }
 
@@ -1535,7 +1535,7 @@ mod tests {
             list.insert(i);
         }
         let drained: Vec<i32> = list.drain_range(10..=20).collect();
-        assert!(drained.is_empty());
+        assert_eq!(drained, []);
         assert_eq!(list.len(), 3);
         assert_eq!(list.iter().copied().collect::<Vec<_>>(), [1, 2, 3]);
     }
