@@ -20,7 +20,7 @@ CARGO_BUILD_WARNINGS = "deny"
 "core:rust" = { version = "1.99", components = "clippy,llvm-tools" }
 "aqua:cargo-bins/cargo-binstall" = "1.24.0"
 "github:taiki-e/cargo-hack" = "0.6"
-"aqua:taiki-e/cargo-llvm-cov" = "0.8"
+"aqua:taiki-e/cargo-llvm-cov" = "0.9.1"
 "aqua:nextest-rs/nextest/cargo-nextest" = "0.9"
 "aqua:j178/prek" = "0.5"
 rumdl = "v0.2.77"
