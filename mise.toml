@@ -23,7 +23,7 @@ CARGO_BUILD_WARNINGS = "deny"
 "aqua:taiki-e/cargo-llvm-cov" = "0.9.1"
 "aqua:nextest-rs/nextest/cargo-nextest" = "0.9"
 "aqua:j178/prek" = "0.5"
-rumdl = "v0.2.77"
+rumdl = "v0.2.78"
 
 [tasks]
   [tasks.lint]
