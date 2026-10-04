@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 <!-- markdownlint-disable -->
 
+## [1.2.1](https://github.com/JP-Ellis/rust-skiplist/compare/v1.2.0...v1.2.1) - _2026-10-04_
+
+### 📚 Documentation
+
+-   _(skip_map)_ Drop the summary link to a missing accessor
+
+### ⚙️ Miscellaneous Tasks
+
+-   _(mise)_ Drop the lockfile
+
+-   _(mise)_ Prefer aqua and github backends
+
+-   Allow 80-char subjects and 100-char bodies
+
+-   _(renovate)_ Group the toolchain pins by dependency name
+
+
 ## [1.2.0](https://github.com/JP-Ellis/rust-skiplist/compare/v1.1.1...v1.2.0) - _2026-09-18_
 
 ### 🚀 Features
