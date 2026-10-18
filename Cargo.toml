@@ -54,7 +54,7 @@ anyhow = "=1.0.104"
 criterion = { version = "=0.8.2", features = ["html_reports"] }
 insta = "=1.49.0"
 pretty_assertions = { version = "=1.4.1", features = ["unstable"] }
-rstest = "=0.27.0"
+rstest = "=0.28.0"
 
 [badges]
 codecov = { branch = "main", repository = "JP-Ellis/rust-skiplist", service = "github" }
