@@ -24,7 +24,10 @@ env:
   MISE_CARGO_BINSTALL_ONLY: 'true'
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  # PRs share one group per ref so a new push cancels the stale run. Pushes to
+  # main get a group per commit: a shared group would let GitHub drop queued
+  # runs, leaving some main commits untested.
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
