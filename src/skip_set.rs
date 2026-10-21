@@ -331,6 +331,21 @@ impl<T: Ord, const N: usize> Default for SkipSet<T, N, OrdComparator, Geometric>
     }
 }
 
+// MARK: Structural checker
+
+#[cfg(test)]
+impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> SkipSet<T, N, C, G> {
+    /// Panic unless the underlying node structure is well formed.
+    #[allow(
+        clippy::allow_attributes,
+        dead_code,
+        reason = "called by the chaos tests"
+    )]
+    pub(crate) fn assert_well_formed(&self) {
+        self.inner.assert_well_formed();
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use pretty_assertions::assert_eq;

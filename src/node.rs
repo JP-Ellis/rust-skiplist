@@ -1042,6 +1042,112 @@ impl<V, const N: usize> Drop for Rebuild<'_, V, N> {
     }
 }
 
+// MARK: Structural checker
+
+#[cfg(test)]
+#[expect(
+    clippy::indexing_slicing,
+    clippy::arithmetic_side_effects,
+    reason = "test-only checker; ranks are bounded by len and levels by N"
+)]
+impl<V, const N: usize> Node<V, N> {
+    /// Panic unless the list rooted at `head` is structurally sound.
+    ///
+    /// One forward walk of the base chain checks that:
+    ///
+    /// - `next` and `prev` mirror each other, and only the head has no value;
+    /// - `len` equals the number of data nodes and `tail` is the last node
+    ///   (`None` when the list is empty);
+    /// - each skip link at level `l` targets the next node with a level-`l`
+    ///   tower, at a distance equal to their rank difference;
+    /// - the last tower at each level has no link at that level.
+    ///
+    /// # Safety
+    ///
+    /// `head` must point at a live list whose nodes are all live.
+    pub(crate) unsafe fn assert_well_formed(
+        head: NonNull<Self>,
+        len: usize,
+        tail: Option<NonNull<Self>>,
+    ) {
+        // Last node seen with a tower at each level, with its rank.
+        let mut last_tower: Vec<Option<(NonNull<Self>, usize)>> = vec![None; N];
+        let mut current = head;
+        let mut rank = 0_usize;
+
+        // SAFETY: the caller guarantees `head` is live; the reference is
+        // short-lived.
+        let head_ref = unsafe { head.as_ref() };
+        assert!(head_ref.prev().is_none(), "head has a prev pointer");
+        assert!(head_ref.value().is_none(), "head holds a value");
+        for slot in last_tower.iter_mut().take(head_ref.level()) {
+            *slot = Some((head, 0));
+        }
+
+        // SAFETY: `current` is always a live node of the list.
+        while let Some(next) = unsafe { current.as_ref() }.next() {
+            rank += 1;
+            assert!(
+                rank <= len,
+                "base chain has more than len ({len}) data nodes"
+            );
+            // SAFETY: `next` is a live node of the list.
+            let node = unsafe { next.as_ref() };
+            assert!(
+                node.prev() == Some(current),
+                "prev of node at rank {rank} does not point back to rank {}",
+                rank - 1
+            );
+            assert!(node.value().is_some(), "node at rank {rank} has no value");
+
+            for (level, slot) in last_tower.iter_mut().enumerate().take(node.level()) {
+                if let Some((owner, owner_rank)) = *slot {
+                    // SAFETY: `owner` is a live node of the list.
+                    let owner_ref = unsafe { owner.as_ref() };
+                    let link = owner_ref.links()[level].as_ref().unwrap_or_else(|| {
+                        panic!(
+                            "node at rank {owner_rank} has no level-{level} link, \
+                             but rank {rank} is the next level-{level} tower"
+                        )
+                    });
+                    assert!(
+                        link.node() == next,
+                        "level-{level} link of rank {owner_rank} does not target the next \
+                         tower (rank {rank})"
+                    );
+                    assert!(
+                        link.distance().get() == rank - owner_rank,
+                        "level-{level} link of rank {owner_rank} has distance {}, expected {}",
+                        link.distance().get(),
+                        rank - owner_rank
+                    );
+                }
+                *slot = Some((next, rank));
+            }
+            current = next;
+        }
+
+        assert!(
+            rank == len,
+            "data node count {rank} does not match len {len}"
+        );
+        assert!(
+            tail == if rank == 0 { None } else { Some(current) },
+            "tail does not point at the last node"
+        );
+        for (level, slot) in last_tower.iter().enumerate() {
+            if let Some((owner, owner_rank)) = *slot {
+                // SAFETY: `owner` is a live node of the list.
+                let owner_ref = unsafe { owner.as_ref() };
+                assert!(
+                    owner_ref.links().get(level).is_none_or(Option::is_none),
+                    "last level-{level} tower (rank {owner_rank}) still has a link"
+                );
+            }
+        }
+    }
+}
+
 #[cfg(any(debug_assertions, test))]
 #[allow(
     clippy::allow_attributes,
@@ -1323,6 +1429,7 @@ impl<V, const N: usize> Drop for Node<V, N> {
     clippy::undocumented_unsafe_blocks,
     clippy::multiple_unsafe_ops_per_block,
     clippy::indexing_slicing,
+    clippy::unwrap_used,
     reason = "test code, covered by miri, so safety guarantees can be relaxed"
 )]
 #[cfg(test)]
@@ -1435,6 +1542,84 @@ pub(crate) mod tests {
         }
 
         Ok(head_nn)
+    }
+
+    // MARK: assert_well_formed
+
+    type Ptr = NonNull<Node<u8, MAX_LEVELS>>;
+
+    /// The [`skiplist`] fixture with its skip links rebuilt from node heights.
+    ///
+    /// The fixture wires `head.links[1]` at a node of height 1, so its links
+    /// are not a function of its heights.  Rebuilding yields the consistent
+    /// layout the checker expects:
+    ///
+    /// ```text
+    /// head -> v1 -> v2 -> v3 -> v4
+    /// head ------> v2 -> v3
+    /// ```
+    fn well_formed_skiplist() -> Result<(Ptr, Ptr)> {
+        let head = skiplist()?;
+        let mut len = 0;
+        let mut tail = None;
+        // SAFETY: head is exclusively owned and every data node is live.
+        unsafe { Node::filter_rebuild(head, &mut len, &mut tail, |_| true, |_| {}) };
+        Ok((head, tail.expect("fixture is non-empty")))
+    }
+
+    /// Run the checker on the rebuilt fixture after `corrupt` has edited it,
+    /// with the given `len`, and report whether it panicked.
+    fn well_formed_panics(
+        len: usize,
+        corrupt: impl FnOnce(NonNull<Node<u8, MAX_LEVELS>>) -> Result<()>,
+    ) -> Result<bool> {
+        let (head, tail) = well_formed_skiplist()?;
+        corrupt(head)?;
+        let panicked = std::panic::catch_unwind(core::panic::AssertUnwindSafe(|| unsafe {
+            Node::assert_well_formed(head, len, Some(tail));
+        }))
+        .is_err();
+        unsafe { drop(Box::from_raw(head.as_ptr())) };
+        Ok(panicked)
+    }
+
+    #[test]
+    fn well_formed_accepts_fixture() -> Result<()> {
+        assert!(!well_formed_panics(4, |_| Ok(()))?);
+        Ok(())
+    }
+
+    #[test]
+    fn well_formed_rejects_wrong_distance() -> Result<()> {
+        // head.links[0] -> v2 really spans 2 positions.
+        let panicked = well_formed_panics(4, |mut head| {
+            let target = unsafe { head.as_ref() }.links()[0].as_ref().unwrap().node();
+            unsafe { head.as_mut() }.links_mut()[0] = Some(Link::new(target, 3)?);
+            Ok(())
+        })?;
+        assert!(panicked);
+        Ok(())
+    }
+
+    #[test]
+    fn well_formed_rejects_link_over_tower() -> Result<()> {
+        // v2 and v3 both have a level-0 tower.  Retarget head.links[0] from v2
+        // to v3 at v3's true distance (3), so only the check that a link lands
+        // on the next tower can catch it.
+        let panicked = well_formed_panics(4, |mut head| {
+            let v2 = unsafe { head.as_ref() }.links()[0].as_ref().unwrap().node();
+            let v3 = unsafe { v2.as_ref() }.links()[0].as_ref().unwrap().node();
+            unsafe { head.as_mut() }.links_mut()[0] = Some(Link::new(v3, 3)?);
+            Ok(())
+        })?;
+        assert!(panicked);
+        Ok(())
+    }
+
+    #[test]
+    fn well_formed_rejects_wrong_len() -> Result<()> {
+        assert!(well_formed_panics(5, |_| Ok(()))?);
+        Ok(())
     }
 
     // MARK: display
