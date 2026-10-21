@@ -431,6 +431,23 @@ impl<K, V, C: Comparator<K>, G: LevelGenerator, const N: usize> Drop for SkipMap
     }
 }
 
+// MARK: Structural checker
+
+#[cfg(test)]
+impl<K, V, C: Comparator<K>, G: LevelGenerator, const N: usize> SkipMap<K, V, N, C, G> {
+    /// Panic unless the underlying node structure is well formed.
+    #[allow(
+        clippy::allow_attributes,
+        dead_code,
+        reason = "called by the chaos tests"
+    )]
+    pub(crate) fn assert_well_formed(&self) {
+        // SAFETY: `head` is the live head of this list, and every node it
+        // reaches is owned by the list.
+        unsafe { Node::assert_well_formed(self.head, self.len, self.tail) };
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use pretty_assertions::assert_eq;
