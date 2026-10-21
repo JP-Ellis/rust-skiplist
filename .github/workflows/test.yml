@@ -80,18 +80,30 @@ jobs:
       - name: Install mise tools
         uses: jdx/mise-action@8418fedb1110381a0d3ba51a7a415d7c1b884550  # v5.2.2
         timeout-minutes: 10
+        with:
+          cache_save: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install Rust
         uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f  # v2.0.0
+        with:
+          cache-save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Restore prek cache
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+        id: prek-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
         with:
           path: ~/.cache/prek
           key: prek-${{ runner.os }}-${{ hashFiles('prek.toml') }}
 
       - name: Run prek
         run: mise run prek
+
+      - name: Save prek cache
+        if: github.ref == 'refs/heads/main' && steps.prek-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+        with:
+          path: ~/.cache/prek
+          key: ${{ steps.prek-cache.outputs.cache-primary-key }}
 
   clippy:
     name: Clippy
@@ -104,9 +116,13 @@ jobs:
       - name: Install mise tools
         uses: jdx/mise-action@8418fedb1110381a0d3ba51a7a415d7c1b884550  # v5.2.2
         timeout-minutes: 10
+        with:
+          cache_save: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install Rust
         uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f  # v2.0.0
+        with:
+          cache-save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Run clippy
         run: mise run lint
@@ -122,9 +138,13 @@ jobs:
       - name: Install mise tools
         uses: jdx/mise-action@8418fedb1110381a0d3ba51a7a415d7c1b884550  # v5.2.2
         timeout-minutes: 10
+        with:
+          cache_save: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install Rust
         uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f  # v2.0.0
+        with:
+          cache-save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install nightly rustfmt
         run: rustup toolchain install nightly --component rustfmt --no-self-update
@@ -160,10 +180,13 @@ jobs:
       - name: Install mise tools
         uses: jdx/mise-action@8418fedb1110381a0d3ba51a7a415d7c1b884550  # v5.2.2
         timeout-minutes: 10
+        with:
+          cache_save: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install Rust
         uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f  # v2.0.0
         with:
+          cache-save-if: ${{ github.ref == 'refs/heads/main' }}
           cache-key: ${{ matrix.toolchain }}
 
       - name: Install matrix toolchain
@@ -188,9 +211,13 @@ jobs:
       - name: Install mise tools
         uses: jdx/mise-action@8418fedb1110381a0d3ba51a7a415d7c1b884550  # v5.2.2
         timeout-minutes: 10
+        with:
+          cache_save: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install Rust
         uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f  # v2.0.0
+        with:
+          cache-save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Test benchmarks
         run: mise run test:benches
@@ -206,9 +233,13 @@ jobs:
       - name: Install mise tools
         uses: jdx/mise-action@8418fedb1110381a0d3ba51a7a415d7c1b884550  # v5.2.2
         timeout-minutes: 10
+        with:
+          cache_save: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install Rust
         uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f  # v2.0.0
+        with:
+          cache-save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Test documentation examples
         run: mise run test:docs
@@ -224,9 +255,13 @@ jobs:
       - name: Install mise tools
         uses: jdx/mise-action@8418fedb1110381a0d3ba51a7a415d7c1b884550  # v5.2.2
         timeout-minutes: 10
+        with:
+          cache_save: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install Rust
         uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f  # v2.0.0
+        with:
+          cache-save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Run examples
         run: mise run examples
@@ -244,9 +279,13 @@ jobs:
       - name: Install mise tools
         uses: jdx/mise-action@8418fedb1110381a0d3ba51a7a415d7c1b884550  # v5.2.2
         timeout-minutes: 10
+        with:
+          cache_save: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install Rust
         uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f  # v2.0.0
+        with:
+          cache-save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install nightly miri
         run: rustup toolchain install nightly --component miri --no-self-update
@@ -265,9 +304,13 @@ jobs:
       - name: Install mise tools
         uses: jdx/mise-action@8418fedb1110381a0d3ba51a7a415d7c1b884550  # v5.2.2
         timeout-minutes: 10
+        with:
+          cache_save: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install Rust
         uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f  # v2.0.0
+        with:
+          cache-save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install MSRV toolchain
         run: rustup toolchain install 1.89 --profile minimal --no-self-update
@@ -286,9 +329,13 @@ jobs:
       - name: Install mise tools
         uses: jdx/mise-action@8418fedb1110381a0d3ba51a7a415d7c1b884550  # v5.2.2
         timeout-minutes: 10
+        with:
+          cache_save: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install Rust
         uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f  # v2.0.0
+        with:
+          cache-save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Generate coverage
         run: mise run coverage
