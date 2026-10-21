@@ -11,6 +11,7 @@
   "prHourlyLimit": 0,
   "prConcurrentLimit": 0,
   "automerge": true,
+  "rebaseWhen": "conflicted",
   "packageRules": [
     {
       "description": "rust-toolchain.toml and mise.toml pin the same toolchain under different dependency names. Grouping them lands both pins in one PR; separately, each PR leaves the two pins disagreeing.",
