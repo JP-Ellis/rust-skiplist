@@ -535,7 +535,7 @@ mod tests {
     #[test]
     fn clear_large_list() {
         // Large list to exercise the iterative Drop path.
-        let n = 1_000_usize;
+        let n: usize = if cfg!(miri) { 100 } else { 1_000 };
         let mut list = SkipList::<usize>::new();
         for i in 0..n {
             list.push_back(i);
@@ -675,8 +675,8 @@ mod tests {
 
     #[test]
     fn truncate_large_list() {
-        const N: usize = 1_000;
-        const HALF: usize = 500;
+        const N: usize = if cfg!(miri) { 100 } else { 1_000 };
+        const HALF: usize = if cfg!(miri) { 50 } else { 500 };
         let mut list = SkipList::<usize>::new();
         for i in 0..N {
             list.push_back(i);
@@ -830,7 +830,7 @@ mod tests {
 
     #[test]
     fn split_off_large_list() {
-        let n: usize = 200;
+        let n: usize = if cfg!(miri) { 50 } else { 200 };
         let mut a = SkipList::<usize>::new();
         for i in 0..n {
             a.push_back(i);
@@ -976,8 +976,8 @@ mod tests {
 
     #[test]
     fn append_large_list() {
-        let n: usize = 200;
-        let m: usize = 150;
+        let n: usize = if cfg!(miri) { 50 } else { 200 };
+        let m: usize = if cfg!(miri) { 40 } else { 150 };
         let mut a = SkipList::<usize>::new();
         for i in 0..n {
             a.push_back(i);
