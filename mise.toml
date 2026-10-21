@@ -60,14 +60,58 @@ rumdl = "v0.3.0"
   ]
 
   [tasks.miri]
-  description = "Run Miri under Tree Borrows"
+  description = "Run Miri under Tree Borrows, one shard per data structure"
+  # Miri runs each test binary single-threaded, so the shards run in parallel
+  # up to `--jobs`.
+  depends = [
+    "miri:skip-list",
+    "miri:ordered-skip-list",
+    "miri:skip-set",
+    "miri:skip-map",
+    "miri:rest",
+  ]
+
+  [tasks."miri:build"]
+  description = "Set up the Miri sysroot and build the test binaries"
   # Miri's generated sysroot crate carries an unused `sysroot` dependency, so
   # cargo's `unused_dependencies` manifest lint fails the build under
   # `build.warnings = "deny"`. Build the sysroot with warnings allowed; the
-  # test run that follows still denies warnings for this crate.
+  # build that follows still denies warnings for this crate.
   run = [
     "CARGO_BUILD_WARNINGS=allow cargo +nightly miri setup",
-    "cargo +nightly miri test --all-features",
+    "cargo +nightly miri test --all-features --no-run",
+  ]
+
+  # libtest filters match substrings, so `skip_list::` also matches
+  # `ordered_skip_list::` and needs an explicit skip.
+  [tasks."miri:skip-list"]
+  description = "Run Miri on the SkipList tests"
+  depends = ["miri:build"]
+  run = "cargo +nightly miri test --all-features --lib -- skip_list:: --skip ordered_skip_list::"
+
+  [tasks."miri:ordered-skip-list"]
+  description = "Run Miri on the OrderedSkipList tests"
+  depends = ["miri:build"]
+  run = "cargo +nightly miri test --all-features --lib -- ordered_skip_list::"
+
+  [tasks."miri:skip-set"]
+  description = "Run Miri on the SkipSet tests"
+  depends = ["miri:build"]
+  run = "cargo +nightly miri test --all-features --lib -- skip_set::"
+
+  [tasks."miri:skip-map"]
+  description = "Run Miri on the SkipMap tests"
+  depends = ["miri:build"]
+  run = "cargo +nightly miri test --all-features --lib -- skip_map::"
+
+  [tasks."miri:rest"]
+  description = "Run Miri on the remaining tests and the doctests"
+  depends = ["miri:build"]
+  # Doctest names include their module path, so the skips above would drop
+  # most doctests. They run in a separate invocation.
+  run = [
+    "cargo +nightly miri test --all-features --tests -- --skip skip_list:: --skip ordered_skip_list:: --skip skip_set:: --skip skip_map::",
+    "cargo +nightly miri test --all-features --doc",
   ]
 
   [tasks.coverage]

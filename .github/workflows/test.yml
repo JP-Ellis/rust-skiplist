@@ -291,7 +291,7 @@ jobs:
         run: rustup toolchain install nightly --component miri --no-self-update
 
       - name: Run Miri
-        run: mise run miri
+        run: mise run --jobs "$(nproc)" --output keep-order miri
 
   msrv:
     name: MSRV
