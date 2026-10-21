@@ -22,7 +22,8 @@ use crate::{
     level_generator::LevelGenerator,
     skip_set::Entry,
     test_util::{
-        Chaos, ChaosOrd, Elem, FixedLevels, Rps, assert_contract_panic, seed_chaos_ord, seeds,
+        Chaos, ChaosOrd, Elem, FixedLevels, Rps, assert_contract_panic, check_step, seed_chaos_ord,
+        seeded_geometric, seeds,
     },
 };
 
@@ -94,7 +95,9 @@ fn step<T, C, G, const N: usize>(
                 let _ = e.insert();
             }
         }
-        17 => set.extend([T::mk(k)]),
+        17 => {
+            let _ = set.entry(T::mk(k)).or_insert_with(|| T::mk(k2));
+        }
         #[cfg(feature = "cursor")]
         18 => drop(
             set.lower_bound_mut(Bound::Included(&T::mk(k)))
@@ -123,21 +126,24 @@ fn step<T, C, G, const N: usize>(
 ///
 /// A panic from the set does not end the run, so the set is exercised and
 /// dropped after it has unwound.
-fn run<T, C, G, const N: usize>(mut set: SkipSet<T, N, C, G>, rng: &mut SmallRng, steps: usize)
+fn run<T, C, G, const N: usize>(mut set: SkipSet<T, N, C, G>, seed: u32, steps: usize)
 where
     T: Elem,
     C: Comparator<T> + ComparatorKey<T, T> + Clone,
     G: LevelGenerator + Clone + Default,
 {
-    for _ in 0..steps {
+    let mut rng = rng_for(seed);
+    for step_index in 0..steps {
         let op = rng.random_range(0..OPS);
         let k = rng.random_range(0..8);
         let k2 = rng.random_range(0..8);
         let index = rng.random_range(0..64);
         let mask = rng.random::<u32>();
         let result = catch_unwind(AssertUnwindSafe(|| step(&mut set, op, k, k2, index, mask)));
-        assert_contract_panic(result, &[]);
-        set.assert_well_formed();
+        check_step(seed, step_index, op, || {
+            assert_contract_panic(result, &[]);
+            set.assert_well_formed();
+        });
     }
 }
 
@@ -153,7 +159,7 @@ fn chaos_comparator_n4() {
     for seed in seeds() {
         let set: SkipSet<u8, 4, Chaos, FixedLevels> =
             SkipSet::with_comparator_and_level_generator(Chaos::new(seed), FixedLevels::new(seed));
-        run(set, &mut rng_for(seed), 50);
+        run(set, seed, 50);
     }
 }
 
@@ -161,8 +167,9 @@ fn chaos_comparator_n4() {
 #[ignore = "issue 401: enabled once the fix lands"]
 fn chaos_comparator_n16() {
     for seed in seeds() {
-        let set: SkipSet<u8, 16, Chaos, Geometric> = SkipSet::with_comparator(Chaos::new(seed));
-        run(set, &mut rng_for(seed), 50);
+        let set: SkipSet<u8, 16, Chaos, Geometric> =
+            SkipSet::with_comparator_and_level_generator(Chaos::new(seed), seeded_geometric(seed));
+        run(set, seed, 50);
     }
 }
 
@@ -171,8 +178,9 @@ fn chaos_comparator_n16() {
 fn chaos_ord() {
     for seed in seeds() {
         seed_chaos_ord(seed);
-        let set: SkipSet<ChaosOrd, 16, OrdComparator, Geometric> = SkipSet::new();
-        run(set, &mut rng_for(seed), 50);
+        let set: SkipSet<ChaosOrd, 16, OrdComparator, Geometric> =
+            SkipSet::with_level_generator(seeded_geometric(seed));
+        run(set, seed, 50);
     }
 }
 
@@ -180,7 +188,8 @@ fn chaos_ord() {
 #[ignore = "issue 401: enabled once the fix lands"]
 fn rps_ord() {
     for seed in seeds() {
-        let set: SkipSet<Rps, 16, OrdComparator, Geometric> = SkipSet::new();
-        run(set, &mut rng_for(seed), 50);
+        let set: SkipSet<Rps, 16, OrdComparator, Geometric> =
+            SkipSet::with_level_generator(seeded_geometric(seed));
+        run(set, seed, 50);
     }
 }

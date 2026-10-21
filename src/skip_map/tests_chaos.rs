@@ -22,7 +22,8 @@ use crate::{
     level_generator::LevelGenerator,
     skip_map::{Entry, OccupiedEntry},
     test_util::{
-        Chaos, ChaosOrd, Elem, FixedLevels, Rps, assert_contract_panic, seed_chaos_ord, seeds,
+        Chaos, ChaosOrd, Elem, FixedLevels, Rps, assert_contract_panic, check_step, seed_chaos_ord,
+        seeded_geometric, seeds,
     },
 };
 
@@ -118,20 +119,23 @@ fn step<K, C, G, const N: usize>(
 ///
 /// A panic from the map does not end the run, so the map is exercised and
 /// dropped after it has unwound.
-fn run<K, C, G, const N: usize>(mut map: SkipMap<K, u8, N, C, G>, rng: &mut SmallRng, steps: usize)
+fn run<K, C, G, const N: usize>(mut map: SkipMap<K, u8, N, C, G>, seed: u32, steps: usize)
 where
     K: Elem,
     C: Comparator<K> + ComparatorKey<K, K> + Clone,
     G: LevelGenerator + Clone + Default,
 {
-    for _ in 0..steps {
+    let mut rng = rng_for(seed);
+    for step_index in 0..steps {
         let op = rng.random_range(0..OPS);
         let k = rng.random_range(0..8);
         let k2 = rng.random_range(0..8);
         let mask = rng.random::<u32>();
         let result = catch_unwind(AssertUnwindSafe(|| step(&mut map, op, k, k2, mask)));
-        assert_contract_panic(result, &[]);
-        map.assert_well_formed();
+        check_step(seed, step_index, op, || {
+            assert_contract_panic(result, &[]);
+            map.assert_well_formed();
+        });
     }
 }
 
@@ -147,7 +151,7 @@ fn chaos_comparator_n4() {
     for seed in seeds() {
         let map: SkipMap<u8, u8, 4, Chaos, FixedLevels> =
             SkipMap::with_comparator_and_level_generator(Chaos::new(seed), FixedLevels::new(seed));
-        run(map, &mut rng_for(seed), 50);
+        run(map, seed, 50);
     }
 }
 
@@ -155,8 +159,9 @@ fn chaos_comparator_n4() {
 #[ignore = "issue 401: enabled once the fix lands"]
 fn chaos_comparator_n16() {
     for seed in seeds() {
-        let map: SkipMap<u8, u8, 16, Chaos, Geometric> = SkipMap::with_comparator(Chaos::new(seed));
-        run(map, &mut rng_for(seed), 50);
+        let map: SkipMap<u8, u8, 16, Chaos, Geometric> =
+            SkipMap::with_comparator_and_level_generator(Chaos::new(seed), seeded_geometric(seed));
+        run(map, seed, 50);
     }
 }
 
@@ -165,8 +170,9 @@ fn chaos_comparator_n16() {
 fn chaos_ord() {
     for seed in seeds() {
         seed_chaos_ord(seed);
-        let map: SkipMap<ChaosOrd, u8, 16, OrdComparator, Geometric> = SkipMap::new();
-        run(map, &mut rng_for(seed), 50);
+        let map: SkipMap<ChaosOrd, u8, 16, OrdComparator, Geometric> =
+            SkipMap::with_level_generator(seeded_geometric(seed));
+        run(map, seed, 50);
     }
 }
 
@@ -174,7 +180,8 @@ fn chaos_ord() {
 #[ignore = "issue 401: enabled once the fix lands"]
 fn rps_ord() {
     for seed in seeds() {
-        let map: SkipMap<Rps, u8, 16, OrdComparator, Geometric> = SkipMap::new();
-        run(map, &mut rng_for(seed), 50);
+        let map: SkipMap<Rps, u8, 16, OrdComparator, Geometric> =
+            SkipMap::with_level_generator(seeded_geometric(seed));
+        run(map, seed, 50);
     }
 }

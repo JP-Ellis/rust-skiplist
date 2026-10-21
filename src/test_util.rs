@@ -12,6 +12,7 @@ use core::cmp::Ordering;
 use std::{cell::Cell, ops::Range, thread::Result as ThreadResult};
 
 use crate::{
+    Geometric,
     comparator::{Comparator, ComparatorKey},
     level_generator::LevelGenerator,
 };
@@ -278,4 +279,18 @@ pub(crate) fn assert_contract_panic(result: ThreadResult<()>, also_allowed: &[&s
 /// The seeds each chaos test iterates over.
 pub(crate) fn seeds() -> Range<u32> {
     if cfg!(miri) { 0..20 } else { 0..2000 }
+}
+
+/// A [`Geometric`] generator with the default shape and a fixed seed.
+pub(crate) fn seeded_geometric(seed: u32) -> Geometric {
+    Geometric::new_with_seed(16, 0.5, u64::from(seed))
+        .expect("16 levels and q = 0.5 are valid Geometric parameters")
+}
+
+/// Runs a post-operation check, naming the seed, step and operation if it panics.
+pub(crate) fn check_step(seed: u32, step: usize, op: u32, check: impl FnOnce()) {
+    if let Err(payload) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(check)) {
+        eprintln!("chaos failure: seed {seed}, step {step}, op {op}");
+        std::panic::resume_unwind(payload);
+    }
 }
