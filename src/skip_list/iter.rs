@@ -1217,7 +1217,7 @@ mod tests {
 
     #[test]
     fn iter_large_list_forward() {
-        const N: usize = 200;
+        const N: usize = if cfg!(miri) { 50 } else { 200 };
         let mut list = SkipList::<usize>::new();
         for i in 0..N {
             list.push_back(i);
@@ -1229,7 +1229,7 @@ mod tests {
 
     #[test]
     fn iter_large_list_backward() {
-        const N: usize = 200;
+        const N: usize = if cfg!(miri) { 50 } else { 200 };
         let mut list = SkipList::<usize>::new();
         for i in 0..N {
             list.push_back(i);

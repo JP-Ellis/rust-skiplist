@@ -697,7 +697,7 @@ mod tests {
 
     #[test]
     fn clear_large_list() {
-        let n = 1_000_usize;
+        let n: usize = if cfg!(miri) { 100 } else { 1_000 };
         let mut list = OrderedSkipList::<usize>::new();
         for i in 0..n {
             list.insert(i);
@@ -1387,8 +1387,8 @@ mod tests {
 
     #[test]
     fn truncate_large_list() {
-        const N: usize = 1_000;
-        const HALF: usize = 500;
+        const N: usize = if cfg!(miri) { 100 } else { 1_000 };
+        const HALF: usize = if cfg!(miri) { 50 } else { 500 };
         let mut list = OrderedSkipList::<usize>::new();
         for i in 0..N {
             list.insert(i);
