@@ -135,7 +135,10 @@ use core::{
 #[cfg(any(debug_assertions, test))]
 use std::collections::HashMap;
 
-use crate::node::{level_array::LevelArray, link::Link};
+use crate::{
+    comparator::total_order_violation,
+    node::{level_array::LevelArray, link::Link},
+};
 
 pub(crate) mod cursor_raw;
 pub(crate) mod level_array;
@@ -734,6 +737,47 @@ impl<V, const N: usize> Node<V, N> {
         }
 
         // Dropping `walk` publishes the length and tail.
+    }
+
+    // MARK: Precursor check
+
+    /// Panics unless every level below the height of `target` has its
+    /// precursor linking straight to `target`.
+    ///
+    /// For each `l < target.level()`, `precursors[l].links()[l]` must be
+    /// `Some` and point at `target`.  A removal that splices through a
+    /// precursor failing this check would leave a link to a freed node, so
+    /// the check calls [`total_order_violation`] instead.  It reads links
+    /// only and compares pointers, so it makes no comparator calls.
+    ///
+    /// # Panics
+    ///
+    /// Panics with the total-order message when a precursor does not link
+    /// to `target`.
+    ///
+    /// # Safety
+    ///
+    /// `target` and every node in `precursors` must be live nodes of one
+    /// list, with no live `&mut` reference to any of them.
+    pub(crate) unsafe fn check_precursors(precursors: &[NonNull<Self>], target: NonNull<Self>) {
+        // SAFETY: the caller guarantees `target` is live; the reference is
+        // short-lived.
+        let height = unsafe { target.as_ref() }.level();
+        debug_assert!(
+            precursors.len() >= height,
+            "one precursor per level of the target"
+        );
+        for (l, pred) in precursors.iter().take(height).enumerate() {
+            // SAFETY: the caller guarantees every precursor is live; the
+            // reference is short-lived.
+            let link = unsafe { pred.as_ref() }
+                .links()
+                .get(l)
+                .and_then(Option::as_ref);
+            if link.is_none_or(|found| found.node() != target) {
+                total_order_violation();
+            }
+        }
     }
 
     // MARK: Cursor surgery
@@ -1652,6 +1696,71 @@ pub(crate) mod tests {
     #[test]
     fn well_formed_rejects_wrong_len() -> Result<()> {
         assert!(well_formed_panics(5, |_| Ok(()))?);
+        Ok(())
+    }
+
+    // MARK: check_precursors
+
+    /// The data node at 1-based `rank` along the base chain.
+    fn nth(head: Ptr, rank: usize) -> Ptr {
+        let mut node = head;
+        for _ in 0..rank {
+            // SAFETY: every node reached from a fixture head is live.
+            node = unsafe { node.as_ref() }
+                .next()
+                .expect("rank within the list");
+        }
+        node
+    }
+
+    #[test]
+    fn check_precursors_accepts_true_precursors() -> Result<()> {
+        // head -> v1 -> v2 -> v3 -> v4
+        // head ------> v2 -> v3
+        let (head, tail) = well_formed_skiplist()?;
+        let (v1, v2, v3) = (nth(head, 1), nth(head, 2), nth(head, 3));
+        // SAFETY: every pointer is a live node of the fixture, which this
+        // test owns and frees last.
+        unsafe {
+            Node::check_precursors(&[head, head, head], v1);
+            Node::check_precursors(&[head, head, head], v2);
+            Node::check_precursors(&[v2, head, head], v3);
+            Node::check_precursors(&[v3, head, head], tail);
+            Node::assert_well_formed(head, 4, Some(tail));
+            drop(Box::from_raw(head.as_ptr()));
+        }
+        Ok(())
+    }
+
+    #[rstest]
+    // `head.links[0]` targets v2, the level-0 predecessor of v3.
+    #[case::level_0_wrong_target(well_formed_skiplist(), 3, [0, 0, 0])]
+    // 30 has a level-1 tower; `20` has no level-1 link.
+    #[case::level_1_missing_link(tall_skiplist(), 3, [2, 2, 0])]
+    fn check_precursors_rejects_wrong_link(
+        #[case] fixture: Result<(Ptr, Ptr)>,
+        #[case] target_rank: usize,
+        #[case] precursor_ranks: [usize; MAX_LEVELS],
+    ) -> Result<()> {
+        use crate::test_util::TOTAL_ORDER_PANIC;
+
+        let (head, tail) = fixture?;
+        let target = nth(head, target_rank);
+        let precursors = precursor_ranks.map(|rank| nth(head, rank));
+
+        // SAFETY: every pointer is a live node of the fixture.
+        let result = std::panic::catch_unwind(core::panic::AssertUnwindSafe(|| unsafe {
+            Node::check_precursors(&precursors, target);
+        }));
+
+        let payload = result.expect_err("a precursor that misses the target must panic");
+        assert_eq!(payload.downcast_ref::<&str>(), Some(&TOTAL_ORDER_PANIC));
+        // SAFETY: the check only reads, so the fixture is intact; the test
+        // owns it and frees it last.
+        unsafe {
+            Node::assert_well_formed(head, 4, Some(tail));
+            drop(Box::from_raw(head.as_ptr()));
+        }
         Ok(())
     }
 
