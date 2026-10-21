@@ -253,6 +253,23 @@ impl<T: PartialOrd> Comparator<T> for PartialOrdComparator {
     }
 }
 
+// MARK: Contract violation
+
+/// Panic because a comparator contradicted an earlier answer.
+///
+/// Mutating traversals call this when the comparator's answers cannot all be
+/// true, before they write to the list.
+#[cold]
+#[inline(never)]
+#[track_caller]
+#[expect(
+    clippy::panic,
+    reason = "continuing would corrupt the list; there is no value to return"
+)]
+pub(crate) fn total_order_violation() -> ! {
+    panic!("comparator does not implement a total order");
+}
+
 // MARK: Tests
 
 #[cfg(test)]
