@@ -262,6 +262,11 @@ impl<K, V, const N: usize, C: Comparator<K>, G: LevelGenerator> SkipMap<K, V, N,
             return None;
         }
 
+        // SAFETY: `target_ptr` and every precursor come from the visitor's
+        // walk of this list and are live for `&mut self`; no `&mut`
+        // reference to any node exists.
+        unsafe { Node::check_precursors(&precursors, target_ptr) };
+
         let max_levels = self.head_ref().level();
 
         // SAFETY: `found` is true, so `target_ptr` is a live data node owned
@@ -354,6 +359,11 @@ impl<K, V, const N: usize, C: Comparator<K>, G: LevelGenerator> SkipMap<K, V, N,
         if !found {
             return None;
         }
+
+        // SAFETY: `target_ptr` and every precursor come from the visitor's
+        // walk of this list and are live for `&mut self`; no `&mut`
+        // reference to any node exists.
+        unsafe { Node::check_precursors(&precursors, target_ptr) };
 
         let max_levels = self.head_ref().level();
 

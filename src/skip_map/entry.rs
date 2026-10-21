@@ -293,6 +293,11 @@ impl<'a, K, V, const N: usize, C: Comparator<K>, G: LevelGenerator>
             map,
         } = self;
 
+        // SAFETY: `target_ptr` and every precursor come from the visitor's
+        // walk of `map` and are live for the entry's `&mut` borrow of it; no
+        // `&mut` reference to any node exists.
+        unsafe { Node::check_precursors(&precursors, target_ptr) };
+
         // SAFETY: map.head is valid for the lifetime of &mut map.
         let max_levels = unsafe { map.head.as_ref() }.level();
 

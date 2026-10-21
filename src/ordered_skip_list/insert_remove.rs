@@ -423,6 +423,11 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
             return None;
         }
 
+        // SAFETY: `target_ptr` and every precursor come from the visitor's
+        // walk of this list and are live for `&mut self`; no `&mut`
+        // reference to any node exists.
+        unsafe { Node::check_precursors(&precursors, target_ptr) };
+
         let max_levels = self.head_ref().level();
 
         // SAFETY: `found` is true, so `target_ptr` is a live data node owned by
@@ -2334,5 +2339,33 @@ mod tests {
         assert_eq!(list.take_fast("apple"), Some("apple".to_owned()));
         assert_eq!(list.len(), 1);
         assert_eq!(list.take_fast("missing"), None);
+    }
+
+    // MARK: panicking comparator
+
+    #[test]
+    fn insert_panicking_comparator_leaves_list_unchanged() {
+        use core::cell::Cell;
+        use std::panic::{AssertUnwindSafe, catch_unwind};
+
+        let armed = Cell::new(false);
+        let cmp = |a: &i32, b: &i32| {
+            assert!(!(armed.get() && (*a == 7 || *b == 7)), "armed comparator");
+            a.cmp(b)
+        };
+        let mut list = OrderedSkipList::<i32, 16, _>::with_comparator(FnComparator(cmp));
+        list.extend(0..16);
+        armed.set(true);
+
+        let result = catch_unwind(AssertUnwindSafe(|| list.insert(7)));
+
+        assert!(result.is_err());
+        armed.set(false);
+        list.assert_well_formed();
+        assert_eq!(list.len(), 16);
+        assert_eq!(
+            list.iter().copied().collect::<Vec<_>>(),
+            (0..16).collect::<Vec<_>>()
+        );
     }
 }
