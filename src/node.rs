@@ -1558,8 +1558,41 @@ pub(crate) mod tests {
     /// head -> v1 -> v2 -> v3 -> v4
     /// head ------> v2 -> v3
     /// ```
-    fn well_formed_skiplist() -> Result<(Ptr, Ptr)> {
+    pub(crate) fn well_formed_skiplist() -> Result<(Ptr, Ptr)> {
         let head = skiplist()?;
+        let mut len = 0;
+        let mut tail = None;
+        // SAFETY: head is exclusively owned and every data node is live.
+        unsafe { Node::filter_rebuild(head, &mut len, &mut tail, |_| true, |_| {}) };
+        Ok((head, tail.expect("fixture is non-empty")))
+    }
+
+    /// A well-formed list of `[10, 20, 30, 40]` where `30` has a level-1
+    /// tower, returned as `(head, tail)`.
+    ///
+    /// ```text
+    /// head -------------> 30
+    /// head ------> 20 -> 30
+    /// head -> 10 -> 20 -> 30 -> 40
+    /// ```
+    #[expect(
+        clippy::unnecessary_wraps,
+        reason = "shares a signature with `well_formed_skiplist` in `#[case]` lists"
+    )]
+    pub(crate) fn tall_skiplist() -> Result<(Ptr, Ptr)> {
+        // SAFETY: `Box::into_raw` never returns null.
+        let head = unsafe {
+            NonNull::new_unchecked(Box::into_raw(Box::new(Node::<u8, MAX_LEVELS>::new(
+                MAX_LEVELS,
+            ))))
+        };
+        // SAFETY: each insert targets the live node returned by the last one.
+        unsafe {
+            let v1 = Node::insert_after(head, Node::with_value(0, 10));
+            let v2 = Node::insert_after(v1, Node::with_value(1, 20));
+            let v3 = Node::insert_after(v2, Node::with_value(2, 30));
+            Node::insert_after(v3, Node::with_value(0, 40));
+        }
         let mut len = 0;
         let mut tail = None;
         // SAFETY: head is exclusively owned and every data node is live.
