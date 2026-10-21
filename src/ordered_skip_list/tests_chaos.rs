@@ -25,7 +25,8 @@ use crate::{
     comparator::{Comparator, ComparatorKey, OrdComparator},
     level_generator::LevelGenerator,
     test_util::{
-        Chaos, ChaosOrd, Elem, FixedLevels, Rps, assert_contract_panic, seed_chaos_ord, seeds,
+        Chaos, ChaosOrd, Elem, FixedLevels, Rps, assert_contract_panic, check_step, seed_chaos_ord,
+        seeded_geometric, seeds,
     },
 };
 
@@ -118,16 +119,14 @@ fn step<T, C, G, const N: usize>(
 ///
 /// A panic from the list does not end the run, so the list is exercised and
 /// dropped after it has unwound.
-fn run<T, C, G, const N: usize>(
-    mut list: OrderedSkipList<T, N, C, G>,
-    rng: &mut SmallRng,
-    steps: usize,
-) where
+fn run<T, C, G, const N: usize>(mut list: OrderedSkipList<T, N, C, G>, seed: u32, steps: usize)
+where
     T: Elem + PartialEq,
     C: Comparator<T> + ComparatorKey<T, T> + Clone,
     G: LevelGenerator + Clone + Default,
 {
-    for _ in 0..steps {
+    let mut rng = rng_for(seed);
+    for step_index in 0..steps {
         let op = rng.random_range(0..OPS);
         let k = rng.random_range(0..8);
         let k2 = rng.random_range(0..8);
@@ -139,8 +138,10 @@ fn run<T, C, G, const N: usize>(
             &[]
         };
         let result = catch_unwind(AssertUnwindSafe(|| step(&mut list, op, k, k2, index, mask)));
-        assert_contract_panic(result, allowed);
-        list.assert_well_formed();
+        check_step(seed, step_index, op, || {
+            assert_contract_panic(result, allowed);
+            list.assert_well_formed();
+        });
     }
 }
 
@@ -159,7 +160,7 @@ fn chaos_comparator_n4() {
                 Chaos::new(seed),
                 FixedLevels::new(seed),
             );
-        run(list, &mut rng_for(seed), 50);
+        run(list, seed, 50);
     }
 }
 
@@ -168,8 +169,11 @@ fn chaos_comparator_n4() {
 fn chaos_comparator_n16() {
     for seed in seeds() {
         let list: OrderedSkipList<u8, 16, Chaos, Geometric> =
-            OrderedSkipList::with_comparator(Chaos::new(seed));
-        run(list, &mut rng_for(seed), 50);
+            OrderedSkipList::with_comparator_and_level_generator(
+                Chaos::new(seed),
+                seeded_geometric(seed),
+            );
+        run(list, seed, 50);
     }
 }
 
@@ -178,8 +182,9 @@ fn chaos_comparator_n16() {
 fn chaos_ord() {
     for seed in seeds() {
         seed_chaos_ord(seed);
-        let list: OrderedSkipList<ChaosOrd, 16, OrdComparator, Geometric> = OrderedSkipList::new();
-        run(list, &mut rng_for(seed), 50);
+        let list: OrderedSkipList<ChaosOrd, 16, OrdComparator, Geometric> =
+            OrderedSkipList::with_level_generator(seeded_geometric(seed));
+        run(list, seed, 50);
     }
 }
 
@@ -187,8 +192,9 @@ fn chaos_ord() {
 #[ignore = "issue 401: enabled once the fix lands"]
 fn rps_ord() {
     for seed in seeds() {
-        let list: OrderedSkipList<Rps, 16, OrdComparator, Geometric> = OrderedSkipList::new();
-        run(list, &mut rng_for(seed), 50);
+        let list: OrderedSkipList<Rps, 16, OrdComparator, Geometric> =
+            OrderedSkipList::with_level_generator(seeded_geometric(seed));
+        run(list, seed, 50);
     }
 }
 
@@ -209,7 +215,7 @@ fn issue_401_reproducer() {
         r = r.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
         (r >> 16) % n
     };
-    for _ in 0..40 {
+    for step_index in 0..40 {
         let k = next(8) as u8;
         let op = next(7);
         let index = next(64) as usize;
@@ -224,8 +230,12 @@ fn issue_401_reproducer() {
                 }
             }
         }));
-        assert_contract_panic(result, &[]);
-        l.assert_well_formed();
+        check_step(seed, step_index, op, || {
+            check_step(seed, step_index, op, || {
+                assert_contract_panic(result, &[]);
+                l.assert_well_formed();
+            });
+        });
     }
 }
 
@@ -233,15 +243,17 @@ fn issue_401_reproducer() {
 #[test]
 #[ignore = "issue 401: enabled once the fix lands"]
 fn issue_401_ord_comparator() {
-    for seed in 0_u32..200 {
+    let seed_count = if cfg!(miri) { 20 } else { 200 };
+    for seed in 0_u32..seed_count {
         seed_chaos_ord(seed);
-        let mut l: OrderedSkipList<ChaosOrd> = OrderedSkipList::new();
+        let mut l: OrderedSkipList<ChaosOrd> =
+            OrderedSkipList::with_level_generator(seeded_geometric(seed));
         let mut r = seed.wrapping_mul(2_654_435_761) | 1;
         let mut next = |n: u32| {
             r = r.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
             (r >> 16) % n
         };
-        for _ in 0..60 {
+        for step_index in 0..60 {
             let k = ChaosOrd(next(8) as u8);
             let op = next(7);
             let index = next(64) as usize;
@@ -256,8 +268,10 @@ fn issue_401_ord_comparator() {
                     }
                 }
             }));
-            assert_contract_panic(result, &[]);
-            l.assert_well_formed();
+            check_step(seed, step_index, op, || {
+                assert_contract_panic(result, &[]);
+                l.assert_well_formed();
+            });
         }
     }
 }
