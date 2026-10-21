@@ -7,7 +7,7 @@
 use core::fmt;
 
 use crate::{
-    comparator::{Comparator, ComparatorKey, OrdComparator},
+    comparator::{Comparator, ComparatorKey, OrdComparator, total_order_violation},
     level_generator::{LevelGenerator, geometric::Geometric},
     skip_set::SkipSet,
 };
@@ -279,12 +279,6 @@ impl<'a, T, C: Comparator<T>, G: LevelGenerator, const N: usize> VacantEntry<'a,
 
 // MARK: OccupiedEntry methods
 
-#[expect(
-    clippy::expect_used,
-    clippy::missing_panics_doc,
-    reason = "OccupiedEntry invariant: the element is present in the set; \
-              the expect fires only on internal invariant violation"
-)]
 impl<'a, T, C: Comparator<T>, G: LevelGenerator, const N: usize> OccupiedEntry<'a, T, N, C, G> {
     /// Returns a shared reference to the probe key.
     ///
@@ -310,6 +304,11 @@ impl<'a, T, C: Comparator<T>, G: LevelGenerator, const N: usize> OccupiedEntry<'
     ///
     /// This operation is `$O(\log n)$` on average.
     ///
+    /// # Panics
+    ///
+    /// Panics if the comparator does not implement a total order and the
+    /// lookup no longer finds the element the entry found.
+    ///
     /// # Examples
     ///
     /// ```rust
@@ -330,13 +329,18 @@ impl<'a, T, C: Comparator<T>, G: LevelGenerator, const N: usize> OccupiedEntry<'
         self.set
             .inner
             .get_fast(&self.value)
-            .expect("OccupiedEntry invariant: element is present in set")
+            .unwrap_or_else(|| total_order_violation())
     }
 
     /// Consumes the entry and returns a shared reference to the element valid
     /// for the lifetime `'a` of the original set borrow.
     ///
     /// This operation is `$O(\log n)$` on average.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the comparator does not implement a total order and the
+    /// lookup no longer finds the element the entry found.
     ///
     /// # Examples
     ///
@@ -360,12 +364,17 @@ impl<'a, T, C: Comparator<T>, G: LevelGenerator, const N: usize> OccupiedEntry<'
         let Self { set, value } = self;
         set.inner
             .get_fast(&value)
-            .expect("OccupiedEntry invariant: element is present in set")
+            .unwrap_or_else(|| total_order_violation())
     }
 
     /// Removes the element from the set and returns it.
     ///
     /// This operation is `$O(\log n)$` on average.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the comparator does not implement a total order and the
+    /// lookup no longer finds the element the entry found.
     ///
     /// # Examples
     ///
@@ -389,7 +398,7 @@ impl<'a, T, C: Comparator<T>, G: LevelGenerator, const N: usize> OccupiedEntry<'
         self.set
             .inner
             .take_first(&self.value)
-            .expect("OccupiedEntry invariant: element is present in set")
+            .unwrap_or_else(|| total_order_violation())
     }
 }
 
@@ -847,5 +856,80 @@ mod tests {
         let mut set = make_set(&[5]);
         let s = format!("{:?}", set.entry(5));
         assert!(s.contains("OccupiedEntry"));
+    }
+
+    // MARK: comparator contradiction
+
+    std::thread_local! {
+        /// When set, [`flipping_cmp`] calls a stored `5` less than a probe `5`.
+        static FLIPPED: core::cell::Cell<bool> = const { core::cell::Cell::new(false) };
+    }
+
+    /// Integer order, except that a flipped comparator answers `Less` for
+    /// `(5, 5)`.  A lookup started before the flip finds `5`; one started
+    /// after walks past it.
+    #[expect(
+        clippy::trivially_copy_pass_by_ref,
+        reason = "FnComparator passes both operands by reference"
+    )]
+    fn flipping_cmp(a: &i32, b: &i32) -> core::cmp::Ordering {
+        if FLIPPED.with(core::cell::Cell::get) && *a == 5 && *b == 5 {
+            core::cmp::Ordering::Less
+        } else {
+            a.cmp(b)
+        }
+    }
+
+    type FlippingSet = SkipSet<i32, 16, FnComparator<fn(&i32, &i32) -> core::cmp::Ordering>>;
+    type FlippingEntry<'a> =
+        super::OccupiedEntry<'a, i32, 16, FnComparator<fn(&i32, &i32) -> core::cmp::Ordering>>;
+
+    /// Finds `5` through [`SkipSet::entry`], flips the comparator, then runs
+    /// `op` on the occupied entry.  `op` must panic with the total-order
+    /// message and leave the set intact.
+    fn assert_flipped_entry_panics(op: impl FnOnce(FlippingEntry<'_>) -> i32) {
+        use std::panic::{AssertUnwindSafe, catch_unwind};
+
+        use crate::test_util::TOTAL_ORDER_PANIC;
+
+        FLIPPED.with(|f| f.set(false));
+        let mut set = FlippingSet::with_comparator(FnComparator(flipping_cmp));
+        set.extend(0..10);
+
+        let result = catch_unwind(AssertUnwindSafe(|| {
+            let Entry::Occupied(entry) = set.entry(5) else {
+                panic!("5 must be found before the flip");
+            };
+            FLIPPED.with(|f| f.set(true));
+            op(entry)
+        }));
+        FLIPPED.with(|f| f.set(false));
+
+        let payload = result.expect_err("a lookup that loses the element must panic");
+        assert_eq!(payload.downcast_ref::<&str>(), Some(&TOTAL_ORDER_PANIC));
+        set.assert_well_formed();
+        assert_eq!(
+            set.iter().copied().collect::<Vec<_>>(),
+            (0..10).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn occupied_get_panics_when_element_vanishes() {
+        assert_flipped_entry_panics(|entry| *entry.get());
+    }
+
+    #[test]
+    fn occupied_into_ref_panics_when_element_vanishes() {
+        assert_flipped_entry_panics(|entry| *entry.into_ref());
+    }
+
+    #[test]
+    #[expect(
+        clippy::redundant_closure_for_method_calls,
+        reason = "a method path fixes one lifetime; the helper needs any lifetime"
+    )]
+    fn occupied_remove_panics_when_element_vanishes() {
+        assert_flipped_entry_panics(|entry| entry.remove());
     }
 }
