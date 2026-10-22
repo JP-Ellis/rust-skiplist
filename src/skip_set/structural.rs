@@ -87,6 +87,10 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> SkipSet<T, N, C, G>
         // self.first), no duplicates can arise.  We delegate directly to the
         // underlying OrderedSkipList, which picks the appropriate splice
         // direction and rebuilds skip links in O(n+m).
+        //
+        // Comparator trust: the comparisons run before any write and only pick
+        // a path.  Both paths are safe for any answer: the splice rebuilds every
+        // skip link, and the slow path inserts through the checked visitors.
         let disjoint = if self.is_empty() {
             true
         } else {
@@ -624,5 +628,40 @@ mod tests {
             right.iter().map(String::as_str).collect::<Vec<_>>(),
             ["cherry", "date"]
         );
+    }
+
+    // MARK: split_off under a lying comparator
+
+    #[test]
+    fn split_off_chaos_is_well_formed() {
+        use std::panic::{AssertUnwindSafe, catch_unwind};
+
+        use crate::test_util::{Chaos, assert_contract_panic, seeded_geometric, seeds};
+
+        for seed in seeds() {
+            let mut list: SkipSet<u8, 16, Chaos, _> = SkipSet::with_comparator_and_level_generator(
+                Chaos::new(seed),
+                seeded_geometric(seed),
+            );
+            for k in 0_u8..24 {
+                let result = catch_unwind(AssertUnwindSafe(|| {
+                    list.insert(k);
+                }));
+                assert_contract_panic(result, &[]);
+            }
+            list.assert_well_formed();
+
+            for probe in [0_u8, 7, 12, 23, 40] {
+                let mut other = None;
+                let result = catch_unwind(AssertUnwindSafe(|| {
+                    other = Some(list.split_off(&probe));
+                }));
+                assert_contract_panic(result, &[]);
+                list.assert_well_formed();
+                if let Some(second) = other {
+                    second.assert_well_formed();
+                }
+            }
+        }
     }
 }

@@ -80,6 +80,9 @@ where
     Q: ?Sized,
     F: Fn(&T, &Q) -> Ordering,
 {
+    // Comparator trust: the answers only choose which links to follow.  The
+    // rank adds stored link distances and base-chain steps, so `(node, rank)`
+    // matches the structure whatever the comparator said, and nothing is written.
     let mut current = head;
     let mut rank: usize = 0;
     // SAFETY: caller guarantees head is valid.
@@ -901,6 +904,37 @@ mod tests {
         assert_eq!(rank, 4);
 
         unsafe { drop(Box::from_raw(head.as_ptr())) };
+        Ok(())
+    }
+
+    // MARK: gap_find under a lying comparator
+
+    #[test]
+    fn gap_find_rank_matches_structure_under_chaos() -> Result<()> {
+        use crate::{comparator::Comparator as _, test_util::Chaos};
+
+        for seed in 0_u32..100 {
+            for advance_on_equal in [false, true] {
+                let head = skiplist()?;
+                let chaos = Chaos::new(seed);
+                // SAFETY: `head` is the live sentinel of the fixture list.
+                let (node, rank) =
+                    unsafe { gap_find(head, &25_u8, |v, q| chaos.compare(v, q), advance_on_equal) };
+
+                // The returned rank counts base-chain steps from the head.
+                let mut walked = head;
+                for _ in 0..rank {
+                    // SAFETY: `walked` is a live node of the fixture list.
+                    walked = unsafe { walked.as_ref() }
+                        .next()
+                        .expect("rank never exceeds the list length");
+                }
+                assert_eq!(walked, node, "seed {seed}");
+
+                // SAFETY: the fixture owns its nodes through the head sentinel.
+                unsafe { drop(Box::from_raw(head.as_ptr())) };
+            }
+        }
         Ok(())
     }
 }

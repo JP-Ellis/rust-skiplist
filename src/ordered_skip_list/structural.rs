@@ -121,6 +121,10 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
         // Forward fast path: self is empty, or every element of other is >=
         // every element of self (self.last <= other.first).  Splice other's
         // chain after self's tail and rebuild skip links in one O(n+m) pass.
+        //
+        // Comparator trust: the comparison below runs before any write and only
+        // picks a path.  Each splice ends in a rebuild of every skip link from
+        // the base chain, so a wrong answer can unsort the list but not mislink it.
         let can_concat = self.is_empty()
             || self.tail.is_some_and(|tail_nn| {
                 // SAFETY: tail_nn is a live data node; other.head is a valid sentinel.
@@ -1581,6 +1585,40 @@ mod tests {
         assert_eq!(list.last().map(PanicOnDrop::id), Some(15));
         for (index, id) in ids.iter().enumerate() {
             assert_eq!(list.get_by_index(index).map(PanicOnDrop::id), Some(*id));
+        }
+    }
+
+    // MARK: split_off under a lying comparator
+
+    #[test]
+    fn split_off_chaos_is_well_formed() {
+        use std::panic::{AssertUnwindSafe, catch_unwind};
+
+        use crate::test_util::{Chaos, assert_contract_panic, seeded_geometric, seeds};
+
+        for seed in seeds() {
+            let mut list: OrderedSkipList<u8, 16, Chaos, _> =
+                OrderedSkipList::with_comparator_and_level_generator(
+                    Chaos::new(seed),
+                    seeded_geometric(seed),
+                );
+            for k in 0_u8..24 {
+                let result = catch_unwind(AssertUnwindSafe(|| list.insert(k)));
+                assert_contract_panic(result, &[]);
+            }
+            list.assert_well_formed();
+
+            for probe in [0_u8, 7, 12, 23, 40] {
+                let mut other = None;
+                let result = catch_unwind(AssertUnwindSafe(|| {
+                    other = Some(list.split_off(&probe));
+                }));
+                assert_contract_panic(result, &[]);
+                list.assert_well_formed();
+                if let Some(second) = other {
+                    second.assert_well_formed();
+                }
+            }
         }
     }
 }
