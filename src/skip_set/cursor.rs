@@ -662,6 +662,7 @@ mod tests {
     use pretty_assertions::assert_eq;
 
     use super::*;
+    use crate::test_util::Counting;
 
     fn set_123() -> SkipSet<i32> {
         [1, 2, 3].into_iter().collect()
@@ -847,5 +848,39 @@ mod tests {
         let mut cur = s.upper_bound_mut(Bound::Unbounded);
         assert_eq!(cur.remove_next(), None);
         assert_eq!(s.len(), 3);
+    }
+
+    // MARK: Interior-mutable comparator
+
+    /// Every mutable-cursor constructor and cursor operation stays sound when
+    /// the comparator writes to its own state on each call.
+    ///
+    /// `Counting` is a consistent order whose counter lives inside the set,
+    /// so each comparison writes to the set's memory.  The cursor's list
+    /// pointer must stay valid across those writes.
+    #[test]
+    fn cursor_interior_mutable_comparator_no_ub() {
+        for case in 0..4_u8 {
+            let mut s = SkipSet::<i32, 16, Counting>::with_comparator(Counting::default());
+            for v in 1..=5 {
+                s.insert(v);
+            }
+            {
+                let mut cur = match case {
+                    0 => s.lower_bound_mut(Bound::Included(&3)),
+                    1 => s.lower_bound_mut(Bound::Excluded(&3)),
+                    2 => s.upper_bound_mut(Bound::Included(&3)),
+                    _ => s.upper_bound_mut(Bound::Excluded(&3)),
+                };
+                let next = cur.remove_next().expect("the gap has a right neighbour");
+                let prev = cur.remove_prev().expect("the gap has a left neighbour");
+                cur.insert_after(next)
+                    .expect("the removed right neighbour fits the gap");
+                cur.insert_before(prev)
+                    .expect("the removed left neighbour fits the gap");
+            }
+            let vals: Vec<_> = s.iter().copied().collect();
+            assert_eq!(vals, [1, 2, 3, 4, 5], "case {case}");
+        }
     }
 }
