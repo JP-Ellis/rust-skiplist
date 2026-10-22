@@ -1027,7 +1027,6 @@ impl<T, const N: usize, C: Comparator<T>, G: LevelGenerator> OrderedSkipList<T, 
         Q: ?Sized,
         C: ComparatorKey<T, Q>,
     {
-        let list_ptr = core::ptr::from_mut(self);
         let (current, rank) = match bound {
             Bound::Unbounded => (self.head, 0),
             Bound::Included(q) => {
@@ -1055,7 +1054,10 @@ impl<T, const N: usize, C: Comparator<T>, G: LevelGenerator> OrderedSkipList<T, 
                 }
             }
         };
-        CursorMut::new(current, rank, list_ptr)
+        // The search calls the comparator through `&self`, which may write to
+        // interior-mutable comparator state.  Deriving the cursor's list
+        // pointer after the search keeps those writes off its borrow.
+        CursorMut::new(current, rank, core::ptr::from_mut(self))
     }
 
     /// Returns a mutable cursor positioned at the gap defined by the given
@@ -1087,7 +1089,6 @@ impl<T, const N: usize, C: Comparator<T>, G: LevelGenerator> OrderedSkipList<T, 
         Q: ?Sized,
         C: ComparatorKey<T, Q>,
     {
-        let list_ptr = core::ptr::from_mut(self);
         let (current, rank) = match bound {
             Bound::Unbounded => match self.tail {
                 Some(tail) => (tail, self.len),
@@ -1118,7 +1119,10 @@ impl<T, const N: usize, C: Comparator<T>, G: LevelGenerator> OrderedSkipList<T, 
                 }
             }
         };
-        CursorMut::new(current, rank, list_ptr)
+        // The search calls the comparator through `&self`, which may write to
+        // interior-mutable comparator state.  Deriving the cursor's list
+        // pointer after the search keeps those writes off its borrow.
+        CursorMut::new(current, rank, core::ptr::from_mut(self))
     }
 }
 
@@ -1129,7 +1133,7 @@ mod tests {
     use pretty_assertions::assert_eq;
 
     use super::*;
-    use crate::ordered_skip_list::OrderedSkipList;
+    use crate::{ordered_skip_list::OrderedSkipList, test_util::Counting};
 
     // Helper: build a list [1, 2, 3].
     fn list_123() -> OrderedSkipList<i32> {
@@ -1578,5 +1582,40 @@ mod tests {
         }
         let vals: Vec<_> = l.iter().copied().collect();
         assert_eq!(vals, [1, 2, 2, 2, 3]);
+    }
+
+    // MARK: Interior-mutable comparator
+
+    /// Every mutable-cursor constructor and cursor operation stays sound when
+    /// the comparator writes to its own state on each call.
+    ///
+    /// `Counting` is a consistent order whose counter lives inside the list,
+    /// so each comparison writes to the list's memory.  The cursor's list
+    /// pointer must stay valid across those writes.
+    #[test]
+    fn cursor_interior_mutable_comparator_no_ub() {
+        for case in 0..4_u8 {
+            let mut l = OrderedSkipList::<i32, 16, Counting>::with_comparator(Counting::default());
+            for v in 1..=5 {
+                l.insert(v);
+            }
+            {
+                let mut cur = match case {
+                    0 => l.lower_bound_mut(Bound::Included(&3)),
+                    1 => l.lower_bound_mut(Bound::Excluded(&3)),
+                    2 => l.upper_bound_mut(Bound::Included(&3)),
+                    _ => l.upper_bound_mut(Bound::Excluded(&3)),
+                };
+                let next = cur.remove_next().expect("the gap has a right neighbour");
+                let prev = cur.remove_prev().expect("the gap has a left neighbour");
+                cur.insert_after(next)
+                    .expect("the removed right neighbour fits the gap");
+                cur.insert_before(prev)
+                    .expect("the removed left neighbour fits the gap");
+            }
+            assert!(l.comparator.calls() > 0, "case {case}");
+            let vals: Vec<_> = l.iter().copied().collect();
+            assert_eq!(vals, [1, 2, 3, 4, 5], "case {case}");
+        }
     }
 }
