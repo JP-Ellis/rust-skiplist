@@ -807,7 +807,9 @@ impl<K, V, const N: usize> FusedIterator for Iter<'_, K, V, N> {}
 pub struct IterMut<'a, K, V, const N: usize = 16> {
     /// Pointer to the next element to yield from the front.
     front: Option<NonNull<Node<(K, V), N>>>,
-    /// Pointer to the next element to yield from the back.
+    /// Pointer to the next element to yield from the back.  Once the back end
+    /// yields the first entry it points at the head sentinel, so only `len`
+    /// marks exhaustion.
     back: Option<NonNull<Node<(K, V), N>>>,
     /// Number of elements remaining.
     len: usize,
@@ -887,12 +889,10 @@ impl<'a, K, V, const N: usize> DoubleEndedIterator for IterMut<'a, K, V, N> {
         // back_ptr points to a live data node for the 'a lifetime, and no
         // other mutable reference to it exists while this IterMut is alive.
         let node: &'a mut Node<(K, V), N> = unsafe { back_ptr.as_mut() };
-        // Walk backward.  The head sentinel has no value; the filter ensures
-        // `back` becomes None when we step past the first data node.
-        // SAFETY: prev() returns a valid pointer into the same map allocation.
-        self.back = node
-            .prev()
-            .filter(|p| unsafe { p.as_ref() }.value().is_some());
+        // Walk backward without reading the predecessor: it may be a node the
+        // front end already yielded, and a read would freeze that `&mut`.
+        // `len` stops iteration before `back` reaches the head sentinel.
+        self.back = node.prev();
         self.len = self.len.saturating_sub(1);
         let kv: &'a mut (K, V) = node.value_mut()?;
         Some((&kv.0, &mut kv.1))
@@ -2085,6 +2085,27 @@ mod tests {
         assert_eq!(map.get(&5), Some(&105));
         assert_eq!(map.get(&4), Some(&104));
         assert_eq!(map.get(&19), Some(&119));
+    }
+
+    /// A value yielded from the front stays writable after `next_back` takes
+    /// the last remaining element.
+    ///
+    /// `next_back` must not read the value of a node the front end already
+    /// yielded, because that read would freeze the caller's `&mut V`.
+    #[test]
+    fn miri_iter_mut_meet_in_middle() {
+        let mut map = imap_from([(1, 10), (2, 20)]);
+        let mut iter = map.iter_mut();
+        let (_, a) = iter.next().expect("first");
+        *a = 11;
+        let (_, b) = iter.next_back().expect("last");
+        *b = 21;
+        *a = 12;
+        assert_eq!(iter.next(), None);
+        assert_eq!(iter.next_back(), None);
+        drop(iter);
+        let pairs: Vec<_> = map.iter().map(|(&k, &v)| (k, v)).collect();
+        assert_eq!(pairs, [(1, 12), (2, 21)]);
     }
 
     // MARK: into_iter
