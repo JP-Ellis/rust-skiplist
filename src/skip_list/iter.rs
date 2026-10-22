@@ -566,7 +566,8 @@ pub struct IterMut<'a, T, const N: usize = 16> {
     /// the iterator is exhausted or the list was empty.
     front: Option<NonNull<Node<T, N>>>,
     /// Pointer to the next element to yield from the back, or `None` when
-    /// the iterator is exhausted or the list was empty.
+    /// the list was empty.  Once the back end yields the first element it
+    /// points at the head sentinel, so only `len` marks exhaustion.
     back: Option<NonNull<Node<T, N>>>,
     /// Number of elements remaining.  Guards against yielding more than
     /// `len` items even when `front` and `back` pointers become stale after
@@ -649,13 +650,10 @@ impl<'a, T, const N: usize> DoubleEndedIterator for IterMut<'a, T, N> {
         // back_ptr points to a live data node for the 'a lifetime, and no
         // other mutable reference to it exists while this IterMut is alive.
         let node: &'a mut Node<T, N> = unsafe { back_ptr.as_mut() };
-        // Walk backward.  The head sentinel has no value; the filter ensures
-        // `back` becomes None when we step past the first data node.
-        // `len` independently prevents accessing a stale `back` pointer.
-        // SAFETY: prev() returns a valid pointer into the same list allocation.
-        self.back = node
-            .prev()
-            .filter(|p| unsafe { p.as_ref() }.value().is_some());
+        // Walk backward without reading the predecessor: it may be a node the
+        // front end already yielded, and a read would freeze that `&mut`.
+        // `len` stops iteration before `back` reaches the head sentinel.
+        self.back = node.prev();
         self.len = self.len.saturating_sub(1);
         node.value_mut()
     }
@@ -1348,6 +1346,28 @@ mod tests {
         assert_eq!(iter.next_back(), Some(&mut 30));
         assert_eq!(iter.next(), None);
         assert_eq!(iter.next_back(), None);
+    }
+
+    /// A value yielded from the front stays writable after `next_back` takes
+    /// the last remaining element.
+    ///
+    /// `next_back` must not read the value of a node the front end already
+    /// yielded, because that read would freeze the caller's `&mut T`.
+    #[test]
+    fn miri_iter_mut_meet_in_middle() {
+        let mut list = SkipList::<i32>::new();
+        list.push_back(10);
+        list.push_back(20);
+        let mut iter = list.iter_mut();
+        let a = iter.next().expect("first");
+        *a = 11;
+        let b = iter.next_back().expect("last");
+        *b = 21;
+        *a = 12;
+        assert_eq!(iter.next(), None);
+        assert_eq!(iter.next_back(), None);
+        drop(iter);
+        assert_eq!(list.iter().copied().collect::<Vec<_>>(), [12, 21]);
     }
 
     #[test]
