@@ -1120,6 +1120,7 @@ impl<V, const N: usize> Node<V, N> {
     /// One forward walk of the base chain checks that:
     ///
     /// - `next` and `prev` mirror each other, and only the head has no value;
+    /// - no node is taller than the head;
     /// - `len` equals the number of data nodes and `tail` is the last node
     ///   (`None` when the list is empty);
     /// - each skip link at level `l` targets the next node with a level-`l`
@@ -1163,6 +1164,12 @@ impl<V, const N: usize> Node<V, N> {
                 rank - 1
             );
             assert!(node.value().is_some(), "node at rank {rank} has no value");
+            assert!(
+                node.level() <= head_ref.level(),
+                "node at rank {rank} has height {}, above the head height {}",
+                node.level(),
+                head_ref.level()
+            );
 
             for (level, slot) in last_tower.iter_mut().enumerate().take(node.level()) {
                 if let Some((owner, owner_rank)) = *slot {
@@ -1716,6 +1723,29 @@ pub(crate) mod tests {
     #[test]
     fn well_formed_rejects_wrong_len() -> Result<()> {
         assert!(well_formed_panics(5, |_| Ok(()))?);
+        Ok(())
+    }
+
+    #[test]
+    fn well_formed_rejects_node_taller_than_head() -> Result<()> {
+        // head (height 1) -> v1 (height 2).  Every link is consistent, so only
+        // the height check can catch it.
+        let mut head = unsafe {
+            NonNull::new_unchecked(Box::into_raw(Box::new(Node::<u8, MAX_LEVELS>::new(1))))
+        };
+        let v1 = unsafe { Node::insert_after(head, Node::with_value(2, 10)) };
+        unsafe { head.as_mut() }.links_mut()[0] = Some(Link::new(v1, 1)?);
+
+        let result = std::panic::catch_unwind(core::panic::AssertUnwindSafe(|| unsafe {
+            Node::assert_well_formed(head, 1, Some(v1));
+        }));
+
+        let payload = result.expect_err("a node taller than the head must panic");
+        assert_eq!(
+            payload.downcast_ref::<String>().map(String::as_str),
+            Some("node at rank 1 has height 2, above the head height 1")
+        );
+        unsafe { drop(Box::from_raw(head.as_ptr())) };
         Ok(())
     }
 
