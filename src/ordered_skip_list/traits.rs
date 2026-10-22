@@ -268,6 +268,11 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> Extend<T>
 {
     /// Inserts all items from `iter` into their sorted positions.
     ///
+    /// # Panics
+    ///
+    /// If the comparator violates its contract, this method may panic after
+    /// earlier steps have taken effect; the collection stays valid.
+    ///
     /// # Examples
     ///
     /// ```rust
@@ -294,6 +299,11 @@ impl<'a, T: Copy + 'a, C: Comparator<T>, G: LevelGenerator, const N: usize> Exte
 {
     /// Copies all items from `iter` and inserts them into their sorted
     /// positions.
+    ///
+    /// # Panics
+    ///
+    /// If the comparator violates its contract, this method may panic after
+    /// earlier steps have taken effect; the collection stays valid.
     ///
     /// # Examples
     ///
@@ -325,6 +335,11 @@ impl<T, C: Comparator<T> + Default, G: LevelGenerator + Default, const N: usize>
     /// Elements are inserted in sorted order regardless of the iteration order
     /// of the source.  The list uses the default comparator and level generator
     /// for the type parameters `C` and `G`.
+    ///
+    /// # Panics
+    ///
+    /// If the comparator violates its contract, this method may panic after
+    /// earlier steps have taken effect; the collection stays valid.
     ///
     /// # Examples
     ///

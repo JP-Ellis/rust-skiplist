@@ -48,11 +48,11 @@ assert_eq!(median, Some(&4.5));
 
 ### NaN panics at runtime
 
-Inserting or looking up a `NaN` value will panic immediately. There is no compile-time protection. If there is any chance that a `NaN` could reach the collection, prefer `FnComparator(f64::total_cmp)` instead (see below).
+Inserting or looking up a `NaN` value will panic immediately. A panic from `PartialOrdComparator` leaves the collection valid. There is no compile-time protection. If there is any chance that a `NaN` could reach the collection, prefer `FnComparator(f64::total_cmp)` instead (see below).
 
 ### No NaN-equality guarantee
 
-Even if a `NaN` somehow entered the collection without panicking, the skip list's ordering invariants would be broken, leading to incorrect search results and potential memory unsafety. The panic is a safety net, not a correctness guarantee.
+Even if a `NaN` somehow entered the collection without panicking, the skip list's ordering invariants would be broken, leading to incorrect search results. The panic is a safety net, not a correctness guarantee.
 
 ## The Recommended Alternative: `FnComparator(f64::total_cmp)`
 

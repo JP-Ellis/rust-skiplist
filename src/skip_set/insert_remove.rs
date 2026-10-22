@@ -40,6 +40,11 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> SkipSet<T, N, C, G>
     ///
     /// This operation is `$O(\log n)$` on average.
     ///
+    /// # Panics
+    ///
+    /// If the comparator violates its contract, this method may panic after
+    /// earlier steps have taken effect; the collection stays valid.
+    ///
     /// # Examples
     ///
     /// ```rust

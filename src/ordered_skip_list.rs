@@ -12,10 +12,16 @@
 //! The ordering is parameterised by `C: Comparator<T>` so that custom
 //! orderings can be used without requiring [`Ord`] on the element type.
 //!
+//! # Comparator Contract
+//!
+//! The comparator must implement a total order, as described in
+//! [`crate::comparator`].  A comparator that does not is a logic error and
+//! never causes undefined behaviour.
+//!
 //! # Key Invariants
 //!
-//! - The collection is **always sorted**; there is no way to insert an element
-//!   out of order.
+//! - The collection is **always sorted** while the comparator meets its
+//!   contract; there is no way to insert an element out of order.
 //! - **Duplicate values are allowed.**  Inserting the same value twice places
 //!   two adjacent entries in the list.
 //! - Elements cannot be mutated in place because that could silently break the

@@ -184,6 +184,11 @@ impl<T: Hash, C: Comparator<T>, G: LevelGenerator, const N: usize> Hash for Skip
 impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> Extend<T> for SkipSet<T, N, C, G> {
     /// Inserts all items from `iter` into the set, skipping duplicates.
     ///
+    /// # Panics
+    ///
+    /// If the comparator violates its contract, this method may panic after
+    /// earlier steps have taken effect; the collection stays valid.
+    ///
     /// # Examples
     ///
     /// ```rust
@@ -210,6 +215,11 @@ impl<'a, T: Copy + 'a, C: Comparator<T>, G: LevelGenerator, const N: usize> Exte
 {
     /// Copies all items from `iter` and inserts them into the set, skipping
     /// duplicates.
+    ///
+    /// # Panics
+    ///
+    /// If the comparator violates its contract, this method may panic after
+    /// earlier steps have taken effect; the collection stays valid.
     ///
     /// # Examples
     ///
@@ -242,6 +252,11 @@ impl<T, C: Comparator<T> + Default, G: LevelGenerator + Default, const N: usize>
     /// of the source.  Duplicate elements are silently discarded.  The set uses
     /// the default comparator and level generator for the type parameters `C`
     /// and `G`.
+    ///
+    /// # Panics
+    ///
+    /// If the comparator violates its contract, this method may panic after
+    /// earlier steps have taken effect; the collection stays valid.
     ///
     /// # Examples
     ///

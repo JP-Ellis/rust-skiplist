@@ -9,11 +9,18 @@
 //! The ordering is parameterised by `C: Comparator<T>` so that custom
 //! orderings can be used without requiring [`Ord`] on the element type.
 //!
+//! # Comparator Contract
+//!
+//! The comparator must implement a total order, as described in
+//! [`crate::comparator`].  A comparator that does not is a logic error and
+//! never causes undefined behaviour.
+//!
 //! # Key Invariants
 //!
 //! - Each value is stored at most once.  Inserting a value that already exists
 //!   is a no-op (`insert` returns `false`).
-//! - Values are always kept in sorted order.
+//! - Values are always kept in sorted order while the comparator meets its
+//!   contract.
 //! - Values cannot be mutated in place because that could silently break the
 //!   sorted invariant.  To update a value, [`take`] it and re-`insert` the new
 //!   one.

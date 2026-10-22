@@ -83,6 +83,11 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
     ///
     /// [`Comparator`]: crate::comparator::Comparator
     ///
+    /// # Panics
+    ///
+    /// If the comparator violates its contract, this method may panic after
+    /// earlier steps have taken effect; the collection stays valid.
+    ///
     /// # Examples
     ///
     /// ```rust
@@ -103,7 +108,6 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
     /// ```
     #[expect(
         clippy::expect_used,
-        clippy::missing_panics_doc,
         reason = "tail/head nodes always have a value; expects fire only on invariant violations"
     )]
     #[expect(

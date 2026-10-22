@@ -54,6 +54,11 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> SkipSet<T, N, C, G>
     ///
     /// [`Comparator`]: crate::comparator::Comparator
     ///
+    /// # Panics
+    ///
+    /// If the comparator violates its contract, this method may panic after
+    /// earlier steps have taken effect; the collection stays valid.
+    ///
     /// # Examples
     ///
     /// ```rust
@@ -72,7 +77,6 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> SkipSet<T, N, C, G>
     /// ```
     #[expect(
         clippy::expect_used,
-        clippy::missing_panics_doc,
         reason = "self.last/first() / other.last/first() return None only when empty; \
                   both sets are checked to be non-empty before the expect calls"
     )]

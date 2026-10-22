@@ -21,8 +21,11 @@
 //! - **Transitivity**: `compare(a, b) != Greater && compare(b, c) !=
 //!   Greater` implies `compare(a, c) != Greater`.
 //!
-//! Violating these properties can cause incorrect behaviour up to and
-//! including memory unsafety in the ordered skip list variants.
+//! A comparator that violates these properties is a logic error.  The
+//! resulting behaviour is unspecified but confined to the collection: methods
+//! may return wrong results, panic, abort or leak, but never cause undefined
+//! behaviour.  Methods panic with "comparator does not implement a total
+//! order" when they detect a contradiction.
 //!
 //! [`OrderedSkipList`]: crate::ordered_skip_list::OrderedSkipList
 //! [`SkipSet`]: crate::skip_set::SkipSet
