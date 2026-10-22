@@ -146,7 +146,6 @@ fn rng_for(seed: u32) -> SmallRng {
 // MARK: Tests
 
 #[test]
-#[ignore = "issue 401: enabled once the fix lands"]
 fn chaos_comparator_n4() {
     for seed in seeds() {
         let map: SkipMap<u8, u8, 4, Chaos, FixedLevels> =
@@ -156,7 +155,6 @@ fn chaos_comparator_n4() {
 }
 
 #[test]
-#[ignore = "issue 401: enabled once the fix lands"]
 fn chaos_comparator_n16() {
     for seed in seeds() {
         let map: SkipMap<u8, u8, 16, Chaos, Geometric> =
@@ -166,7 +164,6 @@ fn chaos_comparator_n16() {
 }
 
 #[test]
-#[ignore = "issue 401: enabled once the fix lands"]
 fn chaos_ord() {
     for seed in seeds() {
         seed_chaos_ord(seed);
@@ -177,7 +174,6 @@ fn chaos_ord() {
 }
 
 #[test]
-#[ignore = "issue 401: enabled once the fix lands"]
 fn rps_ord() {
     for seed in seeds() {
         let map: SkipMap<Rps, u8, 16, OrdComparator, Geometric> =

@@ -152,7 +152,6 @@ fn rng_for(seed: u32) -> SmallRng {
 // MARK: Tests
 
 #[test]
-#[ignore = "issue 401: enabled once the fix lands"]
 fn chaos_comparator_n4() {
     for seed in seeds() {
         let list: OrderedSkipList<u8, 4, Chaos, FixedLevels> =
@@ -165,7 +164,6 @@ fn chaos_comparator_n4() {
 }
 
 #[test]
-#[ignore = "issue 401: enabled once the fix lands"]
 fn chaos_comparator_n16() {
     for seed in seeds() {
         let list: OrderedSkipList<u8, 16, Chaos, Geometric> =
@@ -178,7 +176,6 @@ fn chaos_comparator_n16() {
 }
 
 #[test]
-#[ignore = "issue 401: enabled once the fix lands"]
 fn chaos_ord() {
     for seed in seeds() {
         seed_chaos_ord(seed);
@@ -189,7 +186,6 @@ fn chaos_ord() {
 }
 
 #[test]
-#[ignore = "issue 401: enabled once the fix lands"]
 fn rps_ord() {
     for seed in seeds() {
         let list: OrderedSkipList<Rps, 16, OrdComparator, Geometric> =
@@ -202,7 +198,6 @@ fn rps_ord() {
 
 /// The reduced program from the issue report.
 #[test]
-#[ignore = "issue 401: enabled once the fix lands"]
 fn issue_401_reproducer() {
     let seed: u32 = 2;
     let mut l: OrderedSkipList<u8, 4, Chaos, FixedLevels> =
@@ -241,7 +236,6 @@ fn issue_401_reproducer() {
 
 /// The same program through a safe `Ord` implementation and `OrdComparator`.
 #[test]
-#[ignore = "issue 401: enabled once the fix lands"]
 fn issue_401_ord_comparator() {
     let seed_count = if cfg!(miri) { 20 } else { 200 };
     for seed in 0_u32..seed_count {
