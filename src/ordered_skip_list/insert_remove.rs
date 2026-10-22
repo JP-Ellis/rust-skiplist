@@ -574,7 +574,8 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
 
         // Find the direct level-l predecessor of target_ptr for each level
         // l < target_height via a pointer-equality forward scan.
-        // These are used for the distance-preserving splice and tail update.
+        // The scan compares pointers only, so it finds the true predecessors
+        // even when the comparator answered inconsistently above.
         let scan_precursors: [NonNull<Node<T, N>>; N] = {
             let mut arr = [self.head; N];
             let mut current = self.head;
@@ -779,22 +780,22 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
     )]
     #[expect(
         clippy::indexing_slicing,
-        reason = "l iterates 0..max_levels; scan_precursors[l] and first_precursors[l] are \
-                  valid because OrdMutVisitor fills all max_levels entries; \
-                  links_mut()[l] is valid because l < node.level() = max_levels"
+        reason = "l iterates 0..max_levels and max_levels <= N, so precursors[l] is in \
+                  bounds; links_mut()[l] is valid because each precursor at level l has \
+                  a level-l link slot"
     )]
     #[expect(
         clippy::multiple_unsafe_ops_per_block,
-        reason = "pointer-equality scan, link splicing, and node pop all touch \
-                  provably disjoint heap nodes; splitting across blocks would require \
-                  unsafe-crossing raw-pointer variables"
+        reason = "link splicing and node pop touch provably disjoint heap nodes; \
+                  splitting across blocks would require unsafe-crossing raw-pointer \
+                  variables"
     )]
     #[expect(
         clippy::too_many_lines,
         reason = "This method's complexity arises from the fast-path optimization, \
                   which requires replicating much of the logic of take_first while \
-                  using raw pointers and pointer-equality scans to locate the target \
-                  and its predecessors more quickly. Extracting helper methods would \
+                  using raw pointers and a rank-guided structural walk to locate the \
+                  target and its predecessors. Extracting helper methods would \
                   require passing many raw-pointer variables across unsafe boundaries, \
                   which would be more error-prone than keeping all the logic in one place."
     )]
@@ -805,20 +806,22 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
         C: ComparatorKey<T, Q>,
     {
         // Pass 1: find the "fast" target, the first equal node encountered
-        // during skip traversal (tends to be a higher-level node).
+        // during skip traversal (tends to be a higher-level node), and its
+        // 1-based rank.
         //
         // We replicate OrdVisitor's descent inline using NonNull pointers
         // (Reserved provenance) rather than &Node (Frozen provenance).
         // NonNull::from(&ref) would capture a Frozen tag that forbids
         // subsequent writes, so we obtain fast_ptr exclusively via link.node()
         // and node.next(), both of which preserve Reserved provenance.
-        let fast_ptr: NonNull<Node<T, N>> = {
+        let (fast_ptr, fast_rank): (NonNull<Node<T, N>>, usize) = {
             // SAFETY: self.head is a valid node for &mut self's lifetime.
             let max_levels = unsafe { self.head.as_ref() }.level();
             let cmp = |v: &T| self.comparator.compare_key(v, value);
             let mut current = self.head;
+            let mut rank = 0_usize;
             let mut level = max_levels;
-            let mut result: Option<NonNull<Node<T, N>>> = None;
+            let mut result: Option<(NonNull<Node<T, N>>, usize)> = None;
 
             'search: loop {
                 // Examine skip links from level-1 down to 0, following the
@@ -837,9 +840,10 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
                         let ord = unsafe { next.as_ref() }.value().map_or(Ordering::Less, cmp);
                         if ord != Ordering::Greater {
                             current = next;
+                            rank = rank.saturating_add(link.distance().get());
                             level = l.saturating_add(1);
                             if ord == Ordering::Equal {
-                                result = Some(current);
+                                result = Some((current, rank));
                                 break 'search;
                             }
                             advanced_via_skip = true;
@@ -857,11 +861,13 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
                         Some(next) => {
                             // SAFETY: next is a valid heap-allocated node.
                             let ord = unsafe { next.as_ref() }.value().map_or(Ordering::Less, cmp);
+                            current = next;
+                            rank = rank.saturating_add(1);
                             match ord {
                                 Ordering::Greater => break 'search,
-                                Ordering::Less => current = next,
+                                Ordering::Less => {}
                                 Ordering::Equal => {
-                                    result = Some(next);
+                                    result = Some((current, rank));
                                     break 'search;
                                 }
                             }
@@ -873,67 +879,58 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
             result?
         };
 
-        // Pass 2: locate the first-equal precursors using OrdMutVisitor (Less-only
-        // advancement) as the starting point for the pointer-equality scan.
-        let (first_ptr, found, first_precursors) = {
-            let head = self.head;
-            let cmp = |v: &T, q: &Q| self.comparator.compare_key(v, q);
-            let mut visitor = OrdMutVisitor::new(head, value, cmp);
-            visitor.traverse();
-            visitor.into_parts()
-        };
-
-        if !found {
-            // Pass 1 succeeded, so this is an internal invariant violation.
-            return None;
-        }
-
         let max_levels = self.head_ref().level();
 
-        // SAFETY: `found` is true, so `first_ptr` and `fast_ptr` are live data
-        // nodes owned by this list.  No other &mut references to any node exist
-        // while this block runs.
-        //
-        // The scan reads links via shared (immutable) access only; structural
-        // mutations happen only in the splice loop afterwards.  Both phases touch
-        // provably disjoint heap nodes.
+        // Pass 2: derive the precursors of `fast_ptr` from the structure alone.
+        // At each level, from the top, advance while the link target is not
+        // `fast_ptr` and sits at a rank below `fast_rank`.  The comparator is
+        // not consulted, so the precursors are exact whatever it answered in
+        // pass 1.
+        let precursors: [NonNull<Node<T, N>>; N] = {
+            let mut arr = [self.head; N];
+            let mut current = self.head;
+            let mut rank = 0_usize;
+            for l in (0..max_levels).rev() {
+                loop {
+                    // SAFETY: `current` is a live node of this list, reached
+                    // from `head` through skip links; the reference is
+                    // short-lived and no `&mut` to any node exists.
+                    let maybe_link = unsafe { current.as_ref() }
+                        .links()
+                        .get(l)
+                        .and_then(Option::as_ref);
+                    let Some(link) = maybe_link else { break };
+                    let next_rank = rank.saturating_add(link.distance().get());
+                    if link.node() == fast_ptr || next_rank >= fast_rank {
+                        break;
+                    }
+                    current = link.node();
+                    rank = next_rank;
+                }
+                arr[l] = current;
+            }
+            arr
+        };
+
+        // SAFETY: `fast_ptr` and every precursor were reached from `head`
+        // and are live for `&mut self`; no `&mut` reference to any node
+        // exists.
+        unsafe { Node::check_precursors(&precursors, fast_ptr) };
+
+        // SAFETY: `fast_ptr` is a live data node owned by this list.  For
+        // l < fast_height, `precursors[l].links[l]` points at `fast_ptr`
+        // (checked above).  For l >= fast_height, `precursors[l]` is the last
+        // level-l node ranked below `fast_rank`, so its level-l link, if any,
+        // spans over `fast_ptr`.  No other &mut references to any node exist.
         let (val, new_tail) = unsafe {
             let fast_height = fast_ptr.as_ref().level();
             let fast_raw = fast_ptr.as_ptr();
 
-            // Build `scan_precursors`: for l < fast_height this holds the exact
-            // level-l predecessor of `fast_ptr` found by a pointer-equality scan;
-            // for l >= fast_height it holds `first_precursors[l]` (the node whose
-            // level-l link spans over fast_ptr, valid because whenever fast_ptr !=
-            // first_ptr the skip link that bypasses first_ptr requires
-            // first_ptr.height <= link_level < fast_ptr.height, so fast_height >
-            // first_height and first_precursors[l] for l >= fast_height spans over
-            // fast_ptr).
-            let mut scan_precursors = [self.head; N];
-            for l in 0..max_levels {
-                scan_precursors[l] = first_precursors[l];
-            }
-
-            if fast_ptr != first_ptr {
-                let mut current = self.head;
-                for l in (0..fast_height).rev() {
-                    loop {
-                        let maybe_link = current.as_ref().links().get(l).and_then(|lk| lk.as_ref());
-                        match maybe_link {
-                            None => break,
-                            Some(link) if link.node() == fast_ptr => break,
-                            Some(link) => current = link.node(),
-                        }
-                    }
-                    scan_precursors[l] = current;
-                }
-            }
-
             // Splice out fast_ptr with accurate distance maintenance:
-            //   l < fast_height  → distance-preserving link replacement (scan_precursors)
-            //   l >= fast_height → distance-only decrement (first_precursors == scan_precursors)
-            for (l, &scan_pred) in scan_precursors.iter().enumerate().take(max_levels) {
-                let pred_ptr = scan_pred.as_ptr();
+            //   l < fast_height  → distance-preserving link replacement
+            //   l >= fast_height → distance-only decrement
+            for (l, &pred) in precursors.iter().enumerate().take(max_levels) {
+                let pred_ptr = pred.as_ptr();
                 if l < fast_height {
                     let old_link: Option<Link<T, N>> = (*pred_ptr).links_mut()[l].take();
                     let target_link: Option<Link<T, N>> = (*fast_raw).links_mut()[l].take();
@@ -1874,6 +1871,7 @@ mod tests {
         list.insert(2);
         while let Some(v) = list.take_fast(&1) {
             assert_eq!(v, 1);
+            list.assert_well_formed();
             // Structural check: iter must still produce a sorted sequence.
             let got: Vec<i32> = list.iter().copied().collect();
             let mut sorted = got.clone();
@@ -1883,6 +1881,77 @@ mod tests {
         assert_eq!(list.len(), 2);
         let got: Vec<i32> = list.iter().copied().collect();
         assert_eq!(got, [0, 2]);
+    }
+
+    /// A level generator that hands out a fixed sequence of heights.
+    struct Heights(std::vec::IntoIter<usize>);
+
+    impl crate::level_generator::LevelGenerator for Heights {
+        fn total(&self) -> usize {
+            4
+        }
+
+        fn level(&mut self) -> usize {
+            self.0.next().unwrap_or(0)
+        }
+    }
+
+    #[test]
+    fn take_fast_inconsistent_neighbours_is_safe() {
+        use core::cmp::Ordering;
+        use std::{
+            cell::Cell,
+            panic::{AssertUnwindSafe, catch_unwind},
+            rc::Rc,
+        };
+
+        // Elements are (key, id).  The list is
+        //   head -----------------> (2,1) ------------------->
+        //   head -> (1,0) -> (2,0) -> (2,1) -> (2,2) -> (3,0)
+        // with (2,1) three levels tall and the rest one level tall.
+        //
+        // Once armed, the comparator ignores the probe and answers from the
+        // stored element alone.  Until it first answers `Equal` for (2,0) it
+        // treats (2,1) as `Greater`, so the fast search descends to (2,0).
+        // Afterwards (2,0) and (2,1) compare `Less` and (2,2) compares
+        // `Equal`, so a second search would land on (2,2) instead.
+        const PROBE: (u8, u8) = (2, u8::MAX);
+        let armed = Rc::new(Cell::new(false));
+        let flipped = Rc::new(Cell::new(false));
+        let cmp = {
+            let (is_armed, has_flipped) = (Rc::clone(&armed), Rc::clone(&flipped));
+            FnComparator(move |a: &(u8, u8), b: &(u8, u8)| {
+                if !is_armed.get() {
+                    return a.cmp(b);
+                }
+                let stored = if *a == PROBE { b } else { a };
+                match (*stored, has_flipped.get()) {
+                    ((1, _), _) | ((2, 0 | 1), true) => Ordering::Less,
+                    ((2, 0), false) => {
+                        has_flipped.set(true);
+                        Ordering::Equal
+                    }
+                    ((2, _), true) => Ordering::Equal,
+                    _ => Ordering::Greater,
+                }
+            })
+        };
+        let heights = Heights(vec![1, 1, 3, 1, 1].into_iter());
+        let mut list =
+            OrderedSkipList::<(u8, u8), 4, _, _>::with_comparator_and_level_generator(cmp, heights);
+        for element in [(1, 0), (2, 0), (2, 1), (2, 2), (3, 0)] {
+            list.insert(element);
+        }
+        list.assert_well_formed();
+
+        armed.set(true);
+        let result = catch_unwind(AssertUnwindSafe(|| list.take_fast(&PROBE)));
+        if let Ok(removed) = result {
+            assert_eq!(removed, Some((2, 0)), "the fast search picked (2,0)");
+        }
+        crate::test_util::assert_contract_panic(result.map(drop), &[]);
+        armed.set(false);
+        list.assert_well_formed();
     }
 
     // MARK: remove_all
