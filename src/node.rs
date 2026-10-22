@@ -458,18 +458,23 @@ impl<V, const N: usize> Node<V, N> {
     /// Joins a head node to a tail node, creating a single sequence of nodes.
     ///
     /// This method takes ownership of `head` (consuming it) and splices the
-    /// nodes that follow it onto `self` (the tail).  After the call, `self` is
+    /// nodes that follow it onto `this` (the tail).  After the call, `this` is
     /// no longer a tail node, it now points to what was the first real node
     /// after `head`.
     ///
     /// # Safety
     ///
-    /// This method does not alter the skip links of the nodes. The caller must
-    /// update those links afterwards so that no dangling link pointers remain.
+    /// - `this` must be a valid, exclusively-accessible pointer to the tail
+    ///   node.  It is stored directly in the successor's `prev` without a
+    ///   reborrow, so the caller must pass its long-lived pointer.
+    /// - This method does not alter the skip links of the nodes. The caller must
+    ///   update those links afterwards so that no dangling link pointers remain.
     #[inline]
-    pub(crate) unsafe fn join(&mut self, mut head: Self) {
+    pub(crate) unsafe fn join(mut this: NonNull<Self>, mut head: Self) {
+        // SAFETY: the caller guarantees `this` is valid and exclusive.
+        let tail = unsafe { this.as_mut() };
         debug_assert!(
-            matches!(self.node_type(), NodeType::Tail),
+            matches!(tail.node_type(), NodeType::Tail),
             "Can only join to tail node"
         );
         debug_assert!(
@@ -478,15 +483,15 @@ impl<V, const N: usize> Node<V, N> {
         );
 
         // Copy the head's `next` pointer to the tail node, which transfers the
-        // ownership of the `head.next` reference to `self.next`.
-        self.next = head.next.take();
+        // ownership of the `head.next` reference to `tail.next`.
+        tail.next = head.next.take();
 
         // Update the `prev` pointer of the next node in the sequence to point
         // to the tail node.
-        if let Some(mut head_next) = self.next {
+        if let Some(mut head_next) = tail.next {
             // SAFETY: The pointer can never be null, and the value is
             // [convertible](https://doc.rust-lang.org/stable/std/ptr/index.html#pointer-to-reference-conversion).
-            unsafe { head_next.as_mut() }.prev = Some(NonNull::from(&mut *self));
+            unsafe { head_next.as_mut() }.prev = Some(this);
         }
         // `head` is dropped here; it has already had its `next` taken so only
         // the now-empty sentinel is freed and no nodes are lost.
@@ -2348,7 +2353,7 @@ pub(crate) mod tests {
             // to v2, so the stale back-pointer is never dereferenced.
             let v2 = head1.next_as_mut().expect("v1").next_as_mut().expect("v2");
             debug_assert!(matches!(v2.node_type(), NodeType::Tail));
-            v2.join(*head2);
+            Node::join(NonNull::from_mut(v2), *head2);
         }
 
         let vals: Vec<u8> = {
@@ -2404,7 +2409,7 @@ pub(crate) mod tests {
         unsafe {
             let v2 = head1.next_as_mut().expect("v1").next_as_mut().expect("v2");
             debug_assert!(matches!(v2.node_type(), NodeType::Tail));
-            v2.join(*head2);
+            Node::join(NonNull::from_mut(v2), *head2);
         }
 
         let vals: Vec<u8> = {
