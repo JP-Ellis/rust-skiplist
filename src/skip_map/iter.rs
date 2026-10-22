@@ -94,6 +94,22 @@ impl<K, V, const N: usize, C: Comparator<K>, G: LevelGenerator> SkipMap<K, V, N,
         }
     }
 
+    /// Returns the stored pointer to the data node `current`, or `None` when
+    /// `current` is the head sentinel.
+    ///
+    /// The pointer is read from the successor's `prev` link, or from
+    /// `self.tail` for the last node, so it keeps the node's allocation
+    /// provenance.  `range_mut` writes through it, which a pointer derived
+    /// from the shared reference `current` would not permit.
+    fn stored_ptr(&self, current: &Node<(K, V), N>) -> Option<NonNull<Node<(K, V), N>>> {
+        current.value()?;
+        match current.next() {
+            // SAFETY: `next` is a live node of this map, valid for `&self`.
+            Some(next) => unsafe { next.as_ref() }.prev(),
+            None => self.tail,
+        }
+    }
+
     /// Returns a raw pointer to the last node satisfying the upper bound, or
     /// `None` when no such node exists.
     ///
@@ -114,10 +130,8 @@ impl<K, V, const N: usize, C: Comparator<K>, G: LevelGenerator> SkipMap<K, V, N,
                     };
                 let mut visitor = OrdVisitor::new(head, k, cmp);
                 visitor.traverse();
-                let current = visitor.current();
-                // Return None when the sentinel head has no value (all nodes > k).
-                // NonNull::from a shared reference is safe: no unsafe needed.
-                current.value().is_some().then(|| NonNull::from(current))
+                // `None` when traversal stays on the head sentinel (all nodes > k).
+                self.stored_ptr(visitor.current())
             }
             Bound::Excluded(k) => {
                 // Advance only through nodes strictly < k.
@@ -130,8 +144,7 @@ impl<K, V, const N: usize, C: Comparator<K>, G: LevelGenerator> SkipMap<K, V, N,
                     };
                 let mut visitor = OrdVisitor::new(head, k, cmp);
                 visitor.traverse();
-                let current = visitor.current();
-                current.value().is_some().then(|| NonNull::from(current))
+                self.stored_ptr(visitor.current())
             }
         }
     }
@@ -2030,6 +2043,48 @@ mod tests {
         let lo = 3_i32;
         let hi = 1_i32;
         drop(map.range_mut(lo..hi));
+    }
+
+    /// Writes through the back end of `range_mut` stay valid for every bound
+    /// kind.
+    ///
+    /// `IterMut::next_back` writes through the stored back pointer.  Under
+    /// Tree Borrows that write is only allowed when the pointer carries the
+    /// node's allocation provenance.
+    #[test]
+    fn miri_range_mut_next_back_provenance() {
+        let mut map = SkipMap::<i32, i32>::new();
+        for k in 0..20 {
+            map.insert(k, k);
+        }
+
+        if let Some((_, v)) = map.range_mut(..=10).next_back() {
+            *v = 110;
+        }
+        if let Some((_, v)) = map.range_mut(..10).next_back() {
+            *v = 109;
+        }
+        if let Some((_, v)) = map
+            .range_mut((Bound::Excluded(2), Bound::Included(5)))
+            .next_back()
+        {
+            *v = 105;
+        }
+        if let Some((_, v)) = map
+            .range_mut((Bound::Included(2), Bound::Excluded(5)))
+            .next_back()
+        {
+            *v = 104;
+        }
+        if let Some((_, v)) = map.range_mut(..).next_back() {
+            *v = 119;
+        }
+
+        assert_eq!(map.get(&10), Some(&110));
+        assert_eq!(map.get(&9), Some(&109));
+        assert_eq!(map.get(&5), Some(&105));
+        assert_eq!(map.get(&4), Some(&104));
+        assert_eq!(map.get(&19), Some(&119));
     }
 
     // MARK: into_iter
