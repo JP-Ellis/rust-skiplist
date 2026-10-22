@@ -256,7 +256,7 @@ impl<T, G: LevelGenerator, const N: usize> SkipList<T, N, G> {
             unsafe {
                 let head_ptr: *mut Node<T, N> = self.head.as_ptr();
                 if let Some(first_nn) = (*head_ptr).take_next_chain() {
-                    (*result.head.as_ptr()).set_head_next(first_nn);
+                    Node::set_head_next(result.head, first_nn);
                 }
             }
 
@@ -312,7 +312,7 @@ impl<T, G: LevelGenerator, const N: usize> SkipList<T, N, G> {
                 len: tail_len,
                 generator: self.generator.clone(),
             };
-            (*result.head.as_ptr()).set_head_next(first_of_tail);
+            Node::set_head_next(result.head, first_of_tail);
 
             Node::filter_rebuild(self.head, &mut self.len, &mut self.tail, |_| true, |_| {});
             Node::filter_rebuild(
@@ -408,7 +408,6 @@ impl<T, G: LevelGenerator, const N: usize> SkipList<T, N, G> {
         // disjoint `Box<Node<T>>` allocation.  Within the block each node field is
         // accessed at most once, so no simultaneous aliasing occurs.
         unsafe {
-            let head_ptr: *mut Node<T, N> = self.head.as_ptr();
             let other_head_ptr: *mut Node<T, N> = other.head.as_ptr();
 
             // Step 1: detach other's node chain from other's sentinel head.
@@ -420,9 +419,9 @@ impl<T, G: LevelGenerator, const N: usize> SkipList<T, N, G> {
             // If self is non-empty, attach after self.tail; otherwise attach
             // directly after self's sentinel head.
             if let Some(tail_nn) = self.tail {
-                (*tail_nn.as_ptr()).set_head_next(first_nn);
+                Node::set_head_next(tail_nn, first_nn);
             } else {
-                (*head_ptr).set_head_next(first_nn);
+                Node::set_head_next(self.head, first_nn);
             }
 
             // Step 3: wire the cross-seam skip links.
