@@ -281,6 +281,11 @@ impl<K, V, C: Comparator<K>, G: LevelGenerator, const N: usize> Extend<(K, V)>
     /// Each pair is inserted at its sorted key position. When a key already
     /// exists, the existing value is replaced with the new value.
     ///
+    /// # Panics
+    ///
+    /// If the comparator violates its contract, this method may panic after
+    /// earlier steps have taken effect; the collection stays valid.
+    ///
     /// # Examples
     ///
     /// ```rust
@@ -317,6 +322,11 @@ impl<'a, K: Copy + 'a, V: Copy + 'a, C: Comparator<K>, G: LevelGenerator, const 
     /// both `K` and `V` implement [`Copy`]. When a key already exists, the
     /// existing value is replaced.
     ///
+    /// # Panics
+    ///
+    /// If the comparator violates its contract, this method may panic after
+    /// earlier steps have taken effect; the collection stays valid.
+    ///
     /// # Examples
     ///
     /// ```rust
@@ -348,6 +358,11 @@ impl<K, V, C: Comparator<K> + Default, G: LevelGenerator + Default, const N: usi
     /// Pairs are inserted in their sorted key order regardless of the
     /// iteration order of the source. The map uses the default comparator and
     /// level generator for the type parameters `C` and `G`.
+    ///
+    /// # Panics
+    ///
+    /// If the comparator violates its contract, this method may panic after
+    /// earlier steps have taken effect; the collection stays valid.
     ///
     /// # Examples
     ///

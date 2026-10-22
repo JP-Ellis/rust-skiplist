@@ -84,6 +84,11 @@ impl<K, V, const N: usize, C: Comparator<K>, G: LevelGenerator> SkipMap<K, V, N,
     ///
     /// [`Comparator`]: crate::comparator::Comparator
     ///
+    /// # Panics
+    ///
+    /// If the comparator violates its contract, this method may panic after
+    /// earlier steps have taken effect; the collection stays valid.
+    ///
     /// # Examples
     ///
     /// ```rust
@@ -105,7 +110,6 @@ impl<K, V, const N: usize, C: Comparator<K>, G: LevelGenerator> SkipMap<K, V, N,
     /// ```
     #[expect(
         clippy::expect_used,
-        clippy::missing_panics_doc,
         reason = "tail/head nodes always have a value; expects fire only on invariant violations"
     )]
     #[expect(

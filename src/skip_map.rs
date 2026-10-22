@@ -11,10 +11,17 @@
 //! The key ordering is parameterised by `C: Comparator<K>` so that custom
 //! orderings can be used without requiring [`Ord`] on the key type.
 //!
+//! # Comparator Contract
+//!
+//! The comparator must implement a total order, as described in
+//! [`crate::comparator`].  A comparator that does not is a logic error and
+//! never causes undefined behaviour.
+//!
 //! # Key Invariants
 //!
 //! - Each key appears at most once.
-//! - Keys are always stored in sorted order.
+//! - Keys are always stored in sorted order while the comparator meets its
+//!   contract.
 //! - Values may be mutated in place; keys may not.
 //!
 //! # Intentional Omissions
