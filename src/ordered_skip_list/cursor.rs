@@ -796,6 +796,9 @@ impl<T, const N: usize, C: Comparator<T>, G: LevelGenerator> CursorMut<'_, T, N,
         // SAFETY: `list` is exclusively borrowed for `'a`.
         let list_ref = unsafe { &*self.list };
 
+        // Comparator trust: the two comparisons only accept or reject `value`.
+        // The splice lands at the cursor's rank, so a lying answer can leave
+        // the list unsorted but cannot mislink it, and nothing is written first.
         // Left neighbour: must be < value (strict) or <= value (allow_equal).
         // SAFETY: `current` is valid.
         if let Some(prev_val) = unsafe { self.raw.current.as_ref() }.value() {

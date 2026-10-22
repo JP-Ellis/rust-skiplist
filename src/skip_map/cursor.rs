@@ -734,6 +734,9 @@ impl<K, V, const N: usize, C: Comparator<K>, G: LevelGenerator> CursorMut<'_, K,
         move_cursor: bool,
     ) -> Result<(), UnorderedKeyError<K, V>> {
         // --- Ordering / uniqueness check ---
+        // Comparator trust: the two comparisons only accept or reject `key`.
+        // The splice lands at the cursor's rank, so a lying answer can leave
+        // the map unsorted but cannot mislink it, and nothing is written first.
         // SAFETY: list is exclusively borrowed for 'a.
         let list_ref = unsafe { &*self.list };
 
@@ -1045,6 +1048,7 @@ mod tests {
     use pretty_assertions::assert_eq;
 
     use super::*;
+    use crate::test_util::Counting;
 
     fn map_1a_2b_3c() -> SkipMap<i32, &'static str> {
         let mut m = SkipMap::new();
@@ -1305,5 +1309,44 @@ mod tests {
         assert_eq!(m.len(), 3);
         assert_eq!(m.get(&0), Some(&"zero"));
         assert!(!m.contains_key(&1));
+    }
+
+    // MARK: Interior-mutable comparator
+
+    /// Every mutable-cursor constructor and cursor operation stays sound when
+    /// the comparator writes to its own state on each call.
+    ///
+    /// `Counting` is a consistent order whose counter lives inside the map,
+    /// so each comparison writes to the map's memory.  The cursor's list
+    /// pointer must stay valid across those writes.
+    #[test]
+    fn cursor_interior_mutable_comparator_no_ub() {
+        for case in 0..4_u8 {
+            let mut m = SkipMap::<i32, i32, 16, Counting>::with_comparator(Counting::default());
+            for k in 1..=5 {
+                m.insert(k, k * 10);
+            }
+            {
+                let mut cur = match case {
+                    0 => m.lower_bound_mut(Bound::Included(&3)),
+                    1 => m.lower_bound_mut(Bound::Excluded(&3)),
+                    2 => m.upper_bound_mut(Bound::Included(&3)),
+                    _ => m.upper_bound_mut(Bound::Excluded(&3)),
+                };
+                let (nk, nv) = cur.remove_next().expect("the gap has a right neighbour");
+                let (pk, pv) = cur.remove_prev().expect("the gap has a left neighbour");
+                cur.insert_after(nk, nv)
+                    .expect("the removed right neighbour fits the gap");
+                cur.insert_before(pk, pv)
+                    .expect("the removed left neighbour fits the gap");
+            }
+            assert!(m.comparator.calls() > 0, "case {case}");
+            let pairs: Vec<_> = m.iter().map(|(k, v)| (*k, *v)).collect();
+            assert_eq!(
+                pairs,
+                [(1, 10), (2, 20), (3, 30), (4, 40), (5, 50)],
+                "case {case}"
+            );
+        }
     }
 }

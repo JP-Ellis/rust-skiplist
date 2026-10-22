@@ -128,6 +128,10 @@ impl<K, V, const N: usize, C: Comparator<K>, G: LevelGenerator> SkipMap<K, V, N,
         // last key of self equals the first key of other, we fall through.
         // The slow path calls `insert`, which replaces the existing value,
         // matching the BTreeMap::append contract.
+        //
+        // Comparator trust: the comparison below runs before any write and only
+        // picks a path.  Each splice ends in a rebuild of every skip link from
+        // the base chain, so a wrong answer can unsort the list but not mislink it.
         let can_concat = self.is_empty()
             || self.tail.is_some_and(|tail_nn| {
                 // SAFETY: tail_nn is a live data node owned by self; the
@@ -972,5 +976,41 @@ mod tests {
 
         map.clear();
         assert!(map.is_empty());
+    }
+
+    // MARK: split_off under a lying comparator
+
+    #[test]
+    fn split_off_chaos_is_well_formed() {
+        use std::panic::{AssertUnwindSafe, catch_unwind};
+
+        use crate::test_util::{Chaos, assert_contract_panic, seeded_geometric, seeds};
+
+        for seed in seeds() {
+            let mut list: SkipMap<u8, u8, 16, Chaos, _> =
+                SkipMap::with_comparator_and_level_generator(
+                    Chaos::new(seed),
+                    seeded_geometric(seed),
+                );
+            for k in 0_u8..24 {
+                let result = catch_unwind(AssertUnwindSafe(|| {
+                    list.insert(k, 0_u8);
+                }));
+                assert_contract_panic(result, &[]);
+            }
+            list.assert_well_formed();
+
+            for probe in [0_u8, 7, 12, 23, 40] {
+                let mut other = None;
+                let result = catch_unwind(AssertUnwindSafe(|| {
+                    other = Some(list.split_off(&probe));
+                }));
+                assert_contract_panic(result, &[]);
+                list.assert_well_formed();
+                if let Some(second) = other {
+                    second.assert_well_formed();
+                }
+            }
+        }
     }
 }
