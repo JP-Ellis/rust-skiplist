@@ -19,11 +19,10 @@ use rand::{RngExt as _, SeedableRng as _, rngs::SmallRng};
 use crate::{
     Geometric, SkipSet,
     comparator::{Comparator, ComparatorKey, OrdComparator},
-    level_generator::LevelGenerator,
     skip_set::Entry,
     test_util::{
-        Chaos, ChaosOrd, Elem, FixedLevels, Rps, assert_contract_panic, check_step, seed_chaos_ord,
-        seeded_geometric, seeds,
+        Chaos, ChaosOrd, Elem, FixedLevels, Rps, SeededLevels, assert_contract_panic, check_step,
+        seed_chaos_ord, seeded_geometric, seeds,
     },
 };
 
@@ -40,10 +39,11 @@ fn step<T, C, G, const N: usize>(
     k2: u8,
     index: usize,
     mask: u32,
+    level_seed: u32,
 ) where
     T: Elem,
     C: Comparator<T> + ComparatorKey<T, T> + Clone,
-    G: LevelGenerator + Clone + Default,
+    G: SeededLevels + Clone,
 {
     let pred = |v: &T| (mask >> (v.raw() % 32)) & 1 == 1;
     match op {
@@ -75,7 +75,7 @@ fn step<T, C, G, const N: usize>(
         11 => {
             let mut other = SkipSet::with_comparator_and_level_generator(
                 set.inner.comparator().clone(),
-                G::default(),
+                G::from_seed(level_seed),
             );
             other.extend([T::mk(k), T::mk(k.wrapping_add(1)), T::mk(k2)]);
             set.append(&mut other);
@@ -130,7 +130,7 @@ fn run<T, C, G, const N: usize>(mut set: SkipSet<T, N, C, G>, seed: u32, steps: 
 where
     T: Elem,
     C: Comparator<T> + ComparatorKey<T, T> + Clone,
-    G: LevelGenerator + Clone + Default,
+    G: SeededLevels + Clone,
 {
     let mut rng = rng_for(seed);
     for step_index in 0..steps {
@@ -139,7 +139,10 @@ where
         let k2 = rng.random_range(0..8);
         let index = rng.random_range(0..64);
         let mask = rng.random::<u32>();
-        let result = catch_unwind(AssertUnwindSafe(|| step(&mut set, op, k, k2, index, mask)));
+        let level_seed = rng.random::<u32>();
+        let result = catch_unwind(AssertUnwindSafe(|| {
+            step(&mut set, op, k, k2, index, mask, level_seed);
+        }));
         check_step(seed, step_index, op, || {
             assert_contract_panic(result, &[]);
             set.assert_well_formed();
