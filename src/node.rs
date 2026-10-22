@@ -578,23 +578,38 @@ impl<V, const N: usize> Node<V, N> {
         Some(first)
     }
 
-    /// Wires `first` as the immediate successor of this head sentinel.
+    /// Wires `first` as the immediate successor of `this`.
     ///
-    /// After this call, `self.next = Some(first)` and
-    /// `first.prev = Some(NonNull(self))`.
+    /// After this call, `this.next = Some(first)` and
+    /// `first.prev = Some(this)`.
+    ///
+    /// `this` itself is stored as the back-pointer, so `first.prev` keeps the
+    /// provenance the caller holds.  Both writes go through raw pointers, so
+    /// no reborrow of `this` exists for a later write to invalidate.
     ///
     /// # Safety
     ///
-    /// - `self.next` must be `None` before this call.
+    /// - `this` must point to a live, heap-allocated node with `next == None`,
+    ///   and must carry the long-lived provenance the container uses for that
+    ///   node (the `Box::into_raw` pointer, or a pointer stored in a link).
     /// - `first` must point to a live, heap-allocated node with `prev == None`.
+    /// - The caller must hold exclusive access to both nodes, and no reference
+    ///   to either may be live across this call.
     #[inline]
-    pub(crate) unsafe fn set_head_next(&mut self, first: NonNull<Self>) {
-        debug_assert!(self.next.is_none(), "set_head_next: self.next must be None");
-        let self_nn = NonNull::from(&mut *self);
-        // SAFETY: `first` is a live, heap-allocated node with `prev == None`.
-        // We are the exclusive owner of both `self` and `first` at this point.
-        unsafe { &mut *first.as_ptr() }.prev = Some(self_nn);
-        self.next = Some(first);
+    pub(crate) unsafe fn set_head_next(this: NonNull<Self>, first: NonNull<Self>) {
+        debug_assert!(
+            // SAFETY: `this` is live; no mutable reference to it is live.
+            unsafe { this.as_ref() }.next.is_none(),
+            "set_head_next: this.next must be None"
+        );
+        // SAFETY: `first` is a live, heap-allocated node exclusively owned by
+        // the caller.  The place expression writes through the raw pointer
+        // without creating a reference.
+        unsafe { (*first.as_ptr()).prev = Some(this) };
+        // SAFETY: `this` is a live, heap-allocated node exclusively owned by
+        // the caller.  The write goes through `this` itself, so the copy just
+        // stored in `first.prev` keeps its permissions.
+        unsafe { (*this.as_ptr()).next = Some(first) };
     }
 
     /// Frees `first` and every node that follows it.
@@ -984,7 +999,7 @@ impl<V, const N: usize> Drop for DropChain<'_, V, N> {
         // never read.  Re-attaching only rewires pointers and rebuilding only
         // retains, so neither can unwind a second time.
         unsafe {
-            (*self.attach.as_ptr()).set_head_next(first);
+            Node::set_head_next(self.attach, first);
             Node::filter_rebuild(self.head, self.out_len, self.out_tail, |_| true, |_| {});
         }
     }
@@ -2456,10 +2471,18 @@ pub(crate) mod tests {
         );
 
         // Wire the chain onto a fresh head.
-        let mut head2 = Box::new(Node::<u8, MAX_LEVELS>::new(MAX_LEVELS));
+        // SAFETY: `Box::into_raw` never returns null.
+        let head2_nn = unsafe {
+            NonNull::new_unchecked(Box::into_raw(Box::new(Node::<u8, MAX_LEVELS>::new(
+                MAX_LEVELS,
+            ))))
+        };
         // SAFETY: head2 has no current successor; first_nn is the exclusive
         // owner of the detached chain.
-        unsafe { head2.set_head_next(first_nn) };
+        unsafe { Node::set_head_next(head2_nn, first_nn) };
+        // SAFETY: `head2_nn` came from `Box::into_raw` and no other reference
+        // to it exists.
+        let head2 = unsafe { Box::from_raw(head2_nn.as_ptr()) };
 
         let vals: Vec<u8> = {
             let mut v = Vec::new();
@@ -2496,6 +2519,42 @@ pub(crate) mod tests {
         }
         unsafe { drop(Box::from_raw(head.as_ptr())) };
         Ok(())
+    }
+
+    /// The back-pointer that `set_head_next` stores in `first.prev` stays
+    /// usable for writes after the call returns.
+    ///
+    /// `Node::pop` writes `head.next` through `first.prev`.  Under Tree
+    /// Borrows that write is only allowed when `first.prev` carries the
+    /// head's allocation provenance.
+    #[test]
+    fn miri_set_head_next_provenance() {
+        // SAFETY: `Box::into_raw` never returns null.
+        let head = unsafe {
+            NonNull::new_unchecked(Box::into_raw(Box::new(Node::<u8, MAX_LEVELS>::new(
+                MAX_LEVELS,
+            ))))
+        };
+        // SAFETY: `Box::into_raw` never returns null.
+        let first = unsafe {
+            NonNull::new_unchecked(Box::into_raw(Box::new(Node::<u8, MAX_LEVELS>::with_value(
+                1, 10,
+            ))))
+        };
+
+        // SAFETY: `head` is a fresh sentinel with `next == None`; `first` is
+        // a fresh detached node with `prev == None`.
+        unsafe { Node::set_head_next(head, first) };
+
+        // SAFETY: `first` is the only data node after `head`; nothing else
+        // references it.
+        let popped = unsafe { (*first.as_ptr()).pop() };
+        assert_eq!(popped.value(), Some(&10));
+        // SAFETY: `head` is live; no mutable reference to it exists.
+        assert!(unsafe { head.as_ref() }.next_as_ref().is_none());
+
+        // SAFETY: `head` came from `Box::into_raw` and has no successors.
+        drop(unsafe { Box::from_raw(head.as_ptr()) });
     }
 
     // MARK: rebuild

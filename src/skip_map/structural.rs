@@ -162,7 +162,7 @@ impl<K, V, const N: usize, C: Comparator<K>, G: LevelGenerator> SkipMap<K, V, N,
                 let attach = self.tail.unwrap_or(self.head);
                 // SAFETY: The attachment point (self.tail or self.head) has
                 // next == None.  first_nn.prev was set to None by take_next_chain.
-                unsafe { (*attach.as_ptr()).set_head_next(first_nn) };
+                unsafe { Node::set_head_next(attach, first_nn) };
 
                 // Rebuild all skip links in one O(n+m) pass.
                 //
@@ -229,13 +229,13 @@ impl<K, V, const N: usize, C: Comparator<K>, G: LevelGenerator> SkipMap<K, V, N,
                     //
                     // SAFETY: self.head.next is None after take_next_chain.
                     // first_other_nn.prev was cleared by take_next_chain.
-                    unsafe { (*self.head.as_ptr()).set_head_next(first_other_nn) };
+                    unsafe { Node::set_head_next(self.head, first_other_nn) };
 
                     if let Some(first_self_nn) = first_of_self {
                         // SAFETY: other_tail_nn.next is None (it was the tail
                         // of other's chain).  first_self_nn.prev was cleared
                         // by take_next_chain above.
-                        unsafe { (*other_tail_nn.as_ptr()).set_head_next(first_self_nn) };
+                        unsafe { Node::set_head_next(other_tail_nn, first_self_nn) };
                     }
 
                     // Rebuild all skip links in one O(n+m) pass.
@@ -288,10 +288,9 @@ impl<K, V, const N: usize, C: Comparator<K>, G: LevelGenerator> SkipMap<K, V, N,
     /// ```
     #[expect(
         clippy::multiple_unsafe_ops_per_block,
-        reason = "set_head_next is an unsafe fn called on a raw-pointer dereference; \
-                  the two operations are on the same freshly allocated, exclusively-owned \
-                  node and are provably disjoint from the take_next_chain and filter_rebuild \
-                  calls above and below"
+        reason = "take_next_chain is an unsafe fn called on a raw-pointer dereference; \
+                  both operations act on one exclusively-owned node and are \
+                  provably disjoint from the set_head_next and filter_rebuild calls around them"
     )]
     #[inline]
     #[must_use]
@@ -354,7 +353,7 @@ impl<K, V, const N: usize, C: Comparator<K>, G: LevelGenerator> SkipMap<K, V, N,
             // SAFETY: `result.head` is a freshly allocated, exclusively-owned
             // sentinel node.  `nn` is the first node of the detached chain
             // with no other live references.
-            unsafe { (*result.head.as_ptr()).set_head_next(nn) };
+            unsafe { Node::set_head_next(result.head, nn) };
         }
 
         // Rebuild skip links for both halves and compute their element counts.
