@@ -319,6 +319,24 @@ pub(crate) fn seeded_geometric(seed: u32) -> Geometric {
         .expect("16 levels and q = 0.5 are valid Geometric parameters")
 }
 
+/// A level generator the chaos harnesses can rebuild from a seed, so a
+/// failing seed replays the same tower heights.
+pub(crate) trait SeededLevels: LevelGenerator {
+    fn from_seed(seed: u32) -> Self;
+}
+
+impl SeededLevels for Geometric {
+    fn from_seed(seed: u32) -> Self {
+        seeded_geometric(seed)
+    }
+}
+
+impl SeededLevels for FixedLevels {
+    fn from_seed(seed: u32) -> Self {
+        Self::new(seed)
+    }
+}
+
 /// Runs a post-operation check, naming the seed, step and operation if it panics.
 pub(crate) fn check_step(seed: u32, step: usize, op: u32, check: impl FnOnce()) {
     if let Err(payload) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(check)) {
