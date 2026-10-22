@@ -131,9 +131,11 @@ impl<T> ComparatorKey<T, T> for Chaos {
 /// The counter lives inside the comparator, and so inside the container.
 /// Every comparison therefore writes to the container's own memory through
 /// a shared reference.
+#[cfg(feature = "cursor")]
 #[derive(Debug, Default, Clone)]
 pub(crate) struct Counting(Cell<usize>);
 
+#[cfg(feature = "cursor")]
 impl Counting {
     /// Returns the number of comparisons made so far.
     pub(crate) fn calls(&self) -> usize {
@@ -141,6 +143,7 @@ impl Counting {
     }
 }
 
+#[cfg(feature = "cursor")]
 impl<T: Ord> Comparator<T> for Counting {
     fn compare(&self, a: &T, b: &T) -> Ordering {
         self.0.set(self.0.get() + 1);
@@ -148,6 +151,7 @@ impl<T: Ord> Comparator<T> for Counting {
     }
 }
 
+#[cfg(feature = "cursor")]
 impl<T: Ord> ComparatorKey<T, T> for Counting {
     fn compare_key(&self, stored: &T, key: &T) -> Ordering {
         self.compare(stored, key)
