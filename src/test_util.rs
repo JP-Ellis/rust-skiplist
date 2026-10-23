@@ -9,7 +9,7 @@
 )]
 
 use core::cmp::Ordering;
-use std::{cell::Cell, ops::Range, thread::Result as ThreadResult};
+use std::{cell::Cell, ops::Range, sync::Once, thread::Result as ThreadResult};
 
 use crate::{
     Geometric,
@@ -309,7 +309,21 @@ pub(crate) fn assert_contract_panic(result: ThreadResult<()>, also_allowed: &[&s
 }
 
 /// The seeds each chaos test iterates over.
+///
+/// Also silences the panic hook for [`TOTAL_ORDER_PANIC`], since a chaos run
+/// raises thousands of them.  With `RUST_BACKTRACE` set, each would otherwise
+/// capture a backtrace, and symbolising one is slow enough on Windows to push
+/// a run past the test timeout.  Every other panic reaches the previous hook.
 pub(crate) fn seeds() -> Range<u32> {
+    static QUIET: Once = Once::new();
+    QUIET.call_once(|| {
+        let previous = std::panic::take_hook();
+        std::panic::set_hook(Box::new(move |info| {
+            if info.payload_as_str() != Some(TOTAL_ORDER_PANIC) {
+                previous(info);
+            }
+        }));
+    });
     if cfg!(miri) { 0..20 } else { 0..2000 }
 }
 
