@@ -373,6 +373,11 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
     ///
     /// This operation is `$O(\log n)$` on average.
     ///
+    /// # Panics
+    ///
+    /// Panics if the comparator gives contradictory answers during the
+    /// search.  The panic comes before any change to the list.
+    ///
     /// # Examples
     ///
     /// ```rust
@@ -389,7 +394,6 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
     /// ```
     #[expect(
         clippy::expect_used,
-        clippy::missing_panics_doc,
         reason = "Link::new distance is pred_to_target + target_to_succ - 1 >= 1; \
                   decrement_distance panics only on underflow to 0 which cannot happen \
                   for valid skip-link distances; all expects are invariant violations"
@@ -763,6 +767,11 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
     /// [`take`]: OrderedSkipList::take
     /// [`take_first`]: OrderedSkipList::take_first
     ///
+    /// # Panics
+    ///
+    /// Panics if the comparator gives contradictory answers during the
+    /// search.  The panic comes before any change to the list.
+    ///
     /// # Examples
     ///
     /// ```rust
@@ -778,7 +787,6 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
     /// ```
     #[expect(
         clippy::expect_used,
-        clippy::missing_panics_doc,
         reason = "Link::new distance is pred_to_target + target_to_succ - 1 >= 1; \
                   decrement_distance panics only on underflow to 0 which cannot happen \
                   for valid skip-link distances; all expects are invariant violations"

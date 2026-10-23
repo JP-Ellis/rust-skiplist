@@ -180,6 +180,11 @@ impl<K, V, const N: usize, C: Comparator<K>, G: LevelGenerator> SkipMap<K, V, N,
     ///
     /// This operation is O(log n) on average.
     ///
+    /// # Panics
+    ///
+    /// Panics if the comparator gives contradictory answers during the
+    /// search.  The panic comes before any change to the map.
+    ///
     /// # Examples
     ///
     /// ```rust
@@ -208,6 +213,11 @@ impl<K, V, const N: usize, C: Comparator<K>, G: LevelGenerator> SkipMap<K, V, N,
     /// order) is removed.
     ///
     /// This operation is `$O(\log n)$` on average.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the comparator gives contradictory answers during the
+    /// search.  The panic comes before any change to the map.
     ///
     /// # Examples
     ///

@@ -15,7 +15,9 @@
 //!
 //! The comparator must implement a total order, as described in
 //! [`crate::comparator`].  A comparator that does not is a logic error and
-//! never causes undefined behaviour.
+//! never causes undefined behaviour.  Any method may then return wrong
+//! results or panic with "comparator does not implement a total order";
+//! the collection stays valid either way.
 //!
 //! # Key Invariants
 //!

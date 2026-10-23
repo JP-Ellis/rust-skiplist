@@ -231,6 +231,11 @@ impl<'a, K, V, const N: usize, C: Comparator<K>, G: LevelGenerator>
 
     /// Removes the entry from the map, returning the value.
     ///
+    /// # Panics
+    ///
+    /// Panics if the comparator gave contradictory answers while the entry
+    /// was looked up.  The panic comes before any change to the map.
+    ///
     /// # Examples
     ///
     /// ```rust
@@ -251,6 +256,11 @@ impl<'a, K, V, const N: usize, C: Comparator<K>, G: LevelGenerator>
 
     /// Removes the entry from the map, returning the key-value pair.
     ///
+    /// # Panics
+    ///
+    /// Panics if the comparator gave contradictory answers while the entry
+    /// was looked up.  The panic comes before any change to the map.
+    ///
     /// # Examples
     ///
     /// ```rust
@@ -265,7 +275,6 @@ impl<'a, K, V, const N: usize, C: Comparator<K>, G: LevelGenerator>
     /// ```
     #[expect(
         clippy::expect_used,
-        clippy::missing_panics_doc,
         reason = "new_dist >= 1 because skip-link distances are computed from consecutive \
                   node ranks; decrement_distance requires distance >= 2 for spanning links; \
                   take_value on a data node always returns Some; \
