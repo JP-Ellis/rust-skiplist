@@ -7,6 +7,7 @@ use crate::{
     node::{
         Node,
         level_array::LevelArray,
+        link::Link,
         visitor::{Step, Visitor, VisitorMut},
     },
 };
@@ -261,13 +262,14 @@ impl<T, Q: ?Sized, F: Fn(&T, &Q) -> Ordering, const N: usize> Visitor
                 // level): current is the precursor for this level.
                 self.precursors[level] = self.current;
                 self.precursor_distances[level] = self.rank;
-                if let Some(link) = maybe_link {
-                    self.bound = Some(link.node());
-                } else {
-                    // A node before `bound` always has a link at every level
-                    // below `bound`'s tower.
-                    debug_assert!(self.bound.is_none(), "absent link below the bound");
-                }
+                // A node before `bound` always has a link at every level
+                // below `bound`'s tower, so an absent link leaves `bound`
+                // as `None`. The unconditional store avoids a branch.
+                debug_assert!(
+                    maybe_link.is_some() || self.bound.is_none(),
+                    "absent link below the bound"
+                );
+                self.bound = maybe_link.map(Link::node);
             }
         }
 
@@ -279,17 +281,16 @@ impl<T, Q: ?Sized, F: Fn(&T, &Q) -> Ordering, const N: usize> Visitor
             let ord = unsafe { next_nn.as_ref() }
                 .value()
                 .map_or(Ordering::Less, |v| (self.cmp)(v, self.target));
-            if ord == Ordering::Greater {
+            match ord {
                 // The next sequential node is already past the target; the
                 // target is absent from the list.
-                return Step::Exhausted;
-            }
-            if ord == Ordering::Less && Some(next_nn) == self.bound {
-                total_order_violation();
+                Ordering::Greater => return Step::Exhausted,
+                Ordering::Less if Some(next_nn) == self.bound => total_order_violation(),
+                Ordering::Less => {}
+                Ordering::Equal => self.found = true,
             }
             self.current = next_nn;
             self.rank = self.rank.saturating_add(1);
-            self.found = ord == Ordering::Equal;
             return Step::Advanced(self.current);
         }
 
