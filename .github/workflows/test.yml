@@ -153,7 +153,7 @@ jobs:
         run: mise run format
 
   test:
-    name: Test (${{ matrix.os }}, ${{ matrix.toolchain }})
+    name: Test (${{ matrix.os }}, ${{ matrix.toolchain }}${{ matrix.dev-drive && ', dev drive' || '' }})
     strategy:
       fail-fast: false
       matrix:
@@ -162,6 +162,9 @@ jobs:
             toolchain: stable
           - os: windows-latest
             toolchain: stable
+          - os: windows-latest
+            toolchain: stable
+            dev-drive: true
           - os: macos-latest
             toolchain: stable
           - os: ubuntu-latest
@@ -177,6 +180,22 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
+      - name: Report Defender status
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Get-MpComputerStatus |
+            Select-Object AMServiceEnabled, AntivirusEnabled, RealTimeProtectionEnabled, IsTamperProtected
+
+      - name: Set up Dev Drive
+        if: matrix.dev-drive
+        uses: samypr100/setup-dev-drive@562171fe8df7401fdf582d766cd3b6ab80d5b1a0  # v4.1.0
+        with:
+          drive-size: 8GB
+          trusted-dev-drive: true
+          env-mapping: |
+            CARGO_TARGET_DIR,{{ DEV_DRIVE }}/target
+
       - name: Install mise tools
         uses: jdx/mise-action@8418fedb1110381a0d3ba51a7a415d7c1b884550  # v5.2.2
         timeout-minutes: 10
@@ -187,7 +206,7 @@ jobs:
         uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f  # v2.0.0
         with:
           cache-save-if: ${{ github.ref == 'refs/heads/main' }}
-          cache-key: ${{ matrix.toolchain }}
+          cache-key: ${{ matrix.toolchain }}${{ matrix.dev-drive && '-dev-drive' || '' }}
 
       - name: Install matrix toolchain
         run: rustup toolchain install ${{ matrix.toolchain }} --no-self-update
