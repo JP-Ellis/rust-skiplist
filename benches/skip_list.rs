@@ -36,13 +36,10 @@
     reason = "Using LinkedList as a benchmark baseline"
 )]
 
-use std::{
-    cell::Cell,
-    collections::{LinkedList, VecDeque},
-    hint::black_box,
-    iter,
-    time::Duration,
-};
+extern crate alloc;
+
+use alloc::collections::{LinkedList, VecDeque};
+use core::{cell::Cell, hint::black_box, iter, time::Duration};
 
 use criterion::{
     AxisScale, BatchSize, BenchmarkId, Criterion, PlotConfiguration, Throughput, criterion_group,
@@ -600,7 +597,7 @@ fn bench_get_random(c: &mut Criterion) {
         ));
         let indices: Vec<usize> = {
             let mut rng = SmallRng::seed_from_u64(42);
-            std::iter::repeat_with(|| rng.random_range(0..n))
+            core::iter::repeat_with(|| rng.random_range(0..n))
                 .take(N_RANDOM_INDICES)
                 .collect()
         };

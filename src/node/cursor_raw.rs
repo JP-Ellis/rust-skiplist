@@ -746,7 +746,7 @@ mod tests {
 
         // q=5 < 10: all skip links point to values >= q, so we never advance.
         // Result: (head, 0).
-        let (current, rank) = unsafe { gap_find(head, &5_u8, std::cmp::Ord::cmp, false) };
+        let (current, rank) = unsafe { gap_find(head, &5_u8, core::cmp::Ord::cmp, false) };
         assert_eq!(current, head);
         assert_eq!(rank, 0);
 
@@ -762,7 +762,7 @@ mod tests {
 
         // q=10 == v1: advance_on_equal=false, so we stop before v1.
         // Result: (head, 0).
-        let (current, rank) = unsafe { gap_find(head, &10_u8, std::cmp::Ord::cmp, false) };
+        let (current, rank) = unsafe { gap_find(head, &10_u8, core::cmp::Ord::cmp, false) };
         assert_eq!(current, head);
         assert_eq!(rank, 0);
 
@@ -779,7 +779,7 @@ mod tests {
         // q=15 is between v1=10 and v2=20: skip links all overshoot, so the
         // sequential phase advances past v1 and stops before v2.
         // Result: (v1=10, 1).
-        let (current, rank) = unsafe { gap_find(head, &15_u8, std::cmp::Ord::cmp, false) };
+        let (current, rank) = unsafe { gap_find(head, &15_u8, core::cmp::Ord::cmp, false) };
         assert_eq!(unsafe { current.as_ref() }.value(), Some(&10_u8));
         assert_eq!(rank, 1);
 
@@ -797,7 +797,7 @@ mod tests {
         // taken (advance_on_equal=false).  The level-0 link head->v2 is Less,
         // so we land on v2=20, then the sequential phase sees v3=Equal and stops.
         // Result: (v2=20, 2).
-        let (current, rank) = unsafe { gap_find(head, &30_u8, std::cmp::Ord::cmp, false) };
+        let (current, rank) = unsafe { gap_find(head, &30_u8, core::cmp::Ord::cmp, false) };
         assert_eq!(unsafe { current.as_ref() }.value(), Some(&20_u8));
         assert_eq!(rank, 2);
 
@@ -814,7 +814,7 @@ mod tests {
         // q=50 > 40: skip links and sequential phase advance all the way to
         // the last node.
         // Result: (v4=40, 4).
-        let (current, rank) = unsafe { gap_find(head, &50_u8, std::cmp::Ord::cmp, false) };
+        let (current, rank) = unsafe { gap_find(head, &50_u8, core::cmp::Ord::cmp, false) };
         assert_eq!(unsafe { current.as_ref() }.value(), Some(&40_u8));
         assert_eq!(rank, 4);
 
@@ -832,7 +832,7 @@ mod tests {
 
         // q=5 < 10: nothing to advance past.
         // Result: (head, 0).
-        let (current, rank) = unsafe { gap_find(head, &5_u8, std::cmp::Ord::cmp, true) };
+        let (current, rank) = unsafe { gap_find(head, &5_u8, core::cmp::Ord::cmp, true) };
         assert_eq!(current, head);
         assert_eq!(rank, 0);
 
@@ -849,7 +849,7 @@ mod tests {
         // q=10 == v1: advance_on_equal=true, so we advance past v1 and stop
         // before v2=20 (Greater).
         // Result: (v1=10, 1).
-        let (current, rank) = unsafe { gap_find(head, &10_u8, std::cmp::Ord::cmp, true) };
+        let (current, rank) = unsafe { gap_find(head, &10_u8, core::cmp::Ord::cmp, true) };
         assert_eq!(unsafe { current.as_ref() }.value(), Some(&10_u8));
         assert_eq!(rank, 1);
 
@@ -866,7 +866,7 @@ mod tests {
         // q=15 is between v1=10 and v2=20: identical result to lower-bound
         // because no element equals q.
         // Result: (v1=10, 1).
-        let (current, rank) = unsafe { gap_find(head, &15_u8, std::cmp::Ord::cmp, true) };
+        let (current, rank) = unsafe { gap_find(head, &15_u8, core::cmp::Ord::cmp, true) };
         assert_eq!(unsafe { current.as_ref() }.value(), Some(&10_u8));
         assert_eq!(rank, 1);
 
@@ -884,7 +884,7 @@ mod tests {
         // advance_on_equal=true, so we jump straight to v3 (rank 3).
         // The level-0 link from v3 points to v4=40 (Greater), so we stop.
         // Result: (v3=30, 3).
-        let (current, rank) = unsafe { gap_find(head, &30_u8, std::cmp::Ord::cmp, true) };
+        let (current, rank) = unsafe { gap_find(head, &30_u8, core::cmp::Ord::cmp, true) };
         assert_eq!(unsafe { current.as_ref() }.value(), Some(&30_u8));
         assert_eq!(rank, 3);
 
@@ -900,7 +900,7 @@ mod tests {
 
         // q=50 > 40: advance all the way to the last node.
         // Result: (v4=40, 4).
-        let (current, rank) = unsafe { gap_find(head, &50_u8, std::cmp::Ord::cmp, true) };
+        let (current, rank) = unsafe { gap_find(head, &50_u8, core::cmp::Ord::cmp, true) };
         assert_eq!(unsafe { current.as_ref() }.value(), Some(&40_u8));
         assert_eq!(rank, 4);
 

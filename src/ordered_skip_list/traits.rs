@@ -587,10 +587,8 @@ mod tests {
 
     #[test]
     fn hash_equal_lists_same_hash() {
-        use std::{
-            collections::hash_map::DefaultHasher,
-            hash::{Hash, Hasher},
-        };
+        use core::hash::{Hash, Hasher};
+        use std::collections::hash_map::DefaultHasher;
 
         let mut a = OrderedSkipList::<i32>::new();
         let mut b = OrderedSkipList::<i32>::new();
@@ -613,10 +611,8 @@ mod tests {
 
     #[test]
     fn hash_different_elements_differ() {
-        use std::{
-            collections::hash_map::DefaultHasher,
-            hash::{Hash, Hasher},
-        };
+        use core::hash::{Hash, Hasher};
+        use std::collections::hash_map::DefaultHasher;
 
         let mut a = OrderedSkipList::<i32>::new();
         let mut b = OrderedSkipList::<i32>::new();

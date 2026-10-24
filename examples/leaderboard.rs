@@ -52,7 +52,7 @@ struct Team {
 /// Type alias for our standings table: an ordered skip list of teams, sorted by
 /// the `standings_order` comparator defined below.
 type Standings =
-    OrderedSkipList<Team, 16, FnComparator<fn(&Team, &Team) -> std::cmp::Ordering>, Geometric>;
+    OrderedSkipList<Team, 16, FnComparator<fn(&Team, &Team) -> core::cmp::Ordering>, Geometric>;
 
 impl Team {
     /// Create a new team with zero stats.
@@ -74,9 +74,9 @@ impl Team {
         self.goals_for += gf;
         self.goals_against += ga;
         match gf.cmp(&ga) {
-            std::cmp::Ordering::Greater => self.wins += 1,
-            std::cmp::Ordering::Equal => self.draws += 1,
-            std::cmp::Ordering::Less => self.losses += 1,
+            core::cmp::Ordering::Greater => self.wins += 1,
+            core::cmp::Ordering::Equal => self.draws += 1,
+            core::cmp::Ordering::Less => self.losses += 1,
         }
     }
 
@@ -93,7 +93,7 @@ impl Team {
 
 /// Comparator: rank teams by points (desc), then goal difference (desc), then
 /// goals scored (desc).  Ties broken by name for determinism.
-fn standings_order(a: &Team, b: &Team) -> std::cmp::Ordering {
+fn standings_order(a: &Team, b: &Team) -> core::cmp::Ordering {
     b.points()
         .cmp(&a.points())
         .then(b.goal_difference().cmp(&a.goal_difference()))

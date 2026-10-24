@@ -17,7 +17,7 @@
     reason = "This example is for demonstration, not a test."
 )]
 
-use std::cmp::Ordering;
+use core::cmp::Ordering;
 
 use pretty_assertions::assert_eq;
 use skiplist::{FnComparator, OrderedSkipList};

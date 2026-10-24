@@ -9,7 +9,7 @@
     reason = "`.expect()` is appropriate in benchmarks"
 )]
 
-use std::hint::black_box;
+use core::hint::black_box;
 
 use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 use skiplist::level_generator::{LevelGenerator, geometric::Geometric};

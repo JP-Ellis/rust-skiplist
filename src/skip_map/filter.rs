@@ -81,7 +81,8 @@ impl<K, V, const N: usize, C: Comparator<K>, G: LevelGenerator> SkipMap<K, V, N,
 
 #[cfg(test)]
 mod tests {
-    use std::panic::{AssertUnwindSafe, catch_unwind};
+    use core::panic::AssertUnwindSafe;
+    use std::panic::catch_unwind;
 
     use pretty_assertions::assert_eq;
 

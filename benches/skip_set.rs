@@ -37,12 +37,11 @@
 )]
 #![expect(clippy::indexing_slicing, reason = "Simplifying bench code")]
 
-use std::{
-    cell::Cell,
-    collections::{BTreeSet, HashSet},
-    hint::black_box,
-    time::Duration,
-};
+extern crate alloc;
+
+use alloc::collections::BTreeSet;
+use core::{cell::Cell, hint::black_box, time::Duration};
+use std::collections::HashSet;
 
 use criterion::{
     AxisScale, BatchSize, BenchmarkId, Criterion, PlotConfiguration, Throughput, criterion_group,

@@ -1123,8 +1123,8 @@ where
 
 #[cfg(test)]
 mod tests {
-    use core::{cell::Cell, ops::Bound};
-    use std::panic::{AssertUnwindSafe, catch_unwind};
+    use core::{cell::Cell, ops::Bound, panic::AssertUnwindSafe};
+    use std::panic::catch_unwind;
 
     use pretty_assertions::assert_eq;
 
