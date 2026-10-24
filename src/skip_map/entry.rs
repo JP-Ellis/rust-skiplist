@@ -917,7 +917,7 @@ impl<K: fmt::Debug, V: fmt::Debug, const N: usize, C: Comparator<K>, G: LevelGen
 }
 
 impl<K: fmt::Debug, V: fmt::Debug, const N: usize, C: Comparator<K>, G: LevelGenerator>
-    std::error::Error for OccupiedError<'_, K, V, N, C, G>
+    core::error::Error for OccupiedError<'_, K, V, N, C, G>
 {
 }
 

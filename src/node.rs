@@ -127,13 +127,13 @@
 #![expect(dead_code, reason = "library is still being implemented")]
 
 #[cfg(any(debug_assertions, test))]
-use core::fmt::Write;
+use alloc::collections::BTreeMap;
+#[cfg(any(debug_assertions, test))]
+use alloc::{boxed::Box, format, string::String};
 use core::{
-    fmt::{self, Debug},
+    fmt::{self, Debug, Write},
     ptr::NonNull,
 };
-#[cfg(any(debug_assertions, test))]
-use std::collections::HashMap;
 
 use crate::{
     comparator::total_order_violation,
@@ -1229,8 +1229,8 @@ impl<V, const N: usize> Node<V, N> {
 impl<V: Debug, const N: usize> Node<V, N> {
     /// Generate a map of pointers to node indices.
     #[inline]
-    fn ptr_index_map(&self) -> HashMap<NonNull<Self>, usize> {
-        let mut hm = HashMap::new();
+    fn ptr_index_map(&self) -> BTreeMap<NonNull<Self>, usize> {
+        let mut hm = BTreeMap::new();
         let mut current = self;
         let mut index = 0_usize;
         loop {

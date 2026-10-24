@@ -1,6 +1,7 @@
 //! Standard trait implementations for [`SkipMap`](super::SkipMap):
 //! `Debug`, `Clone`, `PartialEq`, `Eq`, `Hash`, `Extend`, `FromIterator`.
 
+use alloc::{boxed::Box, vec::Vec};
 use core::{
     cmp::Ordering,
     fmt,

@@ -1,6 +1,7 @@
 //! List-restructuring methods for [`OrderedSkipList`](super::OrderedSkipList):
 //! `clear`, `append`, `split_off`, and `truncate`.
 
+use alloc::boxed::Box;
 use core::{cmp::Ordering, ptr::NonNull};
 
 use crate::{

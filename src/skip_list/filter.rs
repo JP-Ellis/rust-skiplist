@@ -12,7 +12,7 @@ impl<T, G: LevelGenerator, const N: usize> SkipList<T, N, G> {
     /// `later` should be removed.  The `later` element may be mutated before
     /// the predicate returns; it is dropped when the predicate returns `true`.
     ///
-    /// This matches the semantics of [`Vec::dedup_by`].
+    /// This matches the semantics of [`Vec::dedup_by`](alloc::vec::Vec::dedup_by).
     ///
     /// This operation is `$O(n)$`.
     ///

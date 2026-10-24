@@ -1,6 +1,7 @@
 //! List-restructuring methods for [`SkipMap`](super::SkipMap):
 //! `clear`, `append`, `split_off`, and `merge`.
 
+use alloc::boxed::Box;
 use core::{cmp::Ordering, ptr::NonNull};
 
 use super::SkipMap;

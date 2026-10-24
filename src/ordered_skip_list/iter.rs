@@ -5,6 +5,7 @@
 //! could violate the sort-order invariant, so only shared (`&T`) iteration is
 //! exposed.
 
+use alloc::vec::Vec;
 use core::{
     cmp::Ordering,
     fmt,
@@ -819,7 +820,7 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> FusedIterator
 #[must_use = "iterators are lazy and do nothing unless consumed"]
 pub struct Drain<'a, T> {
     /// The already-removed values in sorted order, collected eagerly.
-    iter: std::vec::IntoIter<T>,
+    iter: alloc::vec::IntoIter<T>,
     /// Ties the Drain's lifetime to the &'a mut [`OrderedSkipList`] that
     /// created it, preventing the list from being used while this Drain is
     /// alive.

@@ -75,10 +75,13 @@
 // Higher-level links allow the search algorithm to skip over many nodes at
 // once, yielding `$O(\log n)$` average traversal cost.
 
+#![cfg_attr(not(test), no_std)]
 #![expect(
     clippy::pub_use,
     reason = "creating the main public API from private modules"
 )]
+
+extern crate alloc;
 
 pub mod comparator;
 #[cfg(feature = "docs")]

@@ -9,6 +9,7 @@
 //! tracking).  Value-type-specific logic (ordering checks, tail/len updates,
 //! value extraction) stays in the outer `CursorMut` wrappers.
 
+use alloc::boxed::Box;
 use core::{cmp::Ordering, ptr::NonNull};
 
 use crate::node::{

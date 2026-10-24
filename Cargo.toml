@@ -29,28 +29,49 @@ rust-version = "1.98"
       ".cargo/mermaid.script.html",
     ]
 
+[[example]]
+name = "custom_ordering"
+required-features = ["std"]
+
+[[example]]
+name = "float_keys"
+required-features = ["std"]
+
+[[example]]
+name = "getting_started"
+required-features = ["std"]
+
+[[example]]
+name = "leaderboard"
+required-features = ["std"]
+
 [[bench]]
 harness = false
 name = "skip_list"
+required-features = ["std"]
 
 [[bench]]
 harness = false
 name = "ordered_skip_list"
+required-features = ["std"]
 
 [[bench]]
 harness = false
 name = "skip_set"
+required-features = ["std"]
 
 [[bench]]
 harness = false
 name = "skip_map"
+required-features = ["std"]
 
 [[bench]]
 harness = false
 name = "level_generator"
+required-features = ["std"]
 
 [dependencies]
-rand = "0.10"
+rand = { version = "0.10", default-features = false }
 
 [dev-dependencies]
 anyhow = "=1.0.104"
@@ -63,6 +84,7 @@ rstest = "=0.28.0"
 codecov = { branch = "main", repository = "JP-Ellis/rust-skiplist", service = "github" }
 
 [features]
+default = ["std"]
 ## Enable the gap-cursor API (`lower_bound`, `upper_bound`, `CursorMut`, etc.)
 ## for [`OrderedSkipList`], [`SkipSet`], and [`SkipMap`].
 ##
@@ -72,9 +94,16 @@ cursor = []
 ## Enable the `docs` module, which provides long-form explanation pages for
 ## skip list concepts, internals, and the `partial-ord` feature.
 docs = []
+## Seed generators directly from the operating system entropy source without
+## the standard library. Enables `Geometric::new` and the collection
+## constructors that call it. `std` takes precedence when both are enabled.
+getrandom = ["rand/sys_rng"]
 ## Enable `PartialOrdComparator`, which uses `PartialOrd` and panics when
 ## elements are incomparable (i.e. `partial_cmp` returns `None`).
 partial-ord = []
+## Link the standard library and seed generators from the thread-local RNG.
+## Enables `Geometric::new` and the collection constructors that call it.
+std = ["rand/thread_rng"]
 
 [lints]
   [lints.clippy]

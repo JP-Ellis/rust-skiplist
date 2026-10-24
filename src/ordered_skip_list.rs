@@ -35,12 +35,12 @@
 //!   allow callers to change a value without reinserting it, silently
 //!   invalidating the sort order.  To update a value, remove it and reinsert
 //!   the new value.
-//! - **No `with_capacity`.**  Use [`SkipList::with_capacity`] if you need
+//! - **No `with_capacity`.**  Use `SkipList::with_capacity` if you need
 //!   capacity pre-configuration and do not require sorted order.
 //!
 //! # Method Summary
 //!
-//! **Constructors:** [`new`], [`with_level_generator`], [`with_comparator`],
+//! **Constructors:** `new`, [`with_level_generator`], `with_comparator`,
 //!   [`with_comparator_and_level_generator`].
 //!
 //! **Access:** [`first`], [`last`], [`get_by_index`], [`contains`],
@@ -87,11 +87,8 @@
 //! ```
 //!
 //! [`SkipList`]: crate::skip_list::SkipList
-//! [`SkipList::with_capacity`]: crate::skip_list::SkipList::with_capacity
 //! [`Comparator<T>`]: crate::comparator::Comparator
-//! [`new`]: OrderedSkipList::new
 //! [`with_level_generator`]: OrderedSkipList::with_level_generator
-//! [`with_comparator`]: OrderedSkipList::with_comparator
 //! [`with_comparator_and_level_generator`]: OrderedSkipList::with_comparator_and_level_generator
 //! [`first`]: OrderedSkipList::first
 //! [`last`]: OrderedSkipList::last
@@ -137,6 +134,7 @@
     doc = "[`upper_bound_mut`]: OrderedSkipList::upper_bound_mut"
 )]
 
+use alloc::boxed::Box;
 use core::ptr::NonNull;
 
 use crate::{
@@ -172,14 +170,12 @@ mod traits;
 ///
 /// | Constructor                                   | `T: Ord`? | Comparator        | Generator       |
 /// |-----------------------------------------------|:---------:|:-----------------:|:---------------:|
-/// | [`new()`]                                     | required  | [`OrdComparator`] | [`Geometric`]   |
+/// | `new()`                                       | required  | [`OrdComparator`] | [`Geometric`]   |
 /// | [`with_level_generator(g)`]                   | required  | [`OrdComparator`] | `g`             |
-/// | [`with_comparator(c)`]                        | not req.  | `c`               | [`Geometric`]   |
+/// | `with_comparator(c)`                          | not req.  | `c`               | [`Geometric`]   |
 /// | [`with_comparator_and_level_generator(c, g)`] | not req.  | `c`               | `g`             |
 ///
-/// [`new()`]: OrderedSkipList::new
 /// [`with_level_generator(g)`]: OrderedSkipList::with_level_generator
-/// [`with_comparator(c)`]: OrderedSkipList::with_comparator
 /// [`with_comparator_and_level_generator(c, g)`]: OrderedSkipList::with_comparator_and_level_generator
 ///
 /// # Examples
@@ -257,6 +253,11 @@ impl<T: Ord, const N: usize> OrderedSkipList<T, N, OrdComparator, Geometric> {
     /// assert!(list.is_empty());
     /// assert_eq!(list.len(), 0);
     /// ```
+    ///
+    /// # Panics
+    ///
+    /// Panics if the `getrandom` entropy source fails.
+    #[cfg(any(feature = "std", feature = "getrandom"))]
     #[inline]
     #[must_use]
     pub fn new() -> Self {
@@ -310,6 +311,11 @@ impl<T, C: Comparator<T>, const N: usize> OrderedSkipList<T, N, C, Geometric> {
     ///     OrderedSkipList::with_comparator(FnComparator(|a: &i32, b: &i32| b.cmp(a)));
     /// assert!(list.is_empty());
     /// ```
+    ///
+    /// # Panics
+    ///
+    /// Panics if the `getrandom` entropy source fails.
+    #[cfg(any(feature = "std", feature = "getrandom"))]
     #[inline]
     #[must_use]
     pub fn with_comparator(comparator: C) -> Self {
@@ -499,6 +505,7 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
 
 // MARK: Default
 
+#[cfg(any(feature = "std", feature = "getrandom"))]
 impl<T: Ord, const N: usize> Default for OrderedSkipList<T, N, OrdComparator, Geometric> {
     #[inline]
     fn default() -> Self {

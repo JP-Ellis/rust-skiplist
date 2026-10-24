@@ -2,6 +2,7 @@
 //! `keys`, `values`, `values_mut`, `range`, `range_mut`, `drain`,
 //! `extract_if`, all iterator types, and [`IntoIterator`] implementations.
 
+use alloc::vec::Vec;
 use core::{
     cmp::Ordering,
     fmt,
@@ -1446,7 +1447,7 @@ impl<K, V, C: Comparator<K>, G: LevelGenerator, const N: usize> FusedIterator
 #[must_use = "iterators are lazy and do nothing unless consumed"]
 pub struct Drain<'a, K, V> {
     /// The already-removed entries in key order.
-    iter: std::vec::IntoIter<(K, V)>,
+    iter: alloc::vec::IntoIter<(K, V)>,
     /// Ties the `Drain`'s lifetime to the `&'a mut SkipMap` that created it,
     /// preventing the map from being used while this `Drain` is alive.
     _marker: PhantomData<&'a mut (K, V)>,
