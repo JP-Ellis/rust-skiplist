@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 <!-- markdownlint-disable -->
 
+## [2.0.0](https://github.com/JP-Ellis/rust-skiplist/compare/v1.3.4...v2.0.0) - _2026-10-24_
+
+### 🚀 Features
+
+-   _(ordered_skip_list)_ [**breaking**] Take a range in extract_if
+
+-   _(skip_map)_ [**breaking**] Take a range in extract_if
+
+
 ## [1.3.4](https://github.com/JP-Ellis/rust-skiplist/compare/v1.3.3...v1.3.4) - _2026-10-24_
 
 ### 🚜 Refactor
