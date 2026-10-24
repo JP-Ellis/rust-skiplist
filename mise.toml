@@ -130,6 +130,7 @@ rumdl = "v0.3.0"
   description = "Build the library for no_std targets"
   run = [
     "cargo build --lib --no-default-features --target thumbv6m-none-eabi",
+    "cargo build --lib --no-default-features --features cursor,partial-ord,docs --target thumbv6m-none-eabi",
     "cargo build --lib --no-default-features --target wasm32-unknown-unknown",
   ]
 
