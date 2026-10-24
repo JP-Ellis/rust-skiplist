@@ -42,13 +42,14 @@ impl fmt::Display for GeometricError {
 impl Error for GeometricError {}
 
 /// How [`Geometric::level`] draws a sample.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 enum Sampler {
     /// `q == 0.5` exactly: the level is the index of the lowest set bit of a
     /// random `u64`, redrawn when zero or above `total`.
     Bisect,
-    /// Any other `q`: binary search a CDF table built at construction.
-    Table,
+    /// Any other `q`: binary search the CDF over levels `0..=total`, built at
+    /// construction.
+    Table(Vec<f64>),
 }
 
 /// A level generator using a geometric distribution.
@@ -93,9 +94,6 @@ enum Sampler {
 pub struct Geometric {
     /// The total number of levels that are assumed to exist.
     total: usize,
-    /// The cumulative distribution over levels `0..=total`; empty when the
-    /// sampler is [`Sampler::Bisect`].
-    cdf: Vec<f64>,
     /// The random number generator.
     rng: SmallRng,
     /// The sampling strategy, chosen once from `q` at construction.
@@ -145,14 +143,13 @@ impl Geometric {
             clippy::float_cmp,
             reason = "exact match on the literal 0.5 selects the bit sampler"
         )]
-        let (sampler, cdf) = if q == 0.5 {
-            (Sampler::Bisect, Vec::new())
+        let sampler = if q == 0.5 {
+            Sampler::Bisect
         } else {
-            (Sampler::Table, cdf_table(total, q))
+            Sampler::Table(cdf_table(total, q))
         };
         Ok(Geometric {
             total,
-            cdf,
             rng,
             sampler,
         })
@@ -238,9 +235,9 @@ impl Geometric {
     /// variate in `[0, 1)`. The last entry is `1.0`, so the result is at most
     /// `total`.
     #[inline]
-    fn level_table(&mut self) -> usize {
-        let u: f64 = self.rng.random();
-        self.cdf.partition_point(|&c| c <= u)
+    fn level_table(rng: &mut SmallRng, cdf: &[f64]) -> usize {
+        let u: f64 = rng.random();
+        cdf.partition_point(|&c| c <= u)
     }
 
     /// Samples by bit position.
@@ -314,9 +311,9 @@ impl LevelGenerator for Geometric {
     /// in the base layer); `total` is the least probable.
     #[inline]
     fn level(&mut self) -> usize {
-        match self.sampler {
+        match &self.sampler {
             Sampler::Bisect => self.level_bisect(),
-            Sampler::Table => self.level_table(),
+            Sampler::Table(cdf) => Self::level_table(&mut self.rng, cdf),
         }
     }
 }
@@ -525,9 +522,9 @@ mod tests {
     #[test]
     fn q_half_selects_bisect() -> Result<()> {
         let bisect = Geometric::new_with_seed(16, 0.5, 42)?;
-        assert_eq!(bisect.sampler, super::Sampler::Bisect);
+        assert!(matches!(bisect.sampler, super::Sampler::Bisect));
         let table = Geometric::new_with_seed(16, 0.25, 42)?;
-        assert_eq!(table.sampler, super::Sampler::Table);
+        assert!(matches!(table.sampler, super::Sampler::Table(_)));
         Ok(())
     }
 
@@ -558,14 +555,13 @@ mod tests {
 
         let mut bisect = Geometric::new_with_seed(n, 0.5, 7)?;
         let mut table = Geometric::new_with_seed(n, 0.5, 11)?;
-        table.sampler = super::Sampler::Table;
-        table.cdf = super::cdf_table(n, 0.5);
+        table.sampler = super::Sampler::Table(super::cdf_table(n, 0.5));
         let mut bisect_counts = vec![0_u32; n.strict_add(1)];
         let mut table_counts = vec![0_u32; n.strict_add(1)];
         for _ in 0..SAMPLES {
             let b = bisect.level_bisect();
             bisect_counts[b] = bisect_counts[b].strict_add(1);
-            let t = table.level_table();
+            let t = table.level();
             table_counts[t] = table_counts[t].strict_add(1);
         }
 
