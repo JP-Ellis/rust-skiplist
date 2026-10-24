@@ -127,11 +127,18 @@ impl Geometric {
     /// The largest supported number of levels.
     pub const MAX_TOTAL: usize = 64;
 
-    /// Validates the parameters, picks the sampler and builds the CDF table.
-    fn from_rng(total: usize, q: f64, rng: SmallRng) -> Result<Self, GeometricError> {
+    /// Checks the parameters in the order `total == 0`, `total` too large,
+    /// then `q` out of range.
+    fn validate(total: usize, q: f64) -> Result<(), GeometricError> {
         (total != 0).ok_or(GeometricError::ZeroMax)?;
         (total <= Self::MAX_TOTAL).ok_or(GeometricError::MaxTooLarge)?;
         (0.0 < q && q < 1.0).ok_or(GeometricError::InvalidProbability)?;
+        Ok(())
+    }
+
+    /// Validates the parameters, picks the sampler and builds the CDF table.
+    fn from_rng(total: usize, q: f64, rng: SmallRng) -> Result<Self, GeometricError> {
+        Self::validate(total, q)?;
         #[expect(
             clippy::float_cmp,
             reason = "exact match on the literal 0.5 selects the bit sampler"
@@ -155,6 +162,9 @@ impl Geometric {
     /// most [`Geometric::MAX_TOTAL`]). `q` is the probability that an element
     /// is promoted to the next level and must be strictly between 0 and 1.
     ///
+    /// Available with the `std` or `getrandom` feature. Without either, use
+    /// [`Geometric::new_with_seed`].
+    ///
     /// # Errors
     ///
     /// Returns a [`GeometricError`] if `total` is zero, if `total` is too
@@ -162,8 +172,10 @@ impl Geometric {
     /// `std` feature, returns [`GeometricError::Entropy`] if the operating
     /// system entropy source fails.
     ///
-    /// Available with the `std` or `getrandom` feature. Without either, use
-    /// [`Geometric::new_with_seed`].
+    /// # Panics
+    ///
+    /// With the `std` feature, panics if the entropy source behind
+    /// `rand::rng()` fails.
     ///
     /// # Examples
     ///
@@ -185,6 +197,7 @@ impl Geometric {
     #[cfg(any(feature = "std", feature = "getrandom"))]
     #[inline]
     pub fn new(total: usize, q: f64) -> Result<Self, GeometricError> {
+        Self::validate(total, q)?;
         #[cfg(feature = "std")]
         let rng = SmallRng::from_rng(&mut rand::rng());
         #[cfg(not(feature = "std"))]
@@ -261,8 +274,8 @@ impl Default for Geometric {
     ///
     /// # Panics
     ///
-    /// Panics if the operating system entropy source fails, which can only
-    /// happen in builds with `getrandom` but without `std`.
+    /// Panics if the entropy source fails: `rand::rng()` under `std`, or the
+    /// operating system source under `getrandom` alone.
     ///
     /// # Examples
     ///
@@ -316,6 +329,19 @@ mod tests {
 
     use super::{Geometric, LevelGenerator};
     use crate::level_generator::geometric::GeometricError;
+
+    #[test]
+    fn validation_order() {
+        assert_eq!(Geometric::new(0, 2.0).err(), Some(GeometricError::ZeroMax));
+        assert_eq!(
+            Geometric::new(Geometric::MAX_TOTAL + 1, 2.0).err(),
+            Some(GeometricError::MaxTooLarge)
+        );
+        assert_eq!(
+            Geometric::new_with_seed(0, 2.0, 1).err(),
+            Some(GeometricError::ZeroMax)
+        );
+    }
 
     #[test]
     fn invalid_max() {
