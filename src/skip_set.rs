@@ -34,15 +34,9 @@
 //!
 //! # Method Summary
 //!
-#![cfg_attr(
-    any(feature = "std", feature = "getrandom"),
-    doc = "**Constructors:** [`new`], [`with_level_generator`], [`with_comparator`],"
-)]
-#![cfg_attr(
-    not(any(feature = "std", feature = "getrandom")),
-    doc = "**Constructors:** [`with_level_generator`],"
-)]
+//! **Constructors:** [`new`], [`with_level_generator`], [`with_comparator`],
 //!   [`with_comparator_and_level_generator`].
+//! `new` and `with_comparator` need the `std` or `getrandom` feature.
 //!
 //! **Access:** [`contains`], [`get`], [`get_by_index`], [`first`], [`last`],
 //!   [`rank`].
@@ -96,8 +90,16 @@
     doc = "[`new`]: SkipSet::new"
 )]
 #![cfg_attr(
+    not(any(feature = "std", feature = "getrandom")),
+    doc = "[`new`]: crate#features"
+)]
+#![cfg_attr(
     any(feature = "std", feature = "getrandom"),
     doc = "[`with_comparator`]: SkipSet::with_comparator"
+)]
+#![cfg_attr(
+    not(any(feature = "std", feature = "getrandom")),
+    doc = "[`with_comparator`]: crate#features"
 )]
 //! [`with_comparator_and_level_generator`]: SkipSet::with_comparator_and_level_generator
 //! [`contains`]: SkipSet::contains
@@ -172,24 +174,13 @@ pub use set_ops::{Difference, Intersection, SymmetricDifference, Union};
 ///
 /// | Constructor                                   | `T: Ord`? | Comparator        | Generator       |
 /// |-----------------------------------------------|:---------:|:-----------------:|:---------------:|
-#[cfg_attr(
-    any(feature = "std", feature = "getrandom"),
-    doc = "| [`new()`]                                     | required  | [`OrdComparator`] | [`Geometric`]   |"
-)]
-#[cfg_attr(
-    not(any(feature = "std", feature = "getrandom")),
-    doc = "| `new()`                                       | required  | [`OrdComparator`] | [`Geometric`]   |"
-)]
+/// | [`new()`]                                     | required  | [`OrdComparator`] | [`Geometric`]   |
 /// | [`with_level_generator(g)`]                   | required  | [`OrdComparator`] | `g`             |
-#[cfg_attr(
-    any(feature = "std", feature = "getrandom"),
-    doc = "| [`with_comparator(c)`]                        | not req.  | `c`               | [`Geometric`]   |"
-)]
-#[cfg_attr(
-    not(any(feature = "std", feature = "getrandom")),
-    doc = "| `with_comparator(c)`                          | not req.  | `c`               | [`Geometric`]   |"
-)]
+/// | [`with_comparator(c)`]                        | not req.  | `c`               | [`Geometric`]   |
 /// | [`with_comparator_and_level_generator(c, g)`] | not req.  | `c`               | `g`             |
+///
+/// The constructors that build a [`Geometric`] (`new()` and `with_comparator(c)`)
+/// need the `std` or `getrandom` feature.
 ///
 /// [`with_level_generator(g)`]: SkipSet::with_level_generator
 /// [`with_comparator_and_level_generator(c, g)`]: SkipSet::with_comparator_and_level_generator
@@ -198,8 +189,16 @@ pub use set_ops::{Difference, Intersection, SymmetricDifference, Union};
     doc = "[`new()`]: SkipSet::new"
 )]
 #[cfg_attr(
+    not(any(feature = "std", feature = "getrandom")),
+    doc = "[`new()`]: crate#features"
+)]
+#[cfg_attr(
     any(feature = "std", feature = "getrandom"),
     doc = "[`with_comparator(c)`]: SkipSet::with_comparator"
+)]
+#[cfg_attr(
+    not(any(feature = "std", feature = "getrandom")),
+    doc = "[`with_comparator(c)`]: crate#features"
 )]
 ///
 /// # Examples

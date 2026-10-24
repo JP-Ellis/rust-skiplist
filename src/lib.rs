@@ -44,9 +44,18 @@
 //!   `rand::rng()`.
 //! - `getrandom`: enables `rand/sys_rng`, so `no_std` builds seed from the
 //!   operating system.
+//! - `cursor`: enables the gap-cursor API (`lower_bound`, `upper_bound`,
+//!   `CursorMut` and related types) on `OrderedSkipList`, `SkipSet` and
+//!   `SkipMap`. This API is unstable and may change in a minor release.
+//! - `partial-ord`: enables `PartialOrdComparator`, which orders by
+//!   `PartialOrd` and panics on incomparable values.
+//! - `docs`: enables the `docs` module of long-form explanation pages.
 //!
-//! Without either, pass a seed through `Geometric::new_with_seed`.
+//! Without `std` or `getrandom`, the constructors that seed from entropy are
+//! unavailable; pass a seed through `Geometric::new_with_seed` instead.
 //! See [`docs::no_std`] for the constructor availability table.
+//!
+//! Links in these docs to an item whose feature is disabled lead here.
 //!
 //! # Ordering Requirements
 //!
@@ -79,14 +88,29 @@
 //!   `FnComparator(f64::total_cmp)` alternative.
 //! - [`docs::no_std`]: features, seeding without std, and constructor
 //!   availability.
-
+//!
+#![cfg_attr(
+    not(feature = "partial-ord"),
+    doc = "[`PartialOrdComparator`]: crate#features"
+)]
+#![cfg_attr(not(feature = "docs"), doc = "[`docs::concepts`]: crate#features")]
+#![cfg_attr(
+    not(all(feature = "docs", feature = "partial-ord")),
+    doc = "[`docs::partial_ord`]: crate#features"
+)]
+#![cfg_attr(not(feature = "docs"), doc = "[`docs::no_std`]: crate#features")]
+#![cfg_attr(not(feature = "docs"), doc = "[`docs`]: crate#features")]
+#![cfg_attr(
+    not(all(feature = "docs", feature = "cursor")),
+    doc = "[`docs::cursor`]: crate#features"
+)]
+#![cfg_attr(not(feature = "docs"), doc = "[`docs::internals`]: crate#features")]
 // Internal terminology used throughout this crate:
 //   - "height" of a node: how many forward links it holds (minimum 1).
 //   - "level 0": the bottom-most layer, which contains every element.
 //   - "level k" (k > 0): a sparser layer whose nodes also appear at level k-1.
 // Higher-level links allow the search algorithm to skip over many nodes at
 // once, yielding `$O(\log n)$` average traversal cost.
-
 #![cfg_attr(not(test), no_std)]
 #![expect(
     clippy::pub_use,

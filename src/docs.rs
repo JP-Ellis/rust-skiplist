@@ -10,6 +10,9 @@
 //! [`internals`] | Node ownership, pointer provenance, `NonNull`-over-`Box` rationale (for contributors) |
 //! [`partial_ord`] | The `partial-ord` feature, NaN caveats, `total_cmp` alternative |
 //! [`no_std`] | Features, seeding without std, constructor availability |
+//!
+#![cfg_attr(not(feature = "cursor"), doc = "[`cursor`]: crate#features")]
+#![cfg_attr(not(feature = "partial-ord"), doc = "[`partial_ord`]: crate#features")]
 #![expect(
     clippy::inline_modules,
     reason = "each page is an empty module whose docs come from include_str!"
@@ -20,6 +23,18 @@
     reason = "content provided by include_str! when building docs"
 )]
 #[cfg_attr(doc, doc = include_str!("../docs/concepts.md"))]
+#[cfg_attr(
+    all(doc, feature = "partial-ord"),
+    doc = "[`PartialOrdComparator`]: crate::PartialOrdComparator"
+)]
+#[cfg_attr(
+    all(doc, not(feature = "partial-ord")),
+    doc = "[`PartialOrdComparator`]: crate#features"
+)]
+#[cfg_attr(
+    all(doc, not(feature = "partial-ord")),
+    doc = "[`crate::docs::partial_ord`]: crate#features"
+)]
 pub mod concepts {}
 
 #[expect(
