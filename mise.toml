@@ -127,11 +127,12 @@ rumdl = "v0.3.0"
   run = "cargo +1.98 hack --feature-powerset check"
 
   [tasks."no-std"]
-  description = "Build the library for no_std targets"
+  description = "Build the library for no_std targets and test it without entropy"
   run = [
     "cargo build --lib --no-default-features --target thumbv6m-none-eabi",
     "cargo build --lib --no-default-features --features cursor,partial-ord,docs --target thumbv6m-none-eabi",
     "cargo build --lib --no-default-features --target wasm32-unknown-unknown",
+    "cargo nextest run --no-default-features --test no_entropy",
   ]
 
   [tasks.prek]
