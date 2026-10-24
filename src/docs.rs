@@ -9,6 +9,7 @@
 //! [`cursor`] | Gap cursor model, `lower_bound`/`upper_bound` semantics, how-to guides (requires `cursor` feature) |
 //! [`internals`] | Node ownership, pointer provenance, `NonNull`-over-`Box` rationale (for contributors) |
 //! [`partial_ord`] | The `partial-ord` feature, NaN caveats, `total_cmp` alternative |
+//! [`no_std`] | Features, seeding without std, constructor availability |
 #![expect(
     clippy::inline_modules,
     reason = "each page is an empty module whose docs come from include_str!"
@@ -43,3 +44,10 @@ pub mod cursor {}
 )]
 #[cfg_attr(doc, doc = include_str!("../docs/partial_ord.md"))]
 pub mod partial_ord {}
+
+#[expect(
+    missing_docs,
+    reason = "content provided by include_str! when building docs"
+)]
+#[cfg_attr(doc, doc = include_str!("../docs/no_std.md"))]
+pub mod no_std {}

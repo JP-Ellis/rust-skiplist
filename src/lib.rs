@@ -38,6 +38,16 @@
 //! which provides a true total order with no panics.
 //! See [`docs::partial_ord`] for full guidance.
 //!
+//! # Features
+//!
+//! - `std` (default): enables `rand/thread_rng`, so `Geometric` seeds from
+//!   `rand::rng()`.
+//! - `getrandom`: enables `rand/sys_rng`, so `no_std` builds seed from the
+//!   operating system.
+//!
+//! Without either, pass a seed through `Geometric::new_with_seed`.
+//! See [`docs::no_std`] for the constructor availability table.
+//!
 //! # Ordering Requirements
 //!
 //! The ordered collections rely on a well-behaved comparison function.
@@ -67,6 +77,8 @@
 //!   `NonNull`-over-`Box` rationale for contributors.
 //! - [`docs::partial_ord`]: the `partial-ord` feature, NaN caveats, and the
 //!   `FnComparator(f64::total_cmp)` alternative.
+//! - [`docs::no_std`]: features, seeding without std, and constructor
+//!   availability.
 
 // Internal terminology used throughout this crate:
 //   - "height" of a node: how many forward links it holds (minimum 1).
