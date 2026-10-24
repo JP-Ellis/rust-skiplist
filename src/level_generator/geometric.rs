@@ -18,7 +18,7 @@ use crate::level_generator::LevelGenerator;
 pub enum GeometricError {
     /// The maximum number of levels must be non-zero.
     ZeroMax,
-    /// The maximum number of levels must be less than `i32::MAX`.
+    /// The maximum number of levels exceeds [`Geometric::MAX_TOTAL`].
     MaxTooLarge,
     /// The probability `$q$` must be in the range `$(0, 1)$`.
     InvalidProbability,
@@ -29,7 +29,7 @@ impl fmt::Display for GeometricError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::ZeroMax => write!(f, "max must be non-zero."),
-            Self::MaxTooLarge => write!(f, "max must be less than i32::MAX."),
+            Self::MaxTooLarge => write!(f, "max must be at most 64."),
             Self::InvalidProbability => write!(f, "q must be in (0, 1)."),
         }
     }
@@ -43,8 +43,8 @@ enum Sampler {
     /// `q == 0.5` exactly: the level is the index of the lowest set bit of a
     /// random `u64`, redrawn when zero or above `total`.
     Bisect,
-    /// Any other `q`: invert the truncated geometric CDF.
-    Inverse,
+    /// Any other `q`: binary search a CDF table built at construction.
+    Table,
 }
 
 /// A level generator using a geometric distribution.
@@ -64,9 +64,13 @@ enum Sampler {
 /// probability, or [`Geometric::default`] for the standard 16-level, `$q =
 /// 0.5$` configuration.
 ///
-/// When `q` is exactly `0.5` (the default), levels are sampled by bit position
-/// instead of by inverting the CDF. The distribution is identical; the draw
-/// avoids floating-point work.
+/// When `q` is exactly `0.5` (the default), levels are sampled by bit position.
+/// For any other `q`, the cumulative distribution is tabulated once at
+/// construction and each draw is a binary search of a uniform variate in that
+/// table. Neither path calls `powi` or `log`, so no `libm` is needed.
+///
+/// The number of levels is capped at [`Geometric::MAX_TOTAL`] (64), which keeps
+/// the table small and matches the width of the bit sampler's random word.
 ///
 /// # Examples
 ///
@@ -82,25 +86,69 @@ enum Sampler {
 pub struct Geometric {
     /// The total number of levels that are assumed to exist.
     total: usize,
-    /// The total number of levels as an `i32` for use in the CDF computation.
-    /// This needs to be 1 more than the maximum levels to ensure that it
-    /// includes the full range of possible levels (0..=total).
-    total_inclusive: i32,
-    /// The promotion probability, i.e., the probability that a node at level
-    /// `n` also appears at level `n + 1`.
-    q: f64,
+    /// The cumulative distribution over levels `0..=total`; empty when the
+    /// sampler is [`Sampler::Bisect`].
+    cdf: Vec<f64>,
     /// The random number generator.
     rng: SmallRng,
     /// The sampling strategy, chosen once from `q` at construction.
     sampler: Sampler,
 }
 
+/// Builds the CDF of the truncated geometric distribution over `0..=total`.
+///
+/// Entry `i` is `(sum of q^j for j <= i) / (sum of q^j for j <= total)`. Prefix
+/// sums of the powers avoid the cancellation in `1 - q^k` when `q` is near 1.
+/// The last entry is set to exactly `1.0` so every `u < 1` lands in range.
+fn cdf_table(total: usize, q: f64) -> Vec<f64> {
+    let mut power = 1.0_f64;
+    let mut cdf: Vec<f64> = Vec::with_capacity(total.saturating_add(1));
+    let mut sum = 0.0_f64;
+    for _ in 0..=total {
+        sum += power;
+        cdf.push(sum);
+        power *= q;
+    }
+    for entry in &mut cdf {
+        *entry /= sum;
+    }
+    if let Some(last) = cdf.last_mut() {
+        *last = 1.0;
+    }
+    cdf
+}
+
 impl Geometric {
+    /// The largest supported number of levels.
+    pub const MAX_TOTAL: usize = 64;
+
+    /// Validates the parameters, picks the sampler and builds the CDF table.
+    fn from_rng(total: usize, q: f64, rng: SmallRng) -> Result<Self, GeometricError> {
+        (total != 0).ok_or(GeometricError::ZeroMax)?;
+        (total <= Self::MAX_TOTAL).ok_or(GeometricError::MaxTooLarge)?;
+        (0.0 < q && q < 1.0).ok_or(GeometricError::InvalidProbability)?;
+        #[expect(
+            clippy::float_cmp,
+            reason = "exact match on the literal 0.5 selects the bit sampler"
+        )]
+        let (sampler, cdf) = if q == 0.5 {
+            (Sampler::Bisect, Vec::new())
+        } else {
+            (Sampler::Table, cdf_table(total, q))
+        };
+        Ok(Geometric {
+            total,
+            cdf,
+            rng,
+            sampler,
+        })
+    }
+
     /// Creates a new geometric level generator.
     ///
-    /// `total` sets the maximum number of levels (must be at least 1 and less
-    /// than `i32::MAX`). `q` is the probability that an element is promoted to
-    /// the next level and must be strictly between 0 and 1.
+    /// `total` sets the maximum number of levels (must be at least 1 and at
+    /// most [`Geometric::MAX_TOTAL`]). `q` is the probability that an element
+    /// is promoted to the next level and must be strictly between 0 and 1.
     ///
     /// # Errors
     ///
@@ -126,27 +174,7 @@ impl Geometric {
     /// ```
     #[inline]
     pub fn new(total: usize, q: f64) -> Result<Self, GeometricError> {
-        (total != 0).ok_or(GeometricError::ZeroMax)?;
-        let Some(total_inclusive) = i32::try_from(total).ok().and_then(|i| i.checked_add(1)) else {
-            return Err(GeometricError::MaxTooLarge);
-        };
-        (0.0 < q && q < 1.0).ok_or(GeometricError::InvalidProbability)?;
-        #[expect(
-            clippy::float_cmp,
-            reason = "exact match on the literal 0.5 selects the bit sampler"
-        )]
-        let sampler = if q == 0.5 {
-            Sampler::Bisect
-        } else {
-            Sampler::Inverse
-        };
-        Ok(Geometric {
-            total,
-            total_inclusive,
-            q,
-            rng: SmallRng::from_rng(&mut rand::rng()),
-            sampler,
-        })
+        Self::from_rng(total, q, SmallRng::from_rng(&mut rand::rng()))
     }
 
     /// Creates a new geometric level generator with a fixed seed for
@@ -169,57 +197,18 @@ impl Geometric {
     /// ```
     #[inline]
     pub fn new_with_seed(total: usize, q: f64, seed: u64) -> Result<Self, GeometricError> {
-        (total != 0).ok_or(GeometricError::ZeroMax)?;
-        let Some(total_inclusive) = i32::try_from(total).ok().and_then(|i| i.checked_add(1)) else {
-            return Err(GeometricError::MaxTooLarge);
-        };
-        (0.0 < q && q < 1.0).ok_or(GeometricError::InvalidProbability)?;
-        #[expect(
-            clippy::float_cmp,
-            reason = "exact match on the literal 0.5 selects the bit sampler"
-        )]
-        let sampler = if q == 0.5 {
-            Sampler::Bisect
-        } else {
-            Sampler::Inverse
-        };
-        Ok(Geometric {
-            total,
-            total_inclusive,
-            q,
-            rng: SmallRng::seed_from_u64(seed),
-            sampler,
-        })
+        Self::from_rng(total, q, SmallRng::seed_from_u64(seed))
     }
 
-    /// Inverts the CDF of the truncated geometric distribution.
+    /// Samples by binary search of the CDF table.
+    ///
+    /// Returns the first level whose cumulative probability exceeds a uniform
+    /// variate in `[0, 1)`. The last entry is `1.0`, so the result is at most
+    /// `total`.
     #[inline]
-    #[expect(
-        clippy::cast_possible_truncation,
-        clippy::cast_sign_loss,
-        reason = "CDF domain is [0, total] so the cast is safe after clamping"
-    )]
-    #[expect(clippy::as_conversions, reason = "No other way to do this")]
-    fn level_inverse(&mut self) -> usize {
-        // Invert the CDF of the truncated geometric distribution:
-        //
-        //   CDF(n) = (q^n - 1) / (q^t - 1)
-        //
-        // where t is the _exclusive_ upper bound (i.e., total + 1).
-        //
-        // Solving for n given a uniform variate u in [0, 1]:
-        //
-        //   n = floor( log_q( 1 + (q^t - 1) * u ) )
-        //
-        // where q = 1 - p and t is the total number of levels.
-        let u = self.rng.random::<f64>();
-        ((1.0 + (self.q.powi(self.total_inclusive) - 1.0) * u)
-            .log(self.q)
-            .floor() as usize)
-            // When q^total underflows to 0.0 due to floating-point precision,
-            // the formula can produce values > total.  This ensures that we
-            // never return a level greater than total.
-            .min(self.total)
+    fn level_table(&mut self) -> usize {
+        let u: f64 = self.rng.random();
+        self.cdf.partition_point(|&c| c <= u)
     }
 
     /// Samples by bit position.
@@ -289,7 +278,7 @@ impl LevelGenerator for Geometric {
     fn level(&mut self) -> usize {
         match self.sampler {
             Sampler::Bisect => self.level_bisect(),
-            Sampler::Inverse => self.level_inverse(),
+            Sampler::Table => self.level_table(),
         }
     }
 }
@@ -324,7 +313,7 @@ mod tests {
 
     #[rstest]
     fn total_is_correct(
-        #[values(1, 2, 4, 8, 128, 512, 1024)] n: usize,
+        #[values(1, 2, 4, 8, 32, 64)] n: usize,
         #[values(0.01, 0.1, 0.5, 0.99)] q: f64,
     ) -> Result<()> {
         let generator = Geometric::new_with_seed(n, q, 42)?;
@@ -339,7 +328,7 @@ mod tests {
     /// is negligible.
     #[rstest]
     fn generates_level_zero(
-        #[values(1, 2, 4, 8, 128, 512, 1024)] n: usize,
+        #[values(1, 2, 4, 8, 32, 64)] n: usize,
         #[values(0.01, 0.1, 0.2, 0.5, 0.8, 0.99)] q: f64,
     ) -> Result<()> {
         const MAX: usize = if cfg!(miri) { 50 } else { 10_000_000 };
@@ -486,13 +475,13 @@ mod tests {
     fn q_half_selects_bisect() -> Result<()> {
         let bisect = Geometric::new_with_seed(16, 0.5, 42)?;
         assert_eq!(bisect.sampler, super::Sampler::Bisect);
-        let inverse = Geometric::new_with_seed(16, 0.25, 42)?;
-        assert_eq!(inverse.sampler, super::Sampler::Inverse);
+        let table = Geometric::new_with_seed(16, 0.25, 42)?;
+        assert_eq!(table.sampler, super::Sampler::Table);
         Ok(())
     }
 
     #[rstest]
-    fn bisect_never_exceeds_total(#[values(1, 4, 16, 64, 70)] n: usize) -> Result<()> {
+    fn bisect_never_exceeds_total(#[values(1, 4, 16, 63)] n: usize) -> Result<()> {
         const SAMPLES: usize = if cfg!(miri) { 50 } else { 1_000_000 };
         let mut generator = Geometric::new_with_seed(n, 0.5, 42)?;
         for _ in 0..SAMPLES {
@@ -502,7 +491,7 @@ mod tests {
         Ok(())
     }
 
-    /// The two samplers must produce the same truncated distribution at
+    /// The bisect and table samplers must produce the same truncated distribution at
     /// q = 1/2.  Compare per-level frequencies where counts are large enough
     /// for the relative error to be meaningful.
     ///
@@ -511,36 +500,98 @@ mod tests {
     /// `sqrt(2 / MIN_COUNT)`; at 20,000 that is 1%, five times inside the
     /// tolerance, and six bins still qualify at `total = 16`.
     #[rstest]
-    fn bisect_matches_inverse_distribution(#[values(1, 4, 16, 64)] n: usize) -> Result<()> {
+    fn bisect_matches_table_distribution(#[values(1, 4, 16, 64)] n: usize) -> Result<()> {
         const SAMPLES: usize = if cfg!(miri) { 50 } else { 2_000_000 };
         const MIN_COUNT: u32 = 20_000;
         const TOLERANCE: f64 = 0.05;
 
         let mut bisect = Geometric::new_with_seed(n, 0.5, 7)?;
-        let mut inverse = Geometric::new_with_seed(n, 0.5, 11)?;
+        let mut table = Geometric::new_with_seed(n, 0.5, 11)?;
+        table.sampler = super::Sampler::Table;
+        table.cdf = super::cdf_table(n, 0.5);
         let mut bisect_counts = vec![0_u32; n.strict_add(1)];
-        let mut inverse_counts = vec![0_u32; n.strict_add(1)];
+        let mut table_counts = vec![0_u32; n.strict_add(1)];
         for _ in 0..SAMPLES {
             let b = bisect.level_bisect();
             bisect_counts[b] = bisect_counts[b].strict_add(1);
-            let i = inverse.level_inverse();
-            inverse_counts[i] = inverse_counts[i].strict_add(1);
+            let t = table.level_table();
+            table_counts[t] = table_counts[t].strict_add(1);
         }
 
         if cfg!(miri) {
             return Ok(());
         }
 
-        for (k, (&b, &i)) in bisect_counts.iter().zip(&inverse_counts).enumerate() {
-            if b < MIN_COUNT || i < MIN_COUNT {
+        for (k, (&b, &t)) in bisect_counts.iter().zip(&table_counts).enumerate() {
+            if b < MIN_COUNT || t < MIN_COUNT {
                 break;
             }
-            let relative_err = (f64::from(b) - f64::from(i)).abs() / f64::from(i);
+            let relative_err = (f64::from(b) - f64::from(t)).abs() / f64::from(t);
             assert!(
                 relative_err < TOLERANCE,
-                "level {k}: bisect={b}, inverse={i}, err {:.1}%",
+                "level {k}: bisect={b}, table={t}, err {:.1}%",
                 relative_err * 100.0
             );
+        }
+        Ok(())
+    }
+
+    // MARK: table sampler
+
+    #[test]
+    fn total_cap_boundary() -> Result<()> {
+        assert_eq!(Geometric::MAX_TOTAL, 64);
+        assert_eq!(Geometric::new_with_seed(64, 0.7, 0)?.total(), 64);
+        assert_eq!(
+            Geometric::new_with_seed(65, 0.7, 0).err(),
+            Some(GeometricError::MaxTooLarge)
+        );
+        assert_eq!(Geometric::new(64, 0.5)?.total(), 64);
+        assert_eq!(
+            Geometric::new(65, 0.5).err(),
+            Some(GeometricError::MaxTooLarge)
+        );
+        Ok(())
+    }
+
+    #[rstest]
+    fn cdf_table_shape(#[values(1, 4, 16, 64)] n: usize, #[values(0.01, 0.25, 0.7, 0.999)] q: f64) {
+        let cdf = super::cdf_table(n, q);
+        assert_eq!(cdf.len(), n.strict_add(1));
+        assert_eq!(cdf.last(), Some(&1.0));
+        assert!(cdf.is_sorted());
+        assert!(cdf[0] > 0.0);
+    }
+
+    #[rstest]
+    fn table_extreme_q_stays_in_range(#[values(0.999_999, 1.0 - 1e-12)] q: f64) -> Result<()> {
+        const SAMPLES: usize = if cfg!(miri) { 50 } else { 1_000_000 };
+        let mut g = Geometric::new_with_seed(64, q, 42)?;
+        let mut saw_top = false;
+        for _ in 0..SAMPLES {
+            let level = g.level();
+            assert!(level <= 64);
+            saw_top |= level == 64;
+        }
+        assert!(cfg!(miri) || saw_top, "top level never drawn");
+        Ok(())
+    }
+
+    #[test]
+    fn table_tiny_q_returns_zero() -> Result<()> {
+        let mut g = Geometric::new_with_seed(64, 1e-300, 42)?;
+        for _ in 0..1_000 {
+            assert_eq!(g.level(), 0);
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn seed_is_reproducible() -> Result<()> {
+        let mut a = Geometric::new_with_seed(16, 0.7, 9)?;
+        let mut b = Geometric::new_with_seed(16, 0.7, 9)?;
+        for _ in 0..1_000 {
+            assert_eq!(a.level(), b.level());
         }
         Ok(())
     }
