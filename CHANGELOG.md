@@ -7,6 +7,97 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 <!-- markdownlint-disable -->
 
+## [1.3.0](https://github.com/JP-Ellis/rust-skiplist/compare/v1.2.0...v1.3.0) - _2026-10-24_
+
+### 🚀 Features
+
+-   _(skip_list)_ Add insert_mut
+
+-   _(skip_list)_ Add push_{front,back}_mut
+
+-   _(skip_map)_ Add comparator accessor
+
+-   _(skip_list)_ Add pop_front_if and pop_back_if
+
+### 🐛 Bug Fixes
+
+-   Stop IterMut::next_back reading yielded node
+
+-   Keep range_mut back pointer provenance
+
+-   Derive cursor list pointer after search
+
+-   Keep head pointer provenance in splice
+
+-   Derive take_fast precursors structurally
+
+-   Panic when a set entry loses its element
+
+-   Validate precursors before splicing
+
+-   Panic on comparator contradiction
+
+-   _(node)_ Gate fmt::Write import on debug builds
+
+### 🚜 Refactor
+
+-   Take a NonNull in Node::join
+
+-   Drop arrayvec dependency
+
+-   _(node)_ Store links in a LevelArray
+
+-   _(node)_ Add LevelArray
+
+### 📚 Documentation
+
+-   Document comparator panics per method
+
+-   State comparator contract guarantees
+
+-   Note comparator trust in append fast path
+
+-   _(skip_map)_ Drop the summary link to a missing accessor
+
+### 🧪 Testing
+
+-   Silence contract panics in chaos runs
+
+-   Check node height in well-formed checker
+
+-   Seed generators in chaos merge ops
+
+-   Enable inconsistent comparator suites
+
+-   Cover cursor and split paths under chaos
+
+-   Seed chaos generators and report failures
+
+-   Reproduce UB under inconsistent comparators
+
+-   Add structural well-formedness checker
+
+-   Use assert_matches! in unit tests
+
+-   Shrink large-list tests under Miri
+
+### ⚙️ Miscellaneous Tasks
+
+-   _(ci)_ Shard Miri by data structure
+
+-   _(ci)_ Save caches only from main
+
+-   _(renovate)_ Rebase only on conflict
+
+-   _(mise)_ Drop the lockfile
+
+-   _(mise)_ Prefer aqua and github backends
+
+-   Allow 80-char subjects and 100-char bodies
+
+-   _(renovate)_ Group the toolchain pins by dependency name
+
+
 ## [1.2.0](https://github.com/JP-Ellis/rust-skiplist/compare/v1.1.1...v1.2.0) - _2026-09-18_
 
 ### 🚀 Features
