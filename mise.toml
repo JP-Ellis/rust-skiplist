@@ -44,7 +44,7 @@ rumdl = "v0.3.0"
 
   [tasks.test]
   description = "Run unit tests across all feature combinations"
-  run = "cargo hack --feature-powerset nextest run"
+  run = "cargo hack --feature-powerset --at-least-one-of std,getrandom nextest run"
 
   [tasks."test:docs"]
   description = "Run documentation tests"
@@ -125,6 +125,13 @@ rumdl = "v0.3.0"
   [tasks.msrv]
   description = "Verify the declared MSRV compiles the library"
   run = "cargo +1.98 hack --feature-powerset check"
+
+  [tasks."no-std"]
+  description = "Build the library for no_std targets"
+  run = [
+    "cargo build --lib --no-default-features --target thumbv6m-none-eabi",
+    "cargo build --lib --no-default-features --target wasm32-unknown-unknown",
+  ]
 
   [tasks.prek]
   description = "Run prek hooks (Rust hooks skipped; they have dedicated jobs)"
