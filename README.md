@@ -54,14 +54,14 @@ Skip list collections with $O(\log n)$ average-case performance for access, inse
 
 ```toml
 [dependencies]
-skiplist = "1"
+skiplist = "2"
 ```
 
 To use the `PartialOrdComparator` (for types that implement `PartialOrd` but not `Ord`, such as `f64`), enable the `partial-ord` feature:
 
 ```toml
 [dependencies]
-skiplist = { version = "1", features = ["partial-ord"] }
+skiplist = { version = "2", features = ["partial-ord"] }
 ```
 
 > [!WARNING]
@@ -74,7 +74,7 @@ The `cursor` feature adds `lower_bound` / `upper_bound` factory methods to `Orde
 
 ```toml
 [dependencies]
-skiplist = { version = "1", features = ["cursor"] }
+skiplist = { version = "2", features = ["cursor"] }
 ```
 
 ```rust
@@ -99,7 +99,7 @@ The crate is `no_std` and needs `alloc`. Disable the default features to drop `s
 
 ```toml
 [dependencies]
-skiplist = { version = "1", default-features = false, features = ["getrandom"] }
+skiplist = { version = "2", default-features = false, features = ["getrandom"] }
 ```
 
 Without `std` or `getrandom` there is no entropy source, so pass a seed yourself:
