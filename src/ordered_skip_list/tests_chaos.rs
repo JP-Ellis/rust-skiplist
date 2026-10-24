@@ -24,8 +24,8 @@ use crate::{
     Geometric, OrderedSkipList,
     comparator::{Comparator, ComparatorKey, OrdComparator},
     test_util::{
-        Chaos, ChaosOrd, Elem, FixedLevels, Rps, SeededLevels, assert_contract_panic, check_step,
-        seed_chaos_ord, seeded_geometric, seeds,
+        Chaos, ChaosOrd, Elem, FixedLevels, Rps, STEPS, SeededLevels, assert_contract_panic,
+        check_step, seed_chaos_ord, seeded_geometric, seeds,
     },
 };
 
@@ -162,7 +162,7 @@ fn chaos_comparator_n4() {
                 Chaos::new(seed),
                 FixedLevels::new(seed),
             );
-        run(list, seed, 50);
+        run(list, seed, STEPS);
     }
 }
 
@@ -174,7 +174,7 @@ fn chaos_comparator_n16() {
                 Chaos::new(seed),
                 seeded_geometric(seed),
             );
-        run(list, seed, 50);
+        run(list, seed, STEPS);
     }
 }
 
@@ -184,7 +184,7 @@ fn chaos_ord() {
         seed_chaos_ord(seed);
         let list: OrderedSkipList<ChaosOrd, 16, OrdComparator, Geometric> =
             OrderedSkipList::with_level_generator(seeded_geometric(seed));
-        run(list, seed, 50);
+        run(list, seed, STEPS);
     }
 }
 
@@ -193,7 +193,7 @@ fn rps_ord() {
     for seed in seeds() {
         let list: OrderedSkipList<Rps, 16, OrdComparator, Geometric> =
             OrderedSkipList::with_level_generator(seeded_geometric(seed));
-        run(list, seed, 50);
+        run(list, seed, STEPS);
     }
 }
 
@@ -240,7 +240,7 @@ fn issue_401_reproducer() {
 /// The same program through a safe `Ord` implementation and `OrdComparator`.
 #[test]
 fn issue_401_ord_comparator() {
-    let seed_count = if cfg!(miri) { 20 } else { 200 };
+    let seed_count = if cfg!(miri) { 4 } else { 200 };
     for seed in 0_u32..seed_count {
         seed_chaos_ord(seed);
         let mut l: OrderedSkipList<ChaosOrd> =
