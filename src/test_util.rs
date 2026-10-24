@@ -8,8 +8,8 @@
     reason = "the chaotic fixtures reduce random words to small bounded values"
 )]
 
-use core::cmp::Ordering;
-use std::{cell::Cell, ops::Range, sync::Once, thread::Result as ThreadResult};
+use core::{cell::Cell, cmp::Ordering, ops::Range};
+use std::{sync::Once, thread::Result as ThreadResult};
 
 use crate::{
     Geometric,
@@ -356,7 +356,7 @@ impl SeededLevels for FixedLevels {
 
 /// Runs a post-operation check, naming the seed, step and operation if it panics.
 pub(crate) fn check_step(seed: u32, step: usize, op: u32, check: impl FnOnce()) {
-    if let Err(payload) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(check)) {
+    if let Err(payload) = std::panic::catch_unwind(core::panic::AssertUnwindSafe(check)) {
         eprintln!("chaos failure: seed {seed}, step {step}, op {op}");
         std::panic::resume_unwind(payload);
     }

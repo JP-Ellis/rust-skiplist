@@ -1897,7 +1897,7 @@ mod tests {
     }
 
     /// A level generator that hands out a fixed sequence of heights.
-    struct Heights(std::vec::IntoIter<usize>);
+    struct Heights(alloc::vec::IntoIter<usize>);
 
     impl crate::level_generator::LevelGenerator for Heights {
         fn total(&self) -> usize {
@@ -1911,12 +1911,9 @@ mod tests {
 
     #[test]
     fn take_fast_inconsistent_neighbours_is_safe() {
-        use core::cmp::Ordering;
-        use std::{
-            cell::Cell,
-            panic::{AssertUnwindSafe, catch_unwind},
-            rc::Rc,
-        };
+        use alloc::rc::Rc;
+        use core::{cell::Cell, cmp::Ordering, panic::AssertUnwindSafe};
+        use std::panic::catch_unwind;
 
         // Elements are (key, id).  The list is
         //   head -----------------> (2,1) ------------------->
@@ -2427,8 +2424,8 @@ mod tests {
 
     #[test]
     fn insert_panicking_comparator_leaves_list_unchanged() {
-        use core::cell::Cell;
-        use std::panic::{AssertUnwindSafe, catch_unwind};
+        use core::{cell::Cell, panic::AssertUnwindSafe};
+        use std::panic::catch_unwind;
 
         let armed = Cell::new(false);
         let cmp = |a: &i32, b: &i32| {

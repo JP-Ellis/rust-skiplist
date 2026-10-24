@@ -262,7 +262,8 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
 
 #[cfg(test)]
 mod tests {
-    use std::panic::{AssertUnwindSafe, catch_unwind};
+    use core::panic::AssertUnwindSafe;
+    use std::panic::catch_unwind;
 
     use pretty_assertions::assert_eq;
 

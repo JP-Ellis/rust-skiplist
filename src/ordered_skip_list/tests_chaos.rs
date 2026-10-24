@@ -16,7 +16,8 @@
 
 #[cfg(feature = "cursor")]
 use core::ops::Bound;
-use std::panic::{AssertUnwindSafe, catch_unwind};
+use core::panic::AssertUnwindSafe;
+use std::panic::catch_unwind;
 
 use rand::{RngExt as _, SeedableRng as _, rngs::SmallRng};
 

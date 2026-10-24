@@ -888,7 +888,8 @@ mod tests {
     /// `op` on the occupied entry.  `op` must panic with the total-order
     /// message and leave the set intact.
     fn assert_flipped_entry_panics(op: impl FnOnce(FlippingEntry<'_>) -> i32) {
-        use std::panic::{AssertUnwindSafe, catch_unwind};
+        use core::panic::AssertUnwindSafe;
+        use std::panic::catch_unwind;
 
         use crate::test_util::TOTAL_ORDER_PANIC;
 

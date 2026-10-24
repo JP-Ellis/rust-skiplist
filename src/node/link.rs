@@ -131,7 +131,7 @@ impl Error for LinkError {}
 
 #[cfg(test)]
 mod tests {
-    use std::{num::NonZeroUsize, ptr::NonNull};
+    use core::{num::NonZeroUsize, ptr::NonNull};
 
     use anyhow::{Result, anyhow};
     use pretty_assertions::{assert_eq, assert_matches};

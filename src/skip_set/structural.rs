@@ -638,7 +638,8 @@ mod tests {
 
     #[test]
     fn split_off_chaos_is_well_formed() {
-        use std::panic::{AssertUnwindSafe, catch_unwind};
+        use core::panic::AssertUnwindSafe;
+        use std::panic::catch_unwind;
 
         use crate::test_util::{Chaos, assert_contract_panic, seeded_geometric, seeds};
 

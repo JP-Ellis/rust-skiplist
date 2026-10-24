@@ -31,12 +31,11 @@
 )]
 #![expect(clippy::indexing_slicing, reason = "Simplifying bench code")]
 
-use std::{
-    cell::Cell,
-    collections::{BTreeMap, HashMap},
-    hint::black_box,
-    time::Duration,
-};
+extern crate alloc;
+
+use alloc::collections::BTreeMap;
+use core::{cell::Cell, hint::black_box, time::Duration};
+use std::collections::HashMap;
 
 use criterion::{
     AxisScale, BatchSize, BenchmarkId, Criterion, PlotConfiguration, Throughput, criterion_group,
