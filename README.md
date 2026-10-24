@@ -93,6 +93,26 @@ assert_eq!(cur.peek_next(), Some(&5)); // smallest element >= 5
 >
 > The cursor API is modelled on the `BTreeMap` cursor design tracked in [rust-lang/rust#107540](https://github.com/rust-lang/rust/issues/107540), which has not yet been stabilised in the standard library. This implementation is likewise **unstable**: the API may change in a future minor release. See the [cursor documentation on docs.rs](https://docs.rs/skiplist/latest/skiplist/docs/cursor/index.html) for the full guide.
 
+### no_std
+
+The crate is `no_std` and needs `alloc`. Disable the default features to drop `std`, and optionally enable `getrandom` to seed from the operating system:
+
+```toml
+[dependencies]
+skiplist = { version = "1", default-features = false, features = ["getrandom"] }
+```
+
+Without `std` or `getrandom` there is no entropy source, so pass a seed yourself:
+
+```rust
+use skiplist::{SkipList, level_generator::geometric::Geometric};
+
+let generator = Geometric::new_with_seed(16, 0.5, 42).unwrap();
+let mut list: SkipList<i32> = SkipList::with_level_generator(generator);
+```
+
+See the [no_std documentation on docs.rs](https://docs.rs/skiplist/latest/skiplist/docs/no_std/index.html) for the constructor availability table and the reasons there is no fallback seed.
+
 ## Basic usage
 
 ```rust
