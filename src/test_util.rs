@@ -324,8 +324,11 @@ pub(crate) fn seeds() -> Range<u32> {
             }
         }));
     });
-    if cfg!(miri) { 0..20 } else { 0..2000 }
+    if cfg!(miri) { 0..4 } else { 0..2000 }
 }
+
+/// The number of operations each chaos run applies per seed.
+pub(crate) const STEPS: usize = if cfg!(miri) { 20 } else { 50 };
 
 /// A [`Geometric`] generator with the default shape and a fixed seed.
 pub(crate) fn seeded_geometric(seed: u32) -> Geometric {

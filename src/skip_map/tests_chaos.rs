@@ -21,8 +21,8 @@ use crate::{
     comparator::{Comparator, ComparatorKey, OrdComparator},
     skip_map::{Entry, OccupiedEntry},
     test_util::{
-        Chaos, ChaosOrd, Elem, FixedLevels, Rps, SeededLevels, assert_contract_panic, check_step,
-        seed_chaos_ord, seeded_geometric, seeds,
+        Chaos, ChaosOrd, Elem, FixedLevels, Rps, STEPS, SeededLevels, assert_contract_panic,
+        check_step, seed_chaos_ord, seeded_geometric, seeds,
     },
 };
 
@@ -153,7 +153,7 @@ fn chaos_comparator_n4() {
     for seed in seeds() {
         let map: SkipMap<u8, u8, 4, Chaos, FixedLevels> =
             SkipMap::with_comparator_and_level_generator(Chaos::new(seed), FixedLevels::new(seed));
-        run(map, seed, 50);
+        run(map, seed, STEPS);
     }
 }
 
@@ -162,7 +162,7 @@ fn chaos_comparator_n16() {
     for seed in seeds() {
         let map: SkipMap<u8, u8, 16, Chaos, Geometric> =
             SkipMap::with_comparator_and_level_generator(Chaos::new(seed), seeded_geometric(seed));
-        run(map, seed, 50);
+        run(map, seed, STEPS);
     }
 }
 
@@ -172,7 +172,7 @@ fn chaos_ord() {
         seed_chaos_ord(seed);
         let map: SkipMap<ChaosOrd, u8, 16, OrdComparator, Geometric> =
             SkipMap::with_level_generator(seeded_geometric(seed));
-        run(map, seed, 50);
+        run(map, seed, STEPS);
     }
 }
 
@@ -181,6 +181,6 @@ fn rps_ord() {
     for seed in seeds() {
         let map: SkipMap<Rps, u8, 16, OrdComparator, Geometric> =
             SkipMap::with_level_generator(seeded_geometric(seed));
-        run(map, seed, 50);
+        run(map, seed, STEPS);
     }
 }
