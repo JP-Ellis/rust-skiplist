@@ -24,7 +24,14 @@
 //!
 //! # Method Summary
 //!
-//! **Constructors:** `new`, `with_capacity`, `with_capacity_and_seed`,
+#![cfg_attr(
+    any(feature = "std", feature = "getrandom"),
+    doc = "**Constructors:** [`new`], [`with_capacity`], [`with_capacity_and_seed`],"
+)]
+#![cfg_attr(
+    not(any(feature = "std", feature = "getrandom")),
+    doc = "**Constructors:** [`with_capacity_and_seed`],"
+)]
 //!   [`with_level_generator`],
 //!   [`with_comparator_and_level_generator`][SkipList::with_level_generator].
 //!
@@ -67,6 +74,15 @@
 //!
 //! [`OrderedSkipList`]: crate::OrderedSkipList
 //! [`with_level_generator`]: SkipList::with_level_generator
+#![cfg_attr(
+    any(feature = "std", feature = "getrandom"),
+    doc = "[`new`]: SkipList::new"
+)]
+#![cfg_attr(
+    any(feature = "std", feature = "getrandom"),
+    doc = "[`with_capacity`]: SkipList::with_capacity"
+)]
+//! [`with_capacity_and_seed`]: SkipList::with_capacity_and_seed
 //! [`get`]: SkipList::get
 //! [`get_mut`]: SkipList::get_mut
 //! [`front`]: SkipList::front
@@ -201,7 +217,8 @@ impl<T, const N: usize> SkipList<T, N, Geometric> {
     ///
     /// # Panics
     ///
-    /// Panics if the `getrandom` entropy source fails.
+    /// Panics if the entropy source fails: `rand::rng()` under `std`, or the
+    /// operating system source under `getrandom` alone.
     #[cfg(any(feature = "std", feature = "getrandom"))]
     #[inline]
     #[must_use]
@@ -214,8 +231,8 @@ impl<T, const N: usize> SkipList<T, N, Geometric> {
     ///
     /// The level generator is initialised so that skip links are tuned for
     /// `capacity` elements, giving good average-case performance without
-    /// unnecessary levels.  The level count is clamped to `N` so the node
-    /// links array is never overrun.
+    /// unnecessary levels.  The level count is clamped to `N` and to
+    /// [`Geometric::MAX_TOTAL`] so the node links array is never overrun.
     ///
     /// See [`crate::docs::concepts`] for the level-selection formula and
     /// guidance on choosing `N`.
@@ -236,7 +253,9 @@ impl<T, const N: usize> SkipList<T, N, Geometric> {
     ///
     /// # Panics
     ///
-    /// Panics if the `getrandom` entropy source fails.
+    /// Panics if `N` is 0, because a skip list needs at least one level.
+    /// Also panics if the entropy source fails: `rand::rng()` under `std`, or
+    /// the operating system source under `getrandom` alone.
     #[cfg(any(feature = "std", feature = "getrandom"))]
     #[inline]
     #[must_use]
@@ -244,10 +263,11 @@ impl<T, const N: usize> SkipList<T, N, Geometric> {
         let levels = Self::capacity_levels(capacity);
         #[expect(
             clippy::expect_used,
-            reason = "the parameters are valid; only the getrandom entropy source can fail"
+            reason = "`DEFAULT_P` is valid and `N = 0` is documented to panic; otherwise \
+                      only the entropy source can fail"
         )]
         let generator = Geometric::new(levels, DEFAULT_P)
-            .expect("`capacity_levels` and `DEFAULT_P` are valid Geometric parameters");
+            .expect("`N` must be at least 1 and the entropy source must be available");
         Self::with_level_generator(generator)
     }
 
@@ -255,9 +275,21 @@ impl<T, const N: usize> SkipList<T, N, Geometric> {
     /// elements, with a fixed seed for the level generator.
     ///
     /// Tower heights are drawn from the same distribution as
-    /// [`SkipList::with_capacity`], but the generator is seeded from `seed`
-    /// rather than an entropy source. Use this when no entropy source is
-    /// available, such as on `no_std` targets without the `getrandom` feature.
+    #[cfg_attr(
+        any(feature = "std", feature = "getrandom"),
+        doc = "[`SkipList::with_capacity`],"
+    )]
+    #[cfg_attr(
+        not(any(feature = "std", feature = "getrandom")),
+        doc = "`SkipList::with_capacity`,"
+    )]
+    /// but the generator is seeded from `seed` instead of an entropy source.
+    /// Use this when no entropy source is available, such as on `no_std`
+    /// targets without the `getrandom` feature.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `N` is 0, because a skip list needs at least one level.
     ///
     /// # Examples
     ///
@@ -269,17 +301,14 @@ impl<T, const N: usize> SkipList<T, N, Geometric> {
     /// ```
     #[inline]
     #[must_use]
-    #[expect(
-        clippy::missing_panics_doc,
-        reason = "the internal expect cannot fail: the parameters are valid and seeding needs no entropy"
-    )]
     pub fn with_capacity_and_seed(capacity: usize, seed: u64) -> Self {
         #[expect(
             clippy::expect_used,
-            reason = "the parameters are valid and seeding needs no entropy"
+            reason = "N = 0 is documented to panic; the other parameters are valid and \
+                      seeding needs no entropy"
         )]
         let generator = Geometric::new_with_seed(Self::capacity_levels(capacity), DEFAULT_P, seed)
-            .expect("`capacity_levels` and `DEFAULT_P` are valid Geometric parameters");
+            .expect("`N` must be at least 1");
         Self::with_level_generator(generator)
     }
 
@@ -534,6 +563,12 @@ mod tests {
         let list = SkipList::<String>::with_level_generator(g);
         assert!(list.is_empty());
         assert_eq!(list.len(), 0);
+    }
+
+    #[test]
+    #[should_panic(expected = "`N` must be at least 1")]
+    fn with_capacity_and_seed_zero_levels_panics() {
+        let _list = SkipList::<i32, 0>::with_capacity_and_seed(10, 1);
     }
 
     #[test]
