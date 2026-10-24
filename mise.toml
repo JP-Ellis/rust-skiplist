@@ -48,7 +48,7 @@ rumdl = "v0.3.0"
 
   [tasks."test:docs"]
   description = "Run documentation tests"
-  run = "cargo test --doc"
+  run = "cargo test --doc --features docs"
 
   [tasks."test:benches"]
   description = "Compile and smoke-test benchmarks"
