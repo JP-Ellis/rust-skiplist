@@ -1,6 +1,7 @@
 //! List-restructuring methods for [`SkipList`](super::SkipList):
 //! `clear`, `truncate`, `split_off`, and `append`.
 
+use alloc::boxed::Box;
 use core::ptr::NonNull;
 
 use crate::{
@@ -332,8 +333,8 @@ impl<T, G: LevelGenerator, const N: usize> SkipList<T, N, G> {
     /// Elements are appended in the order they appear in `other`.
     ///
     /// When both lists share the same maximum level count (which is always the
-    /// case for lists created with [`new`](SkipList::new) or
-    /// [`with_capacity`](SkipList::with_capacity)), the operation runs in
+    /// case for lists created with `new` or
+    /// `with_capacity`), the operation runs in
     /// `$O(\log n)$` time. When the maximum level counts differ, the operation
     /// falls back to `$O(k \log(n+k))$` via repeated
     /// [`push_back`](SkipList::push_back) calls.

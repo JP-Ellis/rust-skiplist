@@ -2,6 +2,7 @@
 
 #![expect(clippy::float_arithmetic, reason = "computing probabilities")]
 
+use alloc::vec::Vec;
 use core::{error::Error, fmt};
 
 use rand::prelude::*;
@@ -22,6 +23,8 @@ pub enum GeometricError {
     MaxTooLarge,
     /// The probability `$q$` must be in the range `$(0, 1)$`.
     InvalidProbability,
+    /// The platform entropy source failed while seeding the generator.
+    Entropy,
 }
 
 impl fmt::Display for GeometricError {
@@ -31,6 +34,7 @@ impl fmt::Display for GeometricError {
             Self::ZeroMax => write!(f, "max must be non-zero."),
             Self::MaxTooLarge => write!(f, "max must be at most 64."),
             Self::InvalidProbability => write!(f, "q must be in (0, 1)."),
+            Self::Entropy => write!(f, "failed to obtain entropy."),
         }
     }
 }
@@ -60,9 +64,10 @@ enum Sampler {
 /// Also note that for very large values of `$q$`, the assumption that `$P(k +
 /// 1|k) = q$` breaks down due to the truncation at `total`.
 ///
-/// Use [`Geometric::new`] to configure the number of levels and the promotion
-/// probability, or [`Geometric::default`] for the standard 16-level, `$q =
-/// 0.5$` configuration.
+/// Use `Geometric::new` to configure the number of levels and the promotion
+/// probability, or `Geometric::default` for the standard 16-level, `$q =
+/// 0.5$` configuration. Both need the `std` or `getrandom` feature;
+/// `Geometric::new_with_seed` does not.
 ///
 /// When `q` is exactly `0.5` (the default), levels are sampled by bit position.
 /// For any other `q`, the cumulative distribution is tabulated once at
@@ -153,7 +158,12 @@ impl Geometric {
     /// # Errors
     ///
     /// Returns a [`GeometricError`] if `total` is zero, if `total` is too
-    /// large, or if `q` is not in the open interval `$(0, 1)$`.
+    /// large, or if `q` is not in the open interval `$(0, 1)$`. Without the
+    /// `std` feature, returns [`GeometricError::Entropy`] if the operating
+    /// system entropy source fails.
+    ///
+    /// Available with the `std` or `getrandom` feature. Without either, use
+    /// [`Geometric::new_with_seed`].
     ///
     /// # Examples
     ///
@@ -172,16 +182,23 @@ impl Geometric {
     /// assert_eq!(Geometric::new(16, 0.0).unwrap_err(), GeometricError::InvalidProbability);
     /// assert_eq!(Geometric::new(16, 1.0).unwrap_err(), GeometricError::InvalidProbability);
     /// ```
+    #[cfg(any(feature = "std", feature = "getrandom"))]
     #[inline]
     pub fn new(total: usize, q: f64) -> Result<Self, GeometricError> {
-        Self::from_rng(total, q, SmallRng::from_rng(&mut rand::rng()))
+        #[cfg(feature = "std")]
+        let rng = SmallRng::from_rng(&mut rand::rng());
+        #[cfg(not(feature = "std"))]
+        let rng = SmallRng::try_from_rng(&mut rand::rngs::SysRng)
+            .map_err(|_error| GeometricError::Entropy)?;
+        Self::from_rng(total, q, rng)
     }
 
     /// Creates a new geometric level generator with a fixed seed for
     /// reproducible output.
     ///
-    /// Identical to [`Geometric::new`] except the internal RNG is seeded from
-    /// `seed` instead of the thread-local RNG. Useful for deterministic tests.
+    /// Identical to `Geometric::new` except the internal RNG is seeded from
+    /// `seed` instead of an entropy source. Useful for deterministic tests and
+    /// for `no_std` targets without the `std` or `getrandom` feature.
     ///
     /// # Errors
     ///
@@ -234,12 +251,18 @@ impl Geometric {
     }
 }
 
+#[cfg(any(feature = "std", feature = "getrandom"))]
 impl Default for Geometric {
     /// Creates a `Geometric` level generator with 16 levels and `q = 0.5`.
     ///
     /// These defaults match the standard skip list configuration and provide a
     /// good balance between memory usage and search performance for most use
     /// cases.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the operating system entropy source fails, which can only
+    /// happen in builds with `getrandom` but without `std`.
     ///
     /// # Examples
     ///
@@ -258,7 +281,7 @@ impl Default for Geometric {
                       validity is guaranteed by the Geometric invariants"
         )]
         Geometric::new(16, 0.5)
-            .expect("16 levels and q = 0.5 are always valid Geometric parameters")
+            .expect("16 levels and q = 0.5 are valid, and the entropy source must be available")
     }
 }
 

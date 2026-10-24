@@ -71,7 +71,7 @@ impl<K: fmt::Debug, V> fmt::Display for UnorderedKeyError<K, V> {
     }
 }
 
-impl<K: fmt::Debug, V: fmt::Debug> std::error::Error for UnorderedKeyError<K, V> {}
+impl<K: fmt::Debug, V: fmt::Debug> core::error::Error for UnorderedKeyError<K, V> {}
 
 // MARK: Internal gap-finding helper
 

@@ -2,6 +2,7 @@
 //! `Debug`, `Clone`, `PartialEq`, `Eq`, `PartialOrd`, `Ord`, `Hash`,
 //! `Extend`, `FromIterator`.
 
+use alloc::vec::Vec;
 use core::{
     cmp::Ordering,
     fmt,

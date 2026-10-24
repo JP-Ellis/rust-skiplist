@@ -2,7 +2,7 @@
 //!
 //! [`SkipList`] is a general-purpose sequence that stores elements in
 //! **insertion order** and provides `$O(\log n)$` insert, remove, and indexed
-//! access by position.  It is a useful alternative to [`Vec`] when elements are
+//! access by position.  It is a useful alternative to [`Vec`](alloc::vec::Vec) when elements are
 //! frequently inserted or removed anywhere in the sequence, and to a plain
 //! linked list when `$O(\log n)$` random access by index is needed.
 //!
@@ -24,7 +24,7 @@
 //!
 //! # Method Summary
 //!
-//! **Constructors:** [`new`], [`with_capacity`], [`with_level_generator`],
+//! **Constructors:** `new`, `with_capacity`, [`with_level_generator`],
 //!   [`with_comparator_and_level_generator`][SkipList::with_level_generator].
 //!
 //! **Access:** [`get`], [`get_mut`], [`front`], [`back`], [`front_mut`],
@@ -65,8 +65,6 @@
 //! ```
 //!
 //! [`OrderedSkipList`]: crate::OrderedSkipList
-//! [`new`]: SkipList::new
-//! [`with_capacity`]: SkipList::with_capacity
 //! [`with_level_generator`]: SkipList::with_level_generator
 //! [`get`]: SkipList::get
 //! [`get_mut`]: SkipList::get_mut
@@ -99,6 +97,7 @@
     reason = "re-exporting public types from private submodules"
 )]
 
+use alloc::boxed::Box;
 use core::ptr::NonNull;
 
 use crate::{
@@ -119,14 +118,15 @@ mod traits;
 
 pub use iter::{Drain, ExtractIf, IntoIter, Iter, IterMut};
 
-/// Default promotion probability used by [`SkipList::new`] and
-/// [`SkipList::with_capacity`].
+/// Default promotion probability used by `SkipList::new` and
+/// `SkipList::with_capacity`.
+#[cfg(any(feature = "std", feature = "getrandom"))]
 const DEFAULT_P: f64 = 0.5;
 
 /// An index-based skip list.
 ///
 /// `SkipList<T, N, G>` stores elements in insertion order and provides `$O(\log
-/// n)$` insert, remove, and indexed access.  Unlike [`Vec`], inserting or
+/// n)$` insert, remove, and indexed access.  Unlike [`Vec`](alloc::vec::Vec), inserting or
 /// removing in the middle does not shift elements; unlike a plain linked list,
 /// arbitrary-index access is `$O(\log n)$` rather than `$O(n)$`.
 ///
@@ -201,7 +201,8 @@ impl<T, const N: usize> SkipList<T, N, Geometric> {
     ///
     /// # Panics
     ///
-    /// Never panics.
+    /// Panics if the `getrandom` entropy source fails.
+    #[cfg(any(feature = "std", feature = "getrandom"))]
     #[inline]
     #[must_use]
     pub fn new() -> Self {
@@ -235,7 +236,8 @@ impl<T, const N: usize> SkipList<T, N, Geometric> {
     ///
     /// # Panics
     ///
-    /// Never panics.
+    /// Panics if the `getrandom` entropy source fails.
+    #[cfg(any(feature = "std", feature = "getrandom"))]
     #[inline]
     #[must_use]
     pub fn with_capacity(capacity: usize) -> Self {
@@ -278,7 +280,7 @@ impl<T, G: LevelGenerator, const N: usize> SkipList<T, N, G> {
     ///
     /// The generator controls the distribution of tower heights assigned to
     /// newly inserted nodes, which affects the time and space trade-offs of
-    /// the skip list.  Use [`SkipList::new`] or [`SkipList::with_capacity`]
+    /// the skip list.  Use `SkipList::new` or `SkipList::with_capacity`
     /// for the common case.
     ///
     /// # Examples
@@ -404,6 +406,7 @@ impl<T, G: LevelGenerator, const N: usize> SkipList<T, N, G> {
 
 // MARK: Default
 
+#[cfg(any(feature = "std", feature = "getrandom"))]
 impl<T, const N: usize> Default for SkipList<T, N, Geometric> {
     #[inline]
     fn default() -> Self {

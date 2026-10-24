@@ -69,7 +69,7 @@ impl<T: fmt::Debug> fmt::Display for UnorderedValueError<T> {
     }
 }
 
-impl<T: fmt::Debug> std::error::Error for UnorderedValueError<T> {}
+impl<T: fmt::Debug> core::error::Error for UnorderedValueError<T> {}
 
 // MARK: Cursor (read-only)
 

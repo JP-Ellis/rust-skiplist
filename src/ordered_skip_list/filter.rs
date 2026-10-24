@@ -84,7 +84,7 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
     /// `later` should be removed. The `later` element may be mutated before
     /// the predicate returns; it is dropped when the predicate returns `true`.
     ///
-    /// This matches the semantics of [`Vec::dedup_by`].
+    /// This matches the semantics of [`Vec::dedup_by`](alloc::vec::Vec::dedup_by).
     ///
     /// Because `OrderedSkipList` keeps elements in sorted order, all
     /// occurrences of equal values are always adjacent, so this method

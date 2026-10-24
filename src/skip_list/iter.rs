@@ -2,6 +2,7 @@
 //! `range`, `range_mut`, `drain`, `extract_if`, all iterator types, and
 //! [`IntoIterator`] implementations.
 
+use alloc::vec::Vec;
 use core::{
     fmt,
     iter::FusedIterator,
@@ -778,7 +779,7 @@ impl<T, G: LevelGenerator, const N: usize> FusedIterator for IntoIter<T, N, G> {
 #[must_use = "iterators are lazy and do nothing unless consumed"]
 pub struct Drain<'a, T> {
     /// The already-removed values in front-to-back order.
-    iter: std::vec::IntoIter<T>,
+    iter: alloc::vec::IntoIter<T>,
     /// Ties the `Drain`'s lifetime to the `&'a mut SkipList` that created it,
     /// preventing the list from being used while this `Drain` is alive.
     _marker: PhantomData<&'a mut T>,

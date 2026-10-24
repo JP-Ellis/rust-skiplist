@@ -34,7 +34,7 @@
 //!
 //! # Method Summary
 //!
-//! **Constructors:** [`new`], [`with_level_generator`], [`with_comparator`],
+//! **Constructors:** `new`, [`with_level_generator`], `with_comparator`,
 //!   [`with_comparator_and_level_generator`].
 //!
 //! **Access:** [`contains`], [`get`], [`get_by_index`], [`first`], [`last`],
@@ -83,9 +83,7 @@
 //!
 //! [`OrderedSkipList`]: crate::OrderedSkipList
 //! [`Comparator<T>`]: crate::comparator::Comparator
-//! [`new`]: SkipSet::new
 //! [`with_level_generator`]: SkipSet::with_level_generator
-//! [`with_comparator`]: SkipSet::with_comparator
 //! [`with_comparator_and_level_generator`]: SkipSet::with_comparator_and_level_generator
 //! [`contains`]: SkipSet::contains
 //! [`get`]: SkipSet::get
@@ -159,14 +157,12 @@ pub use set_ops::{Difference, Intersection, SymmetricDifference, Union};
 ///
 /// | Constructor                                   | `T: Ord`? | Comparator        | Generator       |
 /// |-----------------------------------------------|:---------:|:-----------------:|:---------------:|
-/// | [`new()`]                                     | required  | [`OrdComparator`] | [`Geometric`]   |
+/// | `new()`                                       | required  | [`OrdComparator`] | [`Geometric`]   |
 /// | [`with_level_generator(g)`]                   | required  | [`OrdComparator`] | `g`             |
-/// | [`with_comparator(c)`]                        | not req.  | `c`               | [`Geometric`]   |
+/// | `with_comparator(c)`                          | not req.  | `c`               | [`Geometric`]   |
 /// | [`with_comparator_and_level_generator(c, g)`] | not req.  | `c`               | `g`             |
 ///
-/// [`new()`]: SkipSet::new
 /// [`with_level_generator(g)`]: SkipSet::with_level_generator
-/// [`with_comparator(c)`]: SkipSet::with_comparator
 /// [`with_comparator_and_level_generator(c, g)`]: SkipSet::with_comparator_and_level_generator
 ///
 /// # Examples
@@ -203,6 +199,11 @@ impl<T: Ord, const N: usize> SkipSet<T, N, OrdComparator, Geometric> {
     /// assert!(set.is_empty());
     /// assert_eq!(set.len(), 0);
     /// ```
+    ///
+    /// # Panics
+    ///
+    /// Panics if the `getrandom` entropy source fails.
+    #[cfg(any(feature = "std", feature = "getrandom"))]
     #[inline]
     #[must_use]
     pub fn new() -> Self {
@@ -256,6 +257,11 @@ impl<T, C: Comparator<T>, const N: usize> SkipSet<T, N, C, Geometric> {
     ///     SkipSet::with_comparator(FnComparator(|a: &i32, b: &i32| b.cmp(a)));
     /// assert!(set.is_empty());
     /// ```
+    ///
+    /// # Panics
+    ///
+    /// Panics if the `getrandom` entropy source fails.
+    #[cfg(any(feature = "std", feature = "getrandom"))]
     #[inline]
     #[must_use]
     pub fn with_comparator(comparator: C) -> Self {
@@ -333,6 +339,7 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> SkipSet<T, N, C, G>
 
 // MARK: Default
 
+#[cfg(any(feature = "std", feature = "getrandom"))]
 impl<T: Ord, const N: usize> Default for SkipSet<T, N, OrdComparator, Geometric> {
     #[inline]
     fn default() -> Self {

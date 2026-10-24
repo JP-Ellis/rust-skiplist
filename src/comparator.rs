@@ -74,8 +74,8 @@ pub trait Comparator<T: ?Sized> {
 
 /// A comparator that delegates to the type's [`Ord`] implementation.
 ///
-/// This is the default comparator used by [`OrderedSkipList::new`],
-/// [`SkipSet::new`], and [`SkipMap::new`]. It requires `T: Ord`.
+/// This is the default comparator used by `OrderedSkipList::new`,
+/// `SkipSet::new`, and `SkipMap::new`. It requires `T: Ord`.
 ///
 /// # Examples
 ///
@@ -89,9 +89,6 @@ pub trait Comparator<T: ?Sized> {
 /// assert_eq!(cmp.compare(&5, &4), Ordering::Greater);
 /// ```
 ///
-/// [`OrderedSkipList::new`]: crate::ordered_skip_list::OrderedSkipList::new
-/// [`SkipSet::new`]: crate::skip_set::SkipSet::new
-/// [`SkipMap::new`]: crate::skip_map::SkipMap::new
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct OrdComparator;
