@@ -265,7 +265,7 @@ impl<T, const N: usize> SkipList<T, N, Geometric> {
             clippy::expect_used,
             reason = "`levels` is always >= 1 and DEFAULT_P is a valid probability"
         )]
-        let generator = Geometric::new(levels.min(N), DEFAULT_P)
+        let generator = Geometric::new(levels.min(N).min(Geometric::MAX_TOTAL), DEFAULT_P)
             .expect("`levels >= 1` and `DEFAULT_P` are valid Geometric parameters");
         Self::with_level_generator(generator)
     }
