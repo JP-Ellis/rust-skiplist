@@ -7,6 +7,104 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 <!-- markdownlint-disable -->
 
+## [2.0.0](https://github.com/JP-Ellis/rust-skiplist/compare/v1.3.4...v2.0.0) - _2026-10-24_
+
+### ⚠️ Breaking Changes
+
+#### `extract_if` takes a range on `OrderedSkipList` and `SkipMap`
+
+`OrderedSkipList::extract_if` and `SkipMap::extract_if` now take a range as their first argument, matching `SkipSet::extract_if`. The predicate sees only elements (or keys) inside the range, and iteration stops at the upper bound.
+
+Calls written as `extract_if(pred)` no longer compile. Pass `..` to keep the 1.x behaviour of visiting every element:
+
+```rust
+// 1.x
+let evens: Vec<_> = list.extract_if(|x| *x % 2 == 0).collect();
+
+// 2.0
+let evens: Vec<_> = list.extract_if(.., |x| *x % 2 == 0).collect();
+```
+
+A narrower range skips the elements outside it without calling the predicate on them. Code that names the `ExtractIf` iterator type must add the range type `R`, which sits between `G` and `F`.
+
+#### `std` is now a default feature
+
+The crate is now `no_std` and requires `alloc`. The new `std` feature is on by default and seeds level generators from `rand::rng()`. Projects that use the default features see no change.
+
+Projects that set `default-features = false` lose every constructor that seeds a `Geometric` from entropy:
+
+-   `Geometric::new` and `impl Default for Geometric`
+-   `new`, `with_capacity` and `with_comparator` on the collections
+-   `Default`, `FromIterator` and `From<Vec<T>>` / `From<[T; M]>` for the default generator
+-   The `SkipSet` operators `|`, `&`, `-` and `^`
+
+Pick one of the following to migrate:
+
+-   Add `features = ["std"]` to restore the 1.x behaviour.
+-   Add `features = ["getrandom"]` to seed from the operating system without `std`. In this configuration `Geometric::new` returns `GeometricError::Entropy` when the operating system source fails, and `new()` and `Default` panic. On `wasm32-unknown-unknown`, also enable the `wasm_js` feature of `getrandom` in your own `Cargo.toml`.
+-   Seed explicitly with `Geometric::new_with_seed` and pass the generator to `with_level_generator` or `with_comparator_and_level_generator`. `SkipList::with_capacity_and_seed` replaces `SkipList::with_capacity`.
+
+The [`no_std` guide](https://docs.rs/skiplist/2.0.0/skiplist/docs/no_std/index.html) lists the replacement for each constructor.
+
+#### `Geometric` caps `total` at 64
+
+`Geometric::new` and `Geometric::new_with_seed` reject a `total` above `Geometric::MAX_TOTAL` (64) with `GeometricError::MaxTooLarge`. In 1.x the limit was `i32::MAX`. At `q = 0.5`, 64 levels already serve about 2^64 elements, so lowering a larger `total` to 64 loses nothing. `SkipList::with_capacity` clamps its derived level count to 64 and never hits this error.
+
+The `Display` text of `MaxTooLarge` now reads `max must be at most 64.`
+
+### 🚀 Features
+
+-   _(skip_list)_ Add with_capacity_and_seed
+
+-   [**breaking**] Support no_std with alloc
+
+-   _(geometric)_ [**breaking**] Sample from a CDF table
+
+-   _(ordered_skip_list)_ [**breaking**] Take a range in extract_if
+
+-   _(skip_map)_ [**breaking**] Take a range in extract_if
+
+### 🐛 Bug Fixes
+
+-   _(skip_list)_ Document and restore ctor links
+
+-   _(geometric)_ Validate before seeding
+
+### 🚜 Refactor
+
+-   Prefer core and alloc over std
+
+-   _(geometric)_ Store CDF in Sampler::Table
+
+### 📚 Documentation
+
+-   Link gated items to the features section
+
+-   Restore gated constructor links
+
+-   Correct std feature and level clamp
+
+-   Document no_std support
+
+### 🧪 Testing
+
+-   Exercise constructors without entropy
+
+### ⚙️ Miscellaneous Tasks
+
+-   _(ci)_ Check doc links in every feature set
+
+-   _(ci)_ Group additive features in powerset
+
+-   _(ci)_ Lint every library feature set
+
+-   _(ci)_ Run doc-page examples
+
+-   _(ci)_ Build no_std with all features
+
+-   _(ci)_ Build for no_std targets
+
+
 ## [1.3.4](https://github.com/JP-Ellis/rust-skiplist/compare/v1.3.3...v1.3.4) - _2026-10-24_
 
 ### 🚜 Refactor

@@ -17,15 +17,15 @@ The `std` feature enables `rand/thread_rng`. The `getrandom` feature enables `ra
 ```toml
 # std (default)
 [dependencies]
-skiplist = "1"
+skiplist = "2"
 
 # no_std with operating-system entropy
 [dependencies]
-skiplist = { version = "1", default-features = false, features = ["getrandom"] }
+skiplist = { version = "2", default-features = false, features = ["getrandom"] }
 
 # no_std without entropy
 [dependencies]
-skiplist = { version = "1", default-features = false }
+skiplist = { version = "2", default-features = false }
 ```
 
 ## What Each Configuration Provides
