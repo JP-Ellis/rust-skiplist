@@ -3,6 +3,12 @@
 [settings]
 experimental = true
 
+[vars]
+# Feature sets for every cargo-hack run. `default` only enables `std`, so it is
+# excluded. `cursor`, `docs` and `partial-ord` are additive and independent, so
+# they are tested together, either all on or all off.
+powerset = "--feature-powerset --exclude-features default --group-features cursor,docs,partial-ord"
+
 [env]
 # rustdoc requires absolute paths for these flags; {{config_root}} expands to
 # the repository root, so this works both locally and in CI.
@@ -31,8 +37,8 @@ rumdl = "v0.3.0"
   # The library builds in every feature set. Tests, benches and examples need
   # `std` or `getrandom` to construct generators, so only those sets lint them.
   run = [
-    "cargo hack --feature-powerset clippy --lib",
-    "cargo hack --feature-powerset --at-least-one-of std,getrandom clippy --all-targets",
+    "cargo hack {{vars.powerset}} clippy --lib",
+    "cargo hack {{vars.powerset}} --at-least-one-of std,getrandom clippy --all-targets",
   ]
 
   [tasks.format]
@@ -45,7 +51,7 @@ rumdl = "v0.3.0"
 
   [tasks.test]
   description = "Run unit tests across all feature combinations"
-  run = "cargo hack --feature-powerset --at-least-one-of std,getrandom nextest run"
+  run = "cargo hack {{vars.powerset}} --at-least-one-of std,getrandom nextest run"
 
   [tasks."test:docs"]
   description = "Run documentation tests"
@@ -125,7 +131,7 @@ rumdl = "v0.3.0"
 
   [tasks.msrv]
   description = "Verify the declared MSRV compiles the library"
-  run = "cargo +1.98 hack --feature-powerset check"
+  run = "cargo +1.98 hack {{vars.powerset}} check"
 
   [tasks."no-std"]
   description = "Build the library for no_std targets and test it without entropy"
