@@ -34,7 +34,14 @@
 //!
 //! # Method Summary
 //!
-//! **Constructors:** `new`, [`with_level_generator`], `with_comparator`,
+#![cfg_attr(
+    any(feature = "std", feature = "getrandom"),
+    doc = "**Constructors:** [`new`], [`with_level_generator`], [`with_comparator`],"
+)]
+#![cfg_attr(
+    not(any(feature = "std", feature = "getrandom")),
+    doc = "**Constructors:** [`with_level_generator`],"
+)]
 //!   [`with_comparator_and_level_generator`].
 //!
 //! **Access:** [`contains`], [`get`], [`get_by_index`], [`first`], [`last`],
@@ -84,6 +91,14 @@
 //! [`OrderedSkipList`]: crate::OrderedSkipList
 //! [`Comparator<T>`]: crate::comparator::Comparator
 //! [`with_level_generator`]: SkipSet::with_level_generator
+#![cfg_attr(
+    any(feature = "std", feature = "getrandom"),
+    doc = "[`new`]: SkipSet::new"
+)]
+#![cfg_attr(
+    any(feature = "std", feature = "getrandom"),
+    doc = "[`with_comparator`]: SkipSet::with_comparator"
+)]
 //! [`with_comparator_and_level_generator`]: SkipSet::with_comparator_and_level_generator
 //! [`contains`]: SkipSet::contains
 //! [`get`]: SkipSet::get
@@ -202,7 +217,8 @@ impl<T: Ord, const N: usize> SkipSet<T, N, OrdComparator, Geometric> {
     ///
     /// # Panics
     ///
-    /// Panics if the `getrandom` entropy source fails.
+    /// Panics if the entropy source fails: `rand::rng()` under `std`, or the
+    /// operating system source under `getrandom` alone.
     #[cfg(any(feature = "std", feature = "getrandom"))]
     #[inline]
     #[must_use]
@@ -260,7 +276,8 @@ impl<T, C: Comparator<T>, const N: usize> SkipSet<T, N, C, Geometric> {
     ///
     /// # Panics
     ///
-    /// Panics if the `getrandom` entropy source fails.
+    /// Panics if the entropy source fails: `rand::rng()` under `std`, or the
+    /// operating system source under `getrandom` alone.
     #[cfg(any(feature = "std", feature = "getrandom"))]
     #[inline]
     #[must_use]

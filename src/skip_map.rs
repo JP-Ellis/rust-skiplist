@@ -34,7 +34,14 @@
 //!
 //! # Method Summary
 //!
-//! **Constructors:** `new`, [`with_level_generator`], `with_comparator`,
+#![cfg_attr(
+    any(feature = "std", feature = "getrandom"),
+    doc = "**Constructors:** [`new`], [`with_level_generator`], [`with_comparator`],"
+)]
+#![cfg_attr(
+    not(any(feature = "std", feature = "getrandom")),
+    doc = "**Constructors:** [`with_level_generator`],"
+)]
 //!   [`with_comparator_and_level_generator`].
 //!
 //! **Access:** [`get`], [`get_mut`], [`get_key_value`], [`get_by_index`],
@@ -78,6 +85,14 @@
 //! [`Comparator<K>`]: crate::comparator::Comparator
 //! [`BTreeMap`]: alloc::collections::BTreeMap
 //! [`with_level_generator`]: SkipMap::with_level_generator
+#![cfg_attr(
+    any(feature = "std", feature = "getrandom"),
+    doc = "[`new`]: SkipMap::new"
+)]
+#![cfg_attr(
+    any(feature = "std", feature = "getrandom"),
+    doc = "[`with_comparator`]: SkipMap::with_comparator"
+)]
 //! [`with_comparator_and_level_generator`]: SkipMap::with_comparator_and_level_generator
 //! [`get`]: SkipMap::get
 //! [`get_mut`]: SkipMap::get_mut
@@ -238,7 +253,8 @@ impl<K: Ord, V, const N: usize> SkipMap<K, V, N, OrdComparator, Geometric> {
     ///
     /// # Panics
     ///
-    /// Panics if the `getrandom` entropy source fails.
+    /// Panics if the entropy source fails: `rand::rng()` under `std`, or the
+    /// operating system source under `getrandom` alone.
     #[cfg(any(feature = "std", feature = "getrandom"))]
     #[inline]
     #[must_use]
@@ -296,7 +312,8 @@ impl<K, V, C: Comparator<K>, const N: usize> SkipMap<K, V, N, C, Geometric> {
     ///
     /// # Panics
     ///
-    /// Panics if the `getrandom` entropy source fails.
+    /// Panics if the entropy source fails: `rand::rng()` under `std`, or the
+    /// operating system source under `getrandom` alone.
     #[cfg(any(feature = "std", feature = "getrandom"))]
     #[inline]
     #[must_use]
