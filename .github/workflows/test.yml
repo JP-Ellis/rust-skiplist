@@ -42,6 +42,7 @@ jobs:
       - miri
       - coverage
       - msrv
+      - no-std
     runs-on: ubuntu-latest
 
     steps:
@@ -317,6 +318,31 @@ jobs:
 
       - name: Verify MSRV
         run: mise run msrv
+
+  no-std:
+    name: no_std
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+
+      - name: Install mise tools
+        uses: jdx/mise-action@8418fedb1110381a0d3ba51a7a415d7c1b884550  # v5.2.2
+        timeout-minutes: 10
+        with:
+          cache_save: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Install Rust
+        uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f  # v2.0.0
+        with:
+          cache-save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Install no_std targets
+        run: rustup target add thumbv6m-none-eabi wasm32-unknown-unknown
+
+      - name: Build for no_std targets
+        run: mise run no-std
 
   coverage:
     name: Coverage
