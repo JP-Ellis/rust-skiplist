@@ -95,7 +95,7 @@ use skiplist::SkipList;
 let mut list = SkipList::<i32>::with_capacity(10_000);
 ```
 
-If `capacity` implies more levels than `N` allows, the level count is clamped to `N`; the list remains correct but the skip links will be denser at the top than ideal.
+If `capacity` implies more levels than `N` allows, the level count is clamped to `N` and to 64 (`Geometric::MAX_TOTAL`); the list remains correct but the skip links will be denser at the top than ideal.
 
 The formula used is `levels = 1 + ceil(log2(capacity))`, derived from the condition that the expected number of nodes at the topmost level equals ~1 when the list holds `capacity` elements.
 
