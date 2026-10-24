@@ -245,6 +245,9 @@ jobs:
       - name: Test documentation examples
         run: mise run test:docs
 
+      - name: Check documentation links
+        run: mise run lint:docs
+
   examples:
     name: Examples
     runs-on: ubuntu-latest

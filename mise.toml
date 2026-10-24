@@ -57,6 +57,12 @@ rumdl = "v0.3.0"
   description = "Run documentation tests"
   run = "cargo test --doc --features docs"
 
+  [tasks."lint:docs"]
+  description = "Build rustdoc in every feature set to catch broken links"
+  # The `docs` pages depend on combinations of `docs`, `cursor` and
+  # `partial-ord`, so the additive features are not grouped here.
+  run = "cargo hack --feature-powerset --exclude-features default doc --no-deps"
+
   [tasks."test:benches"]
   description = "Compile and smoke-test benchmarks"
   run = "cargo test --benches '/'"
@@ -155,6 +161,7 @@ rumdl = "v0.3.0"
     { task = "lint" },
     { task = "test" },
     { task = "test:docs" },
+    { task = "lint:docs" },
     { task = "test:benches" },
     { task = "examples" },
     { task = "msrv" },
