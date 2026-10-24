@@ -75,7 +75,9 @@ enum Sampler {
 /// table. Neither path calls `powi` or `log`, so no `libm` is needed.
 ///
 /// The number of levels is capped at [`Geometric::MAX_TOTAL`] (64), which keeps
-/// the table small and matches the width of the bit sampler's random word.
+/// the table small. The bit sampler draws heights `0..=63` from the 64 bits of
+/// its random word, so at `total = 64` it never draws height 64, whose
+/// probability is about `2^-65`.
 ///
 /// # Examples
 ///

@@ -35,7 +35,14 @@
 //!   allow callers to change a value without reinserting it, silently
 //!   invalidating the sort order.  To update a value, remove it and reinsert
 //!   the new value.
-//! - **No `with_capacity`.**  Use `SkipList::with_capacity` if you need
+#![cfg_attr(
+    any(feature = "std", feature = "getrandom"),
+    doc = "- **No `with_capacity`.**  Use [`SkipList::with_capacity`] if you need"
+)]
+#![cfg_attr(
+    not(any(feature = "std", feature = "getrandom")),
+    doc = "- **No `with_capacity`.**  Use `SkipList::with_capacity` if you need"
+)]
 //!   capacity pre-configuration and do not require sorted order.
 //!
 //! # Method Summary
@@ -96,6 +103,10 @@
 //! [`SkipList`]: crate::skip_list::SkipList
 //! [`Comparator<T>`]: crate::comparator::Comparator
 //! [`with_level_generator`]: OrderedSkipList::with_level_generator
+#![cfg_attr(
+    any(feature = "std", feature = "getrandom"),
+    doc = "[`SkipList::with_capacity`]: crate::skip_list::SkipList::with_capacity"
+)]
 #![cfg_attr(
     any(feature = "std", feature = "getrandom"),
     doc = "[`new`]: OrderedSkipList::new"
@@ -185,13 +196,35 @@ mod traits;
 ///
 /// | Constructor                                   | `T: Ord`? | Comparator        | Generator       |
 /// |-----------------------------------------------|:---------:|:-----------------:|:---------------:|
-/// | `new()`                                       | required  | [`OrdComparator`] | [`Geometric`]   |
+#[cfg_attr(
+    any(feature = "std", feature = "getrandom"),
+    doc = "| [`new()`]                                     | required  | [`OrdComparator`] | [`Geometric`]   |"
+)]
+#[cfg_attr(
+    not(any(feature = "std", feature = "getrandom")),
+    doc = "| `new()`                                       | required  | [`OrdComparator`] | [`Geometric`]   |"
+)]
 /// | [`with_level_generator(g)`]                   | required  | [`OrdComparator`] | `g`             |
-/// | `with_comparator(c)`                          | not req.  | `c`               | [`Geometric`]   |
+#[cfg_attr(
+    any(feature = "std", feature = "getrandom"),
+    doc = "| [`with_comparator(c)`]                        | not req.  | `c`               | [`Geometric`]   |"
+)]
+#[cfg_attr(
+    not(any(feature = "std", feature = "getrandom")),
+    doc = "| `with_comparator(c)`                          | not req.  | `c`               | [`Geometric`]   |"
+)]
 /// | [`with_comparator_and_level_generator(c, g)`] | not req.  | `c`               | `g`             |
 ///
 /// [`with_level_generator(g)`]: OrderedSkipList::with_level_generator
 /// [`with_comparator_and_level_generator(c, g)`]: OrderedSkipList::with_comparator_and_level_generator
+#[cfg_attr(
+    any(feature = "std", feature = "getrandom"),
+    doc = "[`new()`]: OrderedSkipList::new"
+)]
+#[cfg_attr(
+    any(feature = "std", feature = "getrandom"),
+    doc = "[`with_comparator(c)`]: OrderedSkipList::with_comparator"
+)]
 ///
 /// # Examples
 ///

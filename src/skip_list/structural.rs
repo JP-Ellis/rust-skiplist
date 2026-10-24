@@ -332,10 +332,19 @@ impl<T, G: LevelGenerator, const N: usize> SkipList<T, N, G> {
     ///
     /// Elements are appended in the order they appear in `other`.
     ///
-    /// When both lists share the same maximum level count (which is always the
-    /// case for lists created with `new` or
-    /// `with_capacity`), the operation runs in
-    /// `$O(\log n)$` time. When the maximum level counts differ, the operation
+    /// When both lists share the same maximum level count, the operation runs
+    /// in `$O(\log n)$` time. Two lists from
+    /// [`with_capacity_and_seed`](SkipList::with_capacity_and_seed) with the same
+    /// capacity share it.
+    #[cfg_attr(
+        any(feature = "std", feature = "getrandom"),
+        doc = "So do two lists from [`new`](SkipList::new), and two from"
+    )]
+    #[cfg_attr(
+        any(feature = "std", feature = "getrandom"),
+        doc = "[`with_capacity`](SkipList::with_capacity) with the same capacity."
+    )]
+    /// When the maximum level counts differ, the operation
     /// falls back to `$O(k \log(n+k))$` via repeated
     /// [`push_back`](SkipList::push_back) calls.
     ///
