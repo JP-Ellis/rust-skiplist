@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 <!-- markdownlint-disable -->
 
+## [1.3.4](https://github.com/JP-Ellis/rust-skiplist/compare/v1.3.3...v1.3.4) - _2026-10-24_
+
+### 🚜 Refactor
+
+-   _(geometric)_ Guard with bool::ok_or
+
+### 🧪 Testing
+
+-   Shrink chaos runs under Miri
+
+### ⚙️ Miscellaneous Tasks
+
+-   Raise MSRV to 1.98
+
+
 ## [1.3.3](https://github.com/JP-Ellis/rust-skiplist/compare/v1.3.2...v1.3.3) - _2026-10-24_
 
 ### ⚡ Performance
