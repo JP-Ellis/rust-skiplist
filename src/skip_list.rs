@@ -24,16 +24,10 @@
 //!
 //! # Method Summary
 //!
-#![cfg_attr(
-    any(feature = "std", feature = "getrandom"),
-    doc = "**Constructors:** [`new`], [`with_capacity`], [`with_capacity_and_seed`],"
-)]
-#![cfg_attr(
-    not(any(feature = "std", feature = "getrandom")),
-    doc = "**Constructors:** [`with_capacity_and_seed`],"
-)]
+//! **Constructors:** [`new`], [`with_capacity`], [`with_capacity_and_seed`],
 //!   [`with_level_generator`],
 //!   [`with_comparator_and_level_generator`][SkipList::with_level_generator].
+//! `new` and `with_capacity` need the `std` or `getrandom` feature.
 //!
 //! **Access:** [`get`], [`get_mut`], [`front`], [`back`], [`front_mut`],
 //!   [`back_mut`].
@@ -79,8 +73,16 @@
     doc = "[`new`]: SkipList::new"
 )]
 #![cfg_attr(
+    not(any(feature = "std", feature = "getrandom")),
+    doc = "[`new`]: crate#features"
+)]
+#![cfg_attr(
     any(feature = "std", feature = "getrandom"),
     doc = "[`with_capacity`]: SkipList::with_capacity"
+)]
+#![cfg_attr(
+    not(any(feature = "std", feature = "getrandom")),
+    doc = "[`with_capacity`]: crate#features"
 )]
 //! [`with_capacity_and_seed`]: SkipList::with_capacity_and_seed
 //! [`get`]: SkipList::get
@@ -256,6 +258,11 @@ impl<T, const N: usize> SkipList<T, N, Geometric> {
     /// Panics if `N` is 0, because a skip list needs at least one level.
     /// Also panics if the entropy source fails: `rand::rng()` under `std`, or
     /// the operating system source under `getrandom` alone.
+    ///
+    #[cfg_attr(
+        not(feature = "docs"),
+        doc = "[`crate::docs::concepts`]: crate#features"
+    )]
     #[cfg(any(feature = "std", feature = "getrandom"))]
     #[inline]
     #[must_use]
@@ -275,14 +282,7 @@ impl<T, const N: usize> SkipList<T, N, Geometric> {
     /// elements, with a fixed seed for the level generator.
     ///
     /// Tower heights are drawn from the same distribution as
-    #[cfg_attr(
-        any(feature = "std", feature = "getrandom"),
-        doc = "[`SkipList::with_capacity`],"
-    )]
-    #[cfg_attr(
-        not(any(feature = "std", feature = "getrandom")),
-        doc = "`SkipList::with_capacity`,"
-    )]
+    /// [`SkipList::with_capacity`],
     /// but the generator is seeded from `seed` instead of an entropy source.
     /// Use this when no entropy source is available, such as on `no_std`
     /// targets without the `getrandom` feature.
@@ -299,6 +299,11 @@ impl<T, const N: usize> SkipList<T, N, Geometric> {
     /// let list = SkipList::<i32>::with_capacity_and_seed(100, 42);
     /// assert!(list.is_empty());
     /// ```
+    ///
+    #[cfg_attr(
+        not(any(feature = "std", feature = "getrandom")),
+        doc = "[`SkipList::with_capacity`]: crate#features"
+    )]
     #[inline]
     #[must_use]
     pub fn with_capacity_and_seed(capacity: usize, seed: u64) -> Self {

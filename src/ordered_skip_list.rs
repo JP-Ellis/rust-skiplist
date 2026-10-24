@@ -35,27 +35,14 @@
 //!   allow callers to change a value without reinserting it, silently
 //!   invalidating the sort order.  To update a value, remove it and reinsert
 //!   the new value.
-#![cfg_attr(
-    any(feature = "std", feature = "getrandom"),
-    doc = "- **No `with_capacity`.**  Use [`SkipList::with_capacity`] if you need"
-)]
-#![cfg_attr(
-    not(any(feature = "std", feature = "getrandom")),
-    doc = "- **No `with_capacity`.**  Use `SkipList::with_capacity` if you need"
-)]
+//! - **No `with_capacity`.**  Use [`SkipList::with_capacity`] if you need
 //!   capacity pre-configuration and do not require sorted order.
 //!
 //! # Method Summary
 //!
-#![cfg_attr(
-    any(feature = "std", feature = "getrandom"),
-    doc = "**Constructors:** [`new`], [`with_level_generator`], [`with_comparator`],"
-)]
-#![cfg_attr(
-    not(any(feature = "std", feature = "getrandom")),
-    doc = "**Constructors:** [`with_level_generator`],"
-)]
+//! **Constructors:** [`new`], [`with_level_generator`], [`with_comparator`],
 //!   [`with_comparator_and_level_generator`].
+//! `new` and `with_comparator` need the `std` or `getrandom` feature.
 //!
 //! **Access:** [`first`], [`last`], [`get_by_index`], [`contains`],
 //!   [`get`], [`get_first`], [`get_last`], [`rank`], [`count`], [`comparator`].
@@ -67,12 +54,9 @@
 //!
 //! **Structural:** [`len`], [`is_empty`], [`clear`], [`split_off`], [`append`].
 //!
-#![cfg_attr(
-    feature = "cursor",
-    doc = "**Cursors:** [`lower_bound`], [`upper_bound`], [`lower_bound_mut`],"
-)]
-#![cfg_attr(feature = "cursor", doc = "  [`upper_bound_mut`].")]
-#![cfg_attr(feature = "cursor", doc = "")]
+//! **Cursors** (`cursor` feature): [`lower_bound`], [`upper_bound`],
+//!   [`lower_bound_mut`], [`upper_bound_mut`].
+//!
 //! **Iteration:** [`iter`], [`into_iter`].
 //!
 //! # Examples
@@ -108,12 +92,24 @@
     doc = "[`SkipList::with_capacity`]: crate::skip_list::SkipList::with_capacity"
 )]
 #![cfg_attr(
+    not(any(feature = "std", feature = "getrandom")),
+    doc = "[`SkipList::with_capacity`]: crate#features"
+)]
+#![cfg_attr(
     any(feature = "std", feature = "getrandom"),
     doc = "[`new`]: OrderedSkipList::new"
 )]
 #![cfg_attr(
+    not(any(feature = "std", feature = "getrandom")),
+    doc = "[`new`]: crate#features"
+)]
+#![cfg_attr(
     any(feature = "std", feature = "getrandom"),
     doc = "[`with_comparator`]: OrderedSkipList::with_comparator"
+)]
+#![cfg_attr(
+    not(any(feature = "std", feature = "getrandom")),
+    doc = "[`with_comparator`]: crate#features"
 )]
 //! [`with_comparator_and_level_generator`]: OrderedSkipList::with_comparator_and_level_generator
 //! [`first`]: OrderedSkipList::first
@@ -147,18 +143,22 @@
     feature = "cursor",
     doc = "[`lower_bound`]: OrderedSkipList::lower_bound"
 )]
+#![cfg_attr(not(feature = "cursor"), doc = "[`lower_bound`]: crate#features")]
 #![cfg_attr(
     feature = "cursor",
     doc = "[`upper_bound`]: OrderedSkipList::upper_bound"
 )]
+#![cfg_attr(not(feature = "cursor"), doc = "[`upper_bound`]: crate#features")]
 #![cfg_attr(
     feature = "cursor",
     doc = "[`lower_bound_mut`]: OrderedSkipList::lower_bound_mut"
 )]
+#![cfg_attr(not(feature = "cursor"), doc = "[`lower_bound_mut`]: crate#features")]
 #![cfg_attr(
     feature = "cursor",
     doc = "[`upper_bound_mut`]: OrderedSkipList::upper_bound_mut"
 )]
+#![cfg_attr(not(feature = "cursor"), doc = "[`upper_bound_mut`]: crate#features")]
 
 use alloc::boxed::Box;
 use core::ptr::NonNull;
@@ -196,24 +196,13 @@ mod traits;
 ///
 /// | Constructor                                   | `T: Ord`? | Comparator        | Generator       |
 /// |-----------------------------------------------|:---------:|:-----------------:|:---------------:|
-#[cfg_attr(
-    any(feature = "std", feature = "getrandom"),
-    doc = "| [`new()`]                                     | required  | [`OrdComparator`] | [`Geometric`]   |"
-)]
-#[cfg_attr(
-    not(any(feature = "std", feature = "getrandom")),
-    doc = "| `new()`                                       | required  | [`OrdComparator`] | [`Geometric`]   |"
-)]
+/// | [`new()`]                                     | required  | [`OrdComparator`] | [`Geometric`]   |
 /// | [`with_level_generator(g)`]                   | required  | [`OrdComparator`] | `g`             |
-#[cfg_attr(
-    any(feature = "std", feature = "getrandom"),
-    doc = "| [`with_comparator(c)`]                        | not req.  | `c`               | [`Geometric`]   |"
-)]
-#[cfg_attr(
-    not(any(feature = "std", feature = "getrandom")),
-    doc = "| `with_comparator(c)`                          | not req.  | `c`               | [`Geometric`]   |"
-)]
+/// | [`with_comparator(c)`]                        | not req.  | `c`               | [`Geometric`]   |
 /// | [`with_comparator_and_level_generator(c, g)`] | not req.  | `c`               | `g`             |
+///
+/// The constructors that build a [`Geometric`] (`new()` and `with_comparator(c)`)
+/// need the `std` or `getrandom` feature.
 ///
 /// [`with_level_generator(g)`]: OrderedSkipList::with_level_generator
 /// [`with_comparator_and_level_generator(c, g)`]: OrderedSkipList::with_comparator_and_level_generator
@@ -222,8 +211,16 @@ mod traits;
     doc = "[`new()`]: OrderedSkipList::new"
 )]
 #[cfg_attr(
+    not(any(feature = "std", feature = "getrandom")),
+    doc = "[`new()`]: crate#features"
+)]
+#[cfg_attr(
     any(feature = "std", feature = "getrandom"),
     doc = "[`with_comparator(c)`]: OrderedSkipList::with_comparator"
+)]
+#[cfg_attr(
+    not(any(feature = "std", feature = "getrandom")),
+    doc = "[`with_comparator(c)`]: crate#features"
 )]
 ///
 /// # Examples

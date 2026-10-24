@@ -106,4 +106,3 @@ The formula used is `levels = 1 + ceil(log2(capacity))`, derived from the condit
 [`Comparator`]: crate::Comparator
 [`OrdComparator`]: crate::OrdComparator
 [`FnComparator`]: crate::FnComparator
-[`PartialOrdComparator`]: crate::PartialOrdComparator

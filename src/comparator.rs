@@ -30,7 +30,11 @@
 //! [`OrderedSkipList`]: crate::ordered_skip_list::OrderedSkipList
 //! [`SkipSet`]: crate::skip_set::SkipSet
 //! [`SkipMap`]: crate::skip_map::SkipMap
-
+//!
+#![cfg_attr(
+    not(feature = "partial-ord"),
+    doc = "[`PartialOrdComparator`]: crate#features"
+)]
 #![expect(
     clippy::module_name_repetitions,
     reason = "type names intentionally include `Comparator` to avoid clashing \
@@ -74,22 +78,8 @@ pub trait Comparator<T: ?Sized> {
 
 /// A comparator that delegates to the type's [`Ord`] implementation.
 ///
-#[cfg_attr(
-    any(feature = "std", feature = "getrandom"),
-    doc = "This is the default comparator used by [`OrderedSkipList::new`],"
-)]
-#[cfg_attr(
-    not(any(feature = "std", feature = "getrandom")),
-    doc = "This is the default comparator used by `OrderedSkipList::new`,"
-)]
-#[cfg_attr(
-    any(feature = "std", feature = "getrandom"),
-    doc = "[`SkipSet::new`], and [`SkipMap::new`]. It requires `T: Ord`."
-)]
-#[cfg_attr(
-    not(any(feature = "std", feature = "getrandom")),
-    doc = "`SkipSet::new`, and `SkipMap::new`. It requires `T: Ord`."
-)]
+/// This is the default comparator used by [`OrderedSkipList::new`],
+/// [`SkipSet::new`], and [`SkipMap::new`]. It requires `T: Ord`.
 ///
 /// # Examples
 ///
@@ -108,12 +98,24 @@ pub trait Comparator<T: ?Sized> {
     doc = "[`OrderedSkipList::new`]: crate::ordered_skip_list::OrderedSkipList::new"
 )]
 #[cfg_attr(
+    not(any(feature = "std", feature = "getrandom")),
+    doc = "[`OrderedSkipList::new`]: crate#features"
+)]
+#[cfg_attr(
     any(feature = "std", feature = "getrandom"),
     doc = "[`SkipSet::new`]: crate::skip_set::SkipSet::new"
 )]
 #[cfg_attr(
+    not(any(feature = "std", feature = "getrandom")),
+    doc = "[`SkipSet::new`]: crate#features"
+)]
+#[cfg_attr(
     any(feature = "std", feature = "getrandom"),
     doc = "[`SkipMap::new`]: crate::skip_map::SkipMap::new"
+)]
+#[cfg_attr(
+    not(any(feature = "std", feature = "getrandom")),
+    doc = "[`SkipMap::new`]: crate#features"
 )]
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 #[non_exhaustive]

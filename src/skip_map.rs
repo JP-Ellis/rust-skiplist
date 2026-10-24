@@ -34,15 +34,9 @@
 //!
 //! # Method Summary
 //!
-#![cfg_attr(
-    any(feature = "std", feature = "getrandom"),
-    doc = "**Constructors:** [`new`], [`with_level_generator`], [`with_comparator`],"
-)]
-#![cfg_attr(
-    not(any(feature = "std", feature = "getrandom")),
-    doc = "**Constructors:** [`with_level_generator`],"
-)]
+//! **Constructors:** [`new`], [`with_level_generator`], [`with_comparator`],
 //!   [`with_comparator_and_level_generator`].
+//! `new` and `with_comparator` need the `std` or `getrandom` feature.
 //!
 //! **Access:** [`get`], [`get_mut`], [`get_key_value`], [`get_by_index`],
 //!   [`contains_key`], [`first_key_value`], [`last_key_value`], [`rank`],
@@ -90,8 +84,16 @@
     doc = "[`new`]: SkipMap::new"
 )]
 #![cfg_attr(
+    not(any(feature = "std", feature = "getrandom")),
+    doc = "[`new`]: crate#features"
+)]
+#![cfg_attr(
     any(feature = "std", feature = "getrandom"),
     doc = "[`with_comparator`]: SkipMap::with_comparator"
+)]
+#![cfg_attr(
+    not(any(feature = "std", feature = "getrandom")),
+    doc = "[`with_comparator`]: crate#features"
 )]
 //! [`with_comparator_and_level_generator`]: SkipMap::with_comparator_and_level_generator
 //! [`get`]: SkipMap::get
@@ -169,24 +171,13 @@ use crate::{
 ///
 /// | Constructor                                   | `K: Ord`? | Comparator        | Generator       |
 /// |-----------------------------------------------|:---------:|:-----------------:|:---------------:|
-#[cfg_attr(
-    any(feature = "std", feature = "getrandom"),
-    doc = "| [`new()`]                                     | required  | [`OrdComparator`] | [`Geometric`]   |"
-)]
-#[cfg_attr(
-    not(any(feature = "std", feature = "getrandom")),
-    doc = "| `new()`                                       | required  | [`OrdComparator`] | [`Geometric`]   |"
-)]
+/// | [`new()`]                                     | required  | [`OrdComparator`] | [`Geometric`]   |
 /// | [`with_level_generator(g)`]                   | required  | [`OrdComparator`] | `g`             |
-#[cfg_attr(
-    any(feature = "std", feature = "getrandom"),
-    doc = "| [`with_comparator(c)`]                        | not req.  | `c`               | [`Geometric`]   |"
-)]
-#[cfg_attr(
-    not(any(feature = "std", feature = "getrandom")),
-    doc = "| `with_comparator(c)`                          | not req.  | `c`               | [`Geometric`]   |"
-)]
+/// | [`with_comparator(c)`]                        | not req.  | `c`               | [`Geometric`]   |
 /// | [`with_comparator_and_level_generator(c, g)`] | not req.  | `c`               | `g`             |
+///
+/// The constructors that build a [`Geometric`] (`new()` and `with_comparator(c)`)
+/// need the `std` or `getrandom` feature.
 ///
 /// [`with_level_generator(g)`]: SkipMap::with_level_generator
 /// [`with_comparator_and_level_generator(c, g)`]: SkipMap::with_comparator_and_level_generator
@@ -195,8 +186,16 @@ use crate::{
     doc = "[`new()`]: SkipMap::new"
 )]
 #[cfg_attr(
+    not(any(feature = "std", feature = "getrandom")),
+    doc = "[`new()`]: crate#features"
+)]
+#[cfg_attr(
     any(feature = "std", feature = "getrandom"),
     doc = "[`with_comparator(c)`]: SkipMap::with_comparator"
+)]
+#[cfg_attr(
+    not(any(feature = "std", feature = "getrandom")),
+    doc = "[`with_comparator(c)`]: crate#features"
 )]
 ///
 /// # Examples
