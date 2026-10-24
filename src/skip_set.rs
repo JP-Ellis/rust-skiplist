@@ -172,13 +172,35 @@ pub use set_ops::{Difference, Intersection, SymmetricDifference, Union};
 ///
 /// | Constructor                                   | `T: Ord`? | Comparator        | Generator       |
 /// |-----------------------------------------------|:---------:|:-----------------:|:---------------:|
-/// | `new()`                                       | required  | [`OrdComparator`] | [`Geometric`]   |
+#[cfg_attr(
+    any(feature = "std", feature = "getrandom"),
+    doc = "| [`new()`]                                     | required  | [`OrdComparator`] | [`Geometric`]   |"
+)]
+#[cfg_attr(
+    not(any(feature = "std", feature = "getrandom")),
+    doc = "| `new()`                                       | required  | [`OrdComparator`] | [`Geometric`]   |"
+)]
 /// | [`with_level_generator(g)`]                   | required  | [`OrdComparator`] | `g`             |
-/// | `with_comparator(c)`                          | not req.  | `c`               | [`Geometric`]   |
+#[cfg_attr(
+    any(feature = "std", feature = "getrandom"),
+    doc = "| [`with_comparator(c)`]                        | not req.  | `c`               | [`Geometric`]   |"
+)]
+#[cfg_attr(
+    not(any(feature = "std", feature = "getrandom")),
+    doc = "| `with_comparator(c)`                          | not req.  | `c`               | [`Geometric`]   |"
+)]
 /// | [`with_comparator_and_level_generator(c, g)`] | not req.  | `c`               | `g`             |
 ///
 /// [`with_level_generator(g)`]: SkipSet::with_level_generator
 /// [`with_comparator_and_level_generator(c, g)`]: SkipSet::with_comparator_and_level_generator
+#[cfg_attr(
+    any(feature = "std", feature = "getrandom"),
+    doc = "[`new()`]: SkipSet::new"
+)]
+#[cfg_attr(
+    any(feature = "std", feature = "getrandom"),
+    doc = "[`with_comparator(c)`]: SkipSet::with_comparator"
+)]
 ///
 /// # Examples
 ///

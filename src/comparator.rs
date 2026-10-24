@@ -74,8 +74,22 @@ pub trait Comparator<T: ?Sized> {
 
 /// A comparator that delegates to the type's [`Ord`] implementation.
 ///
-/// This is the default comparator used by `OrderedSkipList::new`,
-/// `SkipSet::new`, and `SkipMap::new`. It requires `T: Ord`.
+#[cfg_attr(
+    any(feature = "std", feature = "getrandom"),
+    doc = "This is the default comparator used by [`OrderedSkipList::new`],"
+)]
+#[cfg_attr(
+    not(any(feature = "std", feature = "getrandom")),
+    doc = "This is the default comparator used by `OrderedSkipList::new`,"
+)]
+#[cfg_attr(
+    any(feature = "std", feature = "getrandom"),
+    doc = "[`SkipSet::new`], and [`SkipMap::new`]. It requires `T: Ord`."
+)]
+#[cfg_attr(
+    not(any(feature = "std", feature = "getrandom")),
+    doc = "`SkipSet::new`, and `SkipMap::new`. It requires `T: Ord`."
+)]
 ///
 /// # Examples
 ///
@@ -89,6 +103,18 @@ pub trait Comparator<T: ?Sized> {
 /// assert_eq!(cmp.compare(&5, &4), Ordering::Greater);
 /// ```
 ///
+#[cfg_attr(
+    any(feature = "std", feature = "getrandom"),
+    doc = "[`OrderedSkipList::new`]: crate::ordered_skip_list::OrderedSkipList::new"
+)]
+#[cfg_attr(
+    any(feature = "std", feature = "getrandom"),
+    doc = "[`SkipSet::new`]: crate::skip_set::SkipSet::new"
+)]
+#[cfg_attr(
+    any(feature = "std", feature = "getrandom"),
+    doc = "[`SkipMap::new`]: crate::skip_map::SkipMap::new"
+)]
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct OrdComparator;
