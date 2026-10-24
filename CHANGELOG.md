@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 <!-- markdownlint-disable -->
 
+## [1.3.2](https://github.com/JP-Ellis/rust-skiplist/compare/v1.3.1...v1.3.2) - _2026-10-24_
+
+### 📚 Documentation
+
+-   Show core::range types in range doctests
+
+### ⚙️ Miscellaneous Tasks
+
+-   Raise MSRV to 1.96
+
+
 ## [1.3.1](https://github.com/JP-Ellis/rust-skiplist/compare/v1.3.0...v1.3.1) - _2026-10-24_
 
 ### 🚜 Refactor
