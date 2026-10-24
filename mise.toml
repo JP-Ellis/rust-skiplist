@@ -28,10 +28,11 @@ rumdl = "v0.3.0"
 [tasks]
   [tasks.lint]
   description = "Lint with Clippy across all feature combinations"
+  # The library builds in every feature set. Tests, benches and examples need
+  # `std` or `getrandom` to construct generators, so only those sets lint them.
   run = [
+    "cargo hack --feature-powerset clippy --lib",
     "cargo hack --feature-powerset --at-least-one-of std,getrandom clippy --all-targets",
-    "cargo clippy --lib --no-default-features",
-    "cargo clippy --lib --no-default-features --features cursor,partial-ord,docs",
   ]
 
   [tasks.format]
