@@ -24,7 +24,8 @@
 //!
 //! # Method Summary
 //!
-//! **Constructors:** `new`, `with_capacity`, [`with_level_generator`],
+//! **Constructors:** `new`, `with_capacity`, `with_capacity_and_seed`,
+//!   [`with_level_generator`],
 //!   [`with_comparator_and_level_generator`][SkipList::with_level_generator].
 //!
 //! **Access:** [`get`], [`get_mut`], [`front`], [`back`], [`front_mut`],
@@ -118,9 +119,8 @@ mod traits;
 
 pub use iter::{Drain, ExtractIf, IntoIter, Iter, IterMut};
 
-/// Default promotion probability used by `SkipList::new` and
-/// `SkipList::with_capacity`.
-#[cfg(any(feature = "std", feature = "getrandom"))]
+/// Default promotion probability used by `SkipList::new`,
+/// `SkipList::with_capacity` and `SkipList::with_capacity_and_seed`.
 const DEFAULT_P: f64 = 0.5;
 
 /// An index-based skip list.
@@ -241,8 +241,52 @@ impl<T, const N: usize> SkipList<T, N, Geometric> {
     #[inline]
     #[must_use]
     pub fn with_capacity(capacity: usize) -> Self {
-        // Derive 1 + ceil(log2(capacity)), clamped to a minimum of 1.
-        //
+        let levels = Self::capacity_levels(capacity);
+        #[expect(
+            clippy::expect_used,
+            reason = "the parameters are valid; only the getrandom entropy source can fail"
+        )]
+        let generator = Geometric::new(levels, DEFAULT_P)
+            .expect("`capacity_levels` and `DEFAULT_P` are valid Geometric parameters");
+        Self::with_level_generator(generator)
+    }
+
+    /// Creates an empty skip list pre-configured for the expected number of
+    /// elements, with a fixed seed for the level generator.
+    ///
+    /// Tower heights are drawn from the same distribution as
+    /// [`SkipList::with_capacity`], but the generator is seeded from `seed`
+    /// rather than an entropy source. Use this when no entropy source is
+    /// available, such as on `no_std` targets without the `getrandom` feature.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use skiplist::skip_list::SkipList;
+    ///
+    /// let list = SkipList::<i32>::with_capacity_and_seed(100, 42);
+    /// assert!(list.is_empty());
+    /// ```
+    #[inline]
+    #[must_use]
+    #[expect(
+        clippy::missing_panics_doc,
+        reason = "the internal expect cannot fail: the parameters are valid and seeding needs no entropy"
+    )]
+    pub fn with_capacity_and_seed(capacity: usize, seed: u64) -> Self {
+        #[expect(
+            clippy::expect_used,
+            reason = "the parameters are valid and seeding needs no entropy"
+        )]
+        let generator = Geometric::new_with_seed(Self::capacity_levels(capacity), DEFAULT_P, seed)
+            .expect("`capacity_levels` and `DEFAULT_P` are valid Geometric parameters");
+        Self::with_level_generator(generator)
+    }
+
+    /// Returns the level count for `capacity`, which is
+    /// `1 + ceil(log2(capacity))` clamped to `N` and to
+    /// [`Geometric::MAX_TOTAL`].
+    fn capacity_levels(capacity: usize) -> usize {
         // With p = 0.5 this is the level count at which the expected number of
         // nodes at the topmost level is ~1 when the list holds `capacity`
         // elements.
@@ -263,13 +307,7 @@ impl<T, const N: usize> SkipList<T, N, Geometric> {
         // Clamp to the compile-time capacity N so that the node links array is
         // never overrun.  For capacities larger than ~2^N, this means fewer
         // levels than ideal, but the list remains correct.
-        #[expect(
-            clippy::expect_used,
-            reason = "`levels` is always >= 1 and DEFAULT_P is a valid probability"
-        )]
-        let generator = Geometric::new(levels.min(N).min(Geometric::MAX_TOTAL), DEFAULT_P)
-            .expect("`levels >= 1` and `DEFAULT_P` are valid Geometric parameters");
-        Self::with_level_generator(generator)
+        levels.min(N).min(Geometric::MAX_TOTAL)
     }
 }
 
@@ -433,9 +471,10 @@ impl<T, G: LevelGenerator, const N: usize> Drop for SkipList<T, N, G> {
 #[cfg(test)]
 mod tests {
     use pretty_assertions::assert_eq;
+    use rstest::rstest;
 
     use super::SkipList;
-    use crate::level_generator::geometric::Geometric;
+    use crate::level_generator::{LevelGenerator, geometric::Geometric};
 
     #[test]
     fn new_is_empty() {
@@ -461,6 +500,32 @@ mod tests {
         // capacity = 0 results in 1 level; must not panic
         let list = SkipList::<i32>::with_capacity(0);
         assert!(list.is_empty());
+    }
+
+    #[rstest]
+    fn with_capacity_and_seed_matches_levels(
+        #[values(0, 1, 2, 100, 0x1_0000, 240_000_000)] cap: usize,
+    ) {
+        let a = SkipList::<i32>::with_capacity(cap);
+        let b = SkipList::<i32>::with_capacity_and_seed(cap, 7);
+        assert_eq!(a.generator.total(), b.generator.total());
+    }
+
+    #[test]
+    fn with_capacity_and_seed_is_reproducible() {
+        let mut a = SkipList::<i32>::with_capacity_and_seed(1_000, 7);
+        let mut b = SkipList::<i32>::with_capacity_and_seed(1_000, 7);
+        for _ in 0..100 {
+            assert_eq!(a.generator.level(), b.generator.level());
+        }
+    }
+
+    #[test]
+    fn with_capacity_large_n_clamps_to_cap() {
+        let mut list = SkipList::<i32, 128>::with_capacity_and_seed(usize::MAX, 7);
+        assert_eq!(list.generator.total(), 64);
+        list.extend(0..1_000);
+        assert_eq!(list.len(), 1_000);
     }
 
     #[test]
