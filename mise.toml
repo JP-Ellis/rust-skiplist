@@ -28,6 +28,7 @@ CARGO_BUILD_WARNINGS = "deny"
 "github:taiki-e/cargo-hack" = "0.6"
 "aqua:taiki-e/cargo-llvm-cov" = "0.9.1"
 "aqua:nextest-rs/nextest/cargo-nextest" = "0.9"
+"aqua:mitsuhiko/insta" = "1.49"
 "aqua:j178/prek" = "0.5"
 rumdl = "v0.3.0"
 
