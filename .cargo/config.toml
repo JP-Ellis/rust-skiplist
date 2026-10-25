@@ -17,3 +17,6 @@
 # this class of aliasing correctly.  All tests pass under Tree Borrows.
 [env]
 MIRIFLAGS = "-Zmiri-tree-borrows"
+
+[build]
+rustflags = ["-C", "llvm-args=-align-loops=64"]
