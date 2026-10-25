@@ -91,6 +91,8 @@ impl<T, G: LevelGenerator, const N: usize> SkipList<T, N, G> {
 
         // height ∈ [0, total]: number of skip links to allocate.
         let height = self.generator.level();
+        // SAFETY: the head is live and no reference to it is held.
+        unsafe { (*self.head.as_ptr()).grow_to(height) };
         // new_rank: the rank of the new node after insertion
         // (head = rank 0; element at index i has rank i + 1).
         let new_rank = index.saturating_add(1);

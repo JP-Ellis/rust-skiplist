@@ -235,15 +235,7 @@ impl<T, G: LevelGenerator, const N: usize> SkipList<T, N, G> {
     ///
     /// Elements are appended in the order they appear in `other`.
     ///
-    /// When both lists share the same maximum level count, the operation runs
-    /// in `$O(\log n)$` time. Two lists from
-    /// [`with_capacity_and_seed`](SkipList::with_capacity_and_seed) with the same
-    /// capacity share it.
-    /// So do two lists from [`new`], and two from
-    /// [`with_capacity`] with the same capacity.
-    /// When the maximum level counts differ, the operation
-    /// falls back to `$O(k \log(n+k))$` via repeated
-    /// [`push_back`](SkipList::push_back) calls.
+    /// This operation runs in `$O(\log n)$` time.
     ///
     /// # Examples
     ///
@@ -262,42 +254,14 @@ impl<T, G: LevelGenerator, const N: usize> SkipList<T, N, G> {
     /// assert!(b.is_empty());
     /// assert_eq!(a.iter().copied().collect::<Vec<_>>(), [1, 2, 3, 4]);
     /// ```
-    ///
-    #[cfg_attr(
-        any(feature = "std", feature = "getrandom"),
-        doc = "[`new`]: SkipList::new"
-    )]
-    #[cfg_attr(
-        not(any(feature = "std", feature = "getrandom")),
-        doc = "[`new`]: crate#features"
-    )]
-    #[cfg_attr(
-        any(feature = "std", feature = "getrandom"),
-        doc = "[`with_capacity`]: SkipList::with_capacity"
-    )]
-    #[cfg_attr(
-        not(any(feature = "std", feature = "getrandom")),
-        doc = "[`with_capacity`]: crate#features"
-    )]
     #[inline]
     pub fn append(&mut self, other: &mut Self) {
         if other.is_empty() {
             return;
         }
 
-        let max_levels = self.head_ref().level();
-
-        // Slow path: different level-generator sizes, fall back to re-insertion
-        // to avoid out-of-bounds indexing in the fast-path link wiring below.
-        if max_levels != other.head_ref().level() {
-            while let Some(val) = other.pop_front() {
-                self.push_back(val);
-            }
-            return;
-        }
-
-        // SAFETY: we hold `&mut self` and `&mut other`, two distinct lists of
-        // the same height, and `other` is non-empty.
+        // SAFETY: we hold `&mut self` and `&mut other`, two distinct lists,
+        // and `other` is non-empty.
         unsafe {
             Node::concat(
                 self.head,
@@ -734,6 +698,25 @@ mod tests {
         }
     }
 
+    // MARK: head height
+
+    #[test]
+    fn head_is_as_tall_as_the_tallest_tower() {
+        for len in [0, 1, 2, 10, 100, 1000] {
+            let list = seeded(len, 3);
+            // SAFETY: `head` is the live head of `list`, which owns every node
+            // it reaches.
+            let head = unsafe { list.head.as_ref() };
+            let mut tallest = 0;
+            let mut current = head.next_as_ref();
+            while let Some(node) = current {
+                tallest = tallest.max(node.level());
+                current = node.next_as_ref();
+            }
+            assert_eq!(head.level(), tallest.max(1), "len {len}");
+        }
+    }
+
     // MARK: append
 
     #[test]
@@ -915,14 +898,13 @@ mod tests {
         if !cfg!(miri) {
             let display = list.head_ref().display()?;
             assert_snapshot!(display, @"
-            [04]: 00
             [03]: 00 -------------------> 04
             [02]: 00 -------------> 03 -> 04 -------------------------------> 10
             [01]: 00 -------------> 03 -> 04 -------------> 07 -> 08 -------> 10
             [->]: 00 -> 01 -> 02 -> 03 -> 04 -> 05 -> 06 -> 07 -> 08 -> 09 -> 10
             [<-]: 00 <- 01 <- 02 <- 03 <- 04 <- 05 <- 06 <- 07 <- 08 <- 09 <- 10
 
-            [00|04] None
+            [00|03] None
             [01|00] Some(1)
             [02|00] Some(2)
             [03|02] Some(3)

@@ -76,6 +76,7 @@ impl<T: Clone, G: LevelGenerator + Clone, const N: usize> Clone for SkipList<T, 
         // `src_nn` is one of its data nodes.  `new_list.head` and `prev_nn`
         // are owned by `new_list`, with no other live references.
         unsafe {
+            (*new_list.head.as_ptr()).grow_to(self.head.as_ref().level());
             let mut prev_nn = new_list.head;
             let mut src_opt = self.head.as_ref().next();
             while let Some(src_nn) = src_opt {

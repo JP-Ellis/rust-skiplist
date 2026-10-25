@@ -47,6 +47,30 @@ impl<T, const N: usize> LevelArray<T, N> {
             len: u8::try_from(len).expect("len <= N <= u8::MAX"),
         }
     }
+
+    /// Extends the in-use prefix to `len`, writing `f(i)` into each newly
+    /// exposed slot `i`. Does nothing if `len` is not above the current length.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `len > N`.
+    #[inline]
+    #[expect(
+        clippy::expect_used,
+        reason = "narrowing is guarded by the assert above"
+    )]
+    pub(crate) fn grow(&mut self, len: usize, mut f: impl FnMut(usize) -> T) {
+        assert!(len <= N, "length ({len}) exceeds capacity ({N})");
+        let old = usize::from(self.len);
+        if len <= old {
+            return;
+        }
+        for (i, slot) in self.items.iter_mut().enumerate().take(len).skip(old) {
+            *slot = f(i);
+        }
+        // `len <= N <= u8::MAX` was just checked, so the narrowing cannot fail.
+        self.len = u8::try_from(len).expect("len <= N <= u8::MAX");
+    }
 }
 
 impl<T, const N: usize> Deref for LevelArray<T, N> {
@@ -56,8 +80,8 @@ impl<T, const N: usize> Deref for LevelArray<T, N> {
     fn deref(&self) -> &[T] {
         let len = usize::from(self.len);
         debug_assert!(len <= N, "length ({len}) exceeds capacity ({N})");
-        // SAFETY: `len <= N` is established by `from_fn` and `len` is never
-        // written afterwards, so the range is within `items`.
+        // SAFETY: `from_fn` and `grow` only store a `len <= N`, so the range
+        // is within `items`.
         unsafe { self.items.get_unchecked(..len) }
     }
 }
@@ -121,6 +145,22 @@ mod tests {
     fn from_fn_full_capacity() {
         let arr: LevelArray<usize, 4> = LevelArray::from_fn(4, |i| i);
         assert_eq!(&*arr, &[0, 1, 2, 3]);
+    }
+
+    #[test]
+    fn grow_fills_new_slots_only() {
+        let mut arr: LevelArray<usize, 4> = LevelArray::from_fn(1, |i| i + 1);
+        arr.grow(3, |i| i * 10);
+        assert_eq!(&*arr, &[1, 10, 20]);
+        arr.grow(2, |_| 99);
+        assert_eq!(&*arr, &[1, 10, 20]);
+    }
+
+    #[test]
+    #[should_panic(expected = "exceeds capacity")]
+    fn grow_over_capacity_panics() {
+        let mut arr: LevelArray<usize, 4> = LevelArray::from_fn(0, |i| i);
+        arr.grow(5, |i| i);
     }
 
     #[test]

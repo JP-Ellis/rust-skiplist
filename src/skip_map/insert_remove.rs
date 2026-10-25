@@ -79,8 +79,6 @@ impl<K, V, const N: usize, C: Comparator<K>, G: LevelGenerator> SkipMap<K, V, N,
                 visitor.found(),
             )
         };
-        let precursors = path.precursors();
-        let precursor_distances = path.distances();
         // `visitor` and `cmp` are dropped here, releasing the borrow on
         // `self.comparator`.  `key` is no longer borrowed by the visitor.
 
@@ -107,6 +105,11 @@ impl<K, V, const N: usize, C: Comparator<K>, G: LevelGenerator> SkipMap<K, V, N,
         // A replace links no node, so the height is drawn after the replace
         // check.
         let height = self.generator.level();
+        // SAFETY: the head is live and no reference to it is held.
+        unsafe { (*head.as_ptr()).grow_to(height) };
+        path.grow(head, height);
+        let precursors = path.precursors();
+        let precursor_distances = path.distances();
 
         // `found == false`: current is the last node with key < `key`.
         // new_rank = current_rank + 1.

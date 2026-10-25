@@ -41,6 +41,13 @@ impl<T, const N: usize> Path<T, N> {
         }
     }
 
+    /// Extends the path to `height` levels after the head has grown to
+    /// match. The head is the precursor, at rank 0, on every new level.
+    pub(crate) fn grow(&mut self, head: NonNull<Node<T, N>>, height: usize) {
+        self.precursors.grow(height, |_| head);
+        self.distances.grow(height, |_| 0);
+    }
+
     /// The precursor at each level.
     pub(crate) fn precursors(&self) -> &[NonNull<Node<T, N>>] {
         &self.precursors

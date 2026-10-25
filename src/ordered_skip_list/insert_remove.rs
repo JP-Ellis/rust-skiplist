@@ -229,6 +229,8 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
     pub fn insert(&mut self, value: T) {
         // height ∈ [0, total]: number of skip links to allocate.
         let height = self.generator.level();
+        // SAFETY: the head is live and no reference to it is held.
+        unsafe { (*self.head.as_ptr()).grow_to(height) };
 
         // Use OrdIndexMutVisitor to locate the insertion point, collect precursors,
         // and track rank distances for accurate skip-link maintenance.
@@ -1204,8 +1206,6 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
                 visitor.found(),
             )
         };
-        let precursors = path.precursors();
-        let precursor_distances = path.distances();
         // `cmp` / `visitor` dropped; borrows on `self.comparator` and `value` end.
 
         if found {
@@ -1216,6 +1216,11 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
         // not advanced on the "already present" fast path.
         // height ∈ [0, total]: number of skip links to allocate.
         let height = self.generator.level();
+        // SAFETY: the head is live and no reference to it is held.
+        unsafe { (*head.as_ptr()).grow_to(height) };
+        path.grow(head, height);
+        let precursors = path.precursors();
+        let precursor_distances = path.distances();
         let insert_value = f(value);
         // `found == false`: current is the last node with value < insert_value,
         // so new_rank = current_rank + 1.

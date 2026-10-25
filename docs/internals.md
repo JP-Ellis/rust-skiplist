@@ -47,7 +47,7 @@ Pointer safety is the most critical concern when working below the public API. T
 In addition to `prev` / `next`, each node has an array of skip links. Key observations:
 
 -   A node's _level_ (or _height_) is the number of skip links it has, excluding `prev` / `next`. In the example above, node 1 has height 0, node 2 has height 1, and node 5 has height 2.
--   The **head** node always has the maximum number of levels (`N`). Unused levels point to nothing.
+-   The **head** node is at least as tall as the tallest tower in the list, and never taller than `N`. Levels no tower reaches point to nothing.
 -   If a node is linked at level `k`, it is reachable from all levels `0..=k`.
 
 When inserting a node, the level generator draws a random height for the new node. The visitor records the closest preceding node at each level (_precursor_) during the downward search, and the insertion routine wires the new node into every level up to its height.

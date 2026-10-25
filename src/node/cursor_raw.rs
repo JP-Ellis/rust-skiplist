@@ -179,13 +179,28 @@ impl<V, const N: usize> RawCursorMut<V, N> {
         self.precursors = Some((precursors, precursor_distances));
     }
 
+    /// Raises the head to `height` before a tower of that height is linked,
+    /// extending any cached precursors with the head at rank 0.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `height > N`.
+    pub(crate) fn raise(&mut self, head: NonNull<Node<V, N>>, height: usize) {
+        // SAFETY: the head is live and no reference to it is held.
+        unsafe { (*head.as_ptr()).grow_to(height) };
+        if let Some((ref mut precursors, ref mut precursor_distances)) = self.precursors {
+            precursors.grow(height, |_| head);
+            precursor_distances.grow(height, |_| 0);
+        }
+    }
+
     /// Advance the cursor one position to the right.
     ///
     /// Updates the precursor cache incrementally (if active) and returns the
     /// new `current` node.  Returns `None` if already at the rightmost gap.
     #[expect(
         clippy::indexing_slicing,
-        reason = "l < next_level ≤ N = precursors.len(); head always has N levels"
+        reason = "l < next_level <= head.level() = precursors.len(): no tower is taller than the head"
     )]
     pub(crate) fn advance(&mut self) -> Option<NonNull<Node<V, N>>> {
         // SAFETY: `current` is a valid node.
@@ -346,7 +361,7 @@ impl<V, const N: usize> RawCursorMut<V, N> {
     )]
     #[expect(
         clippy::indexing_slicing,
-        reason = "l < new_level ≤ N = precursors.len(); head always has N levels"
+        reason = "l < new_level <= head.level() = precursors.len(): `raise` ran before the insert"
     )]
     pub(crate) fn insert_at_gap(
         &mut self,

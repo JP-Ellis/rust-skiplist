@@ -404,6 +404,10 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
             max_levels <= N,
             "generator.total() ({max_levels}) exceeds node capacity ({N})"
         );
+        // The head starts one level tall, or with none when the generator has
+        // no levels; inserts raise it to the tallest tower, so walks skip the
+        // levels no tower reaches.
+        //
         // Allocate the sentinel head node as a raw pointer so that all
         // subsequent accesses share the same provenance tag.  Storing it as
         // `Box<Node>` would cause Miri (Tree Borrows) to assign a new Reserved
@@ -413,7 +417,7 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
         // SAFETY: `Box::into_raw` transfers ownership of the allocation to this
         // struct.  It is freed in `Drop::drop` via `Box::from_raw`.
         let head = unsafe {
-            NonNull::new_unchecked(Box::into_raw(Box::new(Node::new(max_levels.min(N)))))
+            NonNull::new_unchecked(Box::into_raw(Box::new(Node::new(max_levels.min(1)))))
         };
         Self {
             head,

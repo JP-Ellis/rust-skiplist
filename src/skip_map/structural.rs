@@ -75,8 +75,7 @@ impl<K, V, const N: usize, C: Comparator<K>, G: LevelGenerator> SkipMap<K, V, N,
     /// When the key ranges are strictly disjoint (every key of `other` is
     /// strictly greater than every key of `self`, or every key of `other` is
     /// strictly less than every key of `self`), the node chains are spliced in
-    /// `$O(\log n)$` time, or `$O(n+m)$` when the two maps have different
-    /// maximum heights (different capacities).
+    /// `$O(\log n)$` time.
     /// Otherwise, when the key ranges overlap (including when
     /// `self.last_key == other.first_key`), each entry of `other` is inserted
     /// individually in `$O(m \log(n+m))$` time.
@@ -115,34 +114,21 @@ impl<K, V, const N: usize, C: Comparator<K>, G: LevelGenerator> SkipMap<K, V, N,
         clippy::expect_used,
         reason = "tail/head nodes always have a value; expects fire only on invariant violations"
     )]
-    #[expect(
-        clippy::multiple_unsafe_ops_per_block,
-        reason = "take_next_chain, set_head_next, and filter_rebuild touch provably disjoint \
-                  heap nodes; splitting across blocks would require unsafe-crossing raw-pointer \
-                  variables"
-    )]
-    #[expect(
-        clippy::too_many_lines,
-        reason = "the splice paths share the comparisons that choose between them"
-    )]
     #[inline]
     pub fn append(&mut self, other: &mut Self) {
         if other.is_empty() {
             return;
         }
 
-        // Forward fast path: self is empty, or every key of other is strictly
-        // greater than every key of self.  Splice other's chain after self's
-        // tail and rebuild skip links in one O(n+m) pass.
+        // The splice conditions use strict `Less` (not `!= Greater`) so that
+        // an equal boundary key falls through to `insert`, which replaces the
+        // existing value, matching the `BTreeMap::append` contract.
         //
-        // The condition is strictly `Less` (not `!= Greater`) so that when the
-        // last key of self equals the first key of other, we fall through.
-        // The slow path calls `insert`, which replaces the existing value,
-        // matching the BTreeMap::append contract.
+        // Comparator trust: the comparisons below run before any write and
+        // only pick a path.  The splices never consult the comparator, so a
+        // wrong answer can unsort the map but not mislink it.
         //
-        // Comparator trust: the comparison below runs before any write and only
-        // picks a path.  The splices never consult the comparator, so a wrong
-        // answer can unsort the map but not mislink it.
+        // Forward splice: self is empty, or self.last_key < other.first_key.
         let can_concat = self.is_empty()
             || self.tail.is_some_and(|tail_nn| {
                 // SAFETY: tail_nn is a live data node owned by self; the
@@ -160,12 +146,9 @@ impl<K, V, const N: usize, C: Comparator<K>, G: LevelGenerator> SkipMap<K, V, N,
                     .0;
                 self.comparator.compare(self_last_key, other_first_key) == Ordering::Less
             });
-
-        let same_height = self.head_ref().level() == other.head_ref().level();
-
-        if can_concat && same_height {
-            // SAFETY: we hold `&mut self` and `&mut other`, two distinct maps
-            // of the same height, and `other` is non-empty.
+        if can_concat {
+            // SAFETY: we hold `&mut self` and `&mut other`, two distinct
+            // maps, and `other` is non-empty.
             unsafe {
                 Node::concat(
                     self.head,
@@ -176,136 +159,46 @@ impl<K, V, const N: usize, C: Comparator<K>, G: LevelGenerator> SkipMap<K, V, N,
                     &mut other.tail,
                 );
             }
-        } else if can_concat {
-            // SAFETY: other.head is a valid head sentinel; we hold &mut other.
-            let first_of_other = unsafe { (*other.head.as_ptr()).take_next_chain() };
+            return;
+        }
 
-            // Clear other.head's skip links: after take_next_chain they may
-            // still point to nodes now belonging to self's chain.
-            for link in other.head_mut().links_mut() {
-                *link = None;
-            }
-            other.tail = None;
-            other.len = 0;
-
-            if let Some(first_nn) = first_of_other {
-                let attach = self.tail.unwrap_or(self.head);
-                // SAFETY: The attachment point (self.tail or self.head) has
-                // next == None.  first_nn.prev was set to None by take_next_chain.
-                unsafe { Node::set_head_next(attach, first_nn) };
-
-                // Rebuild all skip links in one O(n+m) pass.
-                //
-                // SAFETY: self.head is exclusively owned; all reachable nodes
-                // are live heap allocations with no other live references.
-                unsafe {
-                    Node::filter_rebuild(
-                        self.head,
-                        &mut self.len,
-                        &mut self.tail,
-                        |_| true,
-                        |_| {},
-                    );
-                }
+        // Reverse splice: other.last_key < self.first_key.  self is non-empty
+        // here because can_concat covers self.is_empty().
+        let can_prepend = other.tail.is_some_and(|other_tail_nn| {
+            // SAFETY: other_tail_nn is a live data node owned by other.
+            let other_last_key: &K = &unsafe { other_tail_nn.as_ref() }
+                .value()
+                .expect("other tail node has a value")
+                .0;
+            // SAFETY: self.head is a valid sentinel; next_as_ref returns a
+            // short-lived shared reference that is not retained.
+            let self_first_key: &K = &unsafe { self.head.as_ref() }
+                .next_as_ref()
+                .and_then(|n| n.value())
+                .expect("self is non-empty so its first data node has a value")
+                .0;
+            self.comparator.compare(other_last_key, self_first_key) == Ordering::Less
+        });
+        if can_prepend {
+            // `other` goes first: swap the two chains, then append.
+            core::mem::swap(&mut self.head, &mut other.head);
+            core::mem::swap(&mut self.tail, &mut other.tail);
+            core::mem::swap(&mut self.len, &mut other.len);
+            // SAFETY: we hold `&mut self` and `&mut other`, two distinct
+            // maps, and `other` now holds the non-empty original `self`.
+            unsafe {
+                Node::concat(
+                    self.head,
+                    &mut self.len,
+                    &mut self.tail,
+                    other.head,
+                    &mut other.len,
+                    &mut other.tail,
+                );
             }
         } else {
-            // Reverse fast path: every key of other is strictly less than every
-            // key of self (other.last_key < self.first_key).  Prepend other's
-            // chain before self's chain and rebuild skip links in one O(n+m)
-            // pass.
-            //
-            // Uses strict Less (not != Greater) for the same reason as above:
-            // equal-boundary keys must go through the slow path to replace.
-            //
-            // self is non-empty here (can_concat handles self.is_empty()).
-            let other_tail_saved = other.tail;
-            let can_prepend = other_tail_saved.is_some_and(|other_tail_nn| {
-                // SAFETY: other_tail_nn is a live data node owned by other.
-                let other_last_key: &K = &unsafe { other_tail_nn.as_ref() }
-                    .value()
-                    .expect("other tail node has a value")
-                    .0;
-                // SAFETY: self.head is a valid sentinel; next_as_ref returns a
-                // short-lived shared reference that is not retained.
-                let self_first_key: &K = &unsafe { self.head.as_ref() }
-                    .next_as_ref()
-                    .and_then(|n| n.value())
-                    .expect("self is non-empty so its first data node has a value")
-                    .0;
-                self.comparator.compare(other_last_key, self_first_key) == Ordering::Less
-            });
-
-            if can_prepend && same_height {
-                // `other` goes first: swap the two chains, then append.
-                core::mem::swap(&mut self.head, &mut other.head);
-                core::mem::swap(&mut self.tail, &mut other.tail);
-                core::mem::swap(&mut self.len, &mut other.len);
-                // SAFETY: we hold `&mut self` and `&mut other`, two distinct
-                // maps of the same height, and `other` now holds the
-                // non-empty original `self`.
-                unsafe {
-                    Node::concat(
-                        self.head,
-                        &mut self.len,
-                        &mut self.tail,
-                        other.head,
-                        &mut other.len,
-                        &mut other.tail,
-                    );
-                }
-            } else if can_prepend {
-                let other_tail_nn = other_tail_saved.expect("other is non-empty in this branch");
-
-                // Detach other's chain and clear its sentinel's skip links.
-                //
-                // SAFETY: other.head is a valid head sentinel; we hold &mut other.
-                let first_of_other = unsafe { (*other.head.as_ptr()).take_next_chain() };
-                for link in other.head_mut().links_mut() {
-                    *link = None;
-                }
-                other.tail = None;
-                other.len = 0;
-
-                // Detach self's existing chain so we can reattach it after
-                // other's chain.
-                //
-                // SAFETY: self.head is a valid head sentinel; we hold &mut self.
-                let first_of_self = unsafe { (*self.head.as_ptr()).take_next_chain() };
-
-                if let Some(first_other_nn) = first_of_other {
-                    // Wire: self.head -> other's chain -> self's old chain.
-                    //
-                    // SAFETY: self.head.next is None after take_next_chain.
-                    // first_other_nn.prev was cleared by take_next_chain.
-                    unsafe { Node::set_head_next(self.head, first_other_nn) };
-
-                    if let Some(first_self_nn) = first_of_self {
-                        // SAFETY: other_tail_nn.next is None (it was the tail
-                        // of other's chain).  first_self_nn.prev was cleared
-                        // by take_next_chain above.
-                        unsafe { Node::set_head_next(other_tail_nn, first_self_nn) };
-                    }
-
-                    // Rebuild all skip links in one O(n+m) pass.
-                    //
-                    // SAFETY: self.head is exclusively owned; all reachable
-                    // nodes are live heap allocations with no other live
-                    // references.
-                    unsafe {
-                        Node::filter_rebuild(
-                            self.head,
-                            &mut self.len,
-                            &mut self.tail,
-                            |_| true,
-                            |_| {},
-                        );
-                    }
-                }
-            } else {
-                // Slow path: overlapping key ranges, insert each entry individually.
-                while let Some((k, v)) = other.pop_first() {
-                    self.insert(k, v);
-                }
+            while let Some((k, v)) = other.pop_first() {
+                self.insert(k, v);
             }
         }
     }
@@ -717,14 +610,13 @@ mod tests {
         if !cfg!(miri) {
             let display = map.head_ref().display()?;
             assert_snapshot!(display, @"
-            [04]: 00
             [03]: 00 -------------------> 04
             [02]: 00 -------------> 03 -> 04 -------------------------------> 10
             [01]: 00 -------------> 03 -> 04 -------------> 07 -> 08 -------> 10
             [->]: 00 -> 01 -> 02 -> 03 -> 04 -> 05 -> 06 -> 07 -> 08 -> 09 -> 10
             [<-]: 00 <- 01 <- 02 <- 03 <- 04 <- 05 <- 06 <- 07 <- 08 <- 09 <- 10
 
-            [00|04] None
+            [00|03] None
             [01|00] Some((1, 10))
             [02|00] Some((2, 20))
             [03|02] Some((3, 30))

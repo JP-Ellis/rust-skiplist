@@ -45,8 +45,7 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> SkipSet<T, N, C, G>
     ///
     /// This operation is `$O(\log n)$` when the element ranges are strictly
     /// disjoint (`self.last() < other.first()` or `other.last() < self.first()`
-    /// according to the comparator), `$O(n+m)$` if the two sets also have
-    /// different maximum heights (different capacities), and
+    /// according to the comparator), and
     /// `$O(m \log(n+m))$` when the ranges overlap.
     ///
     /// The disjoint path compares only the boundary elements and trusts the
@@ -427,14 +426,13 @@ mod tests {
         if !cfg!(miri) {
             let display = set.inner.head_ref().display()?;
             assert_snapshot!(display, @"
-            [04]: 00
             [03]: 00 -------------------> 04
             [02]: 00 -------------> 03 -> 04 -------------------------------> 10
             [01]: 00 -------------> 03 -> 04 -------------> 07 -> 08 -------> 10
             [->]: 00 -> 01 -> 02 -> 03 -> 04 -> 05 -> 06 -> 07 -> 08 -> 09 -> 10
             [<-]: 00 <- 01 <- 02 <- 03 <- 04 <- 05 <- 06 <- 07 <- 08 <- 09 <- 10
 
-            [00|04] None
+            [00|03] None
             [01|00] Some(1)
             [02|00] Some(2)
             [03|02] Some(3)
