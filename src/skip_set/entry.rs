@@ -4,11 +4,12 @@
 //! [`OccupiedEntry`] (an element that compares equal to the probe is already
 //! present) or a [`VacantEntry`] (no such element exists).
 
-use core::fmt;
+use core::{fmt, ptr::NonNull};
 
 use crate::{
     comparator::{Comparator, ComparatorKey, OrdComparator, total_order_violation},
     level_generator::{LevelGenerator, geometric::Geometric},
+    node::Node,
     skip_set::SkipSet,
 };
 
@@ -114,6 +115,24 @@ pub struct OccupiedEntry<
     set: &'a mut SkipSet<T, N, C, G>,
     /// The probe value used for comparator-based lookups on this entry.
     value: T,
+    /// The node holding the equal element, found by [`SkipSet::entry`].  It
+    /// stays live while `set` is borrowed, and its pointer derives from the
+    /// head's, not from a reborrow of `set`.
+    node: NonNull<Node<T, N>>,
+}
+
+// SAFETY: `node` points into the set that `set` borrows exclusively, so the
+// entry is as safe to send as that borrow and the probe value, which is
+// what the auto trait required before `node` was added.
+unsafe impl<T: Send, C: Comparator<T> + Send, G: LevelGenerator + Send, const N: usize> Send
+    for OccupiedEntry<'_, T, N, C, G>
+{
+}
+
+// SAFETY: as for `Send`; shared access only reads the element through `node`.
+unsafe impl<T: Sync, C: Comparator<T> + Sync, G: LevelGenerator + Sync, const N: usize> Sync
+    for OccupiedEntry<'_, T, N, C, G>
+{
 }
 
 // MARK: Entry methods
@@ -302,12 +321,7 @@ impl<'a, T, C: Comparator<T>, G: LevelGenerator, const N: usize> OccupiedEntry<'
     /// Returns a shared reference to the element in the set that compares
     /// equal to the probe key.
     ///
-    /// This operation is `$O(\log n)$` on average.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the comparator does not implement a total order and the
-    /// lookup no longer finds the element the entry found.
+    /// This operation is `$O(1)$`.
     ///
     /// # Examples
     ///
@@ -320,27 +334,25 @@ impl<'a, T, C: Comparator<T>, G: LevelGenerator, const N: usize> OccupiedEntry<'
     ///     assert_eq!(e.get(), &5);
     /// }
     /// ```
+    #[expect(
+        clippy::expect_used,
+        clippy::missing_panics_doc,
+        reason = "the entry holds a data node, which always has a value"
+    )]
     #[inline]
     #[must_use]
-    pub fn get(&self) -> &T
-    where
-        C: ComparatorKey<T, T>,
-    {
-        self.set
-            .inner
-            .get_fast(&self.value)
-            .unwrap_or_else(|| total_order_violation())
+    pub fn get(&self) -> &T {
+        // SAFETY: `node` is a live data node of `set`, which is borrowed for
+        // the life of `self`.
+        unsafe { self.node.as_ref() }
+            .value()
+            .expect("data node has value")
     }
 
     /// Consumes the entry and returns a shared reference to the element valid
     /// for the lifetime `'a` of the original set borrow.
     ///
-    /// This operation is `$O(\log n)$` on average.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the comparator does not implement a total order and the
-    /// lookup no longer finds the element the entry found.
+    /// This operation is `$O(1)$`.
     ///
     /// # Examples
     ///
@@ -355,16 +367,20 @@ impl<'a, T, C: Comparator<T>, G: LevelGenerator, const N: usize> OccupiedEntry<'
     /// };
     /// assert_eq!(r, &5);
     /// ```
+    #[expect(
+        clippy::expect_used,
+        clippy::missing_panics_doc,
+        reason = "the entry holds a data node, which always has a value"
+    )]
     #[inline]
     #[must_use]
-    pub fn into_ref(self) -> &'a T
-    where
-        C: ComparatorKey<T, T>,
-    {
-        let Self { set, value } = self;
-        set.inner
-            .get_fast(&value)
-            .unwrap_or_else(|| total_order_violation())
+    pub fn into_ref(self) -> &'a T {
+        let Self { node, .. } = self;
+        // SAFETY: `node` is a live data node of the set, which stays borrowed
+        // for `'a`.
+        unsafe { node.as_ref() }
+            .value()
+            .expect("data node has value")
     }
 
     /// Removes the element from the set and returns it.
@@ -426,10 +442,15 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> SkipSet<T, N, C, G>
     where
         C: ComparatorKey<T, T>,
     {
-        if self.inner.contains(&value) {
-            Entry::Occupied(OccupiedEntry { set: self, value })
-        } else {
-            Entry::Vacant(VacantEntry { set: self, value })
+        let cmp = |v: &T| self.inner.comparator().compare_key(v, &value);
+        // SAFETY: `head_ptr` is the live head of this set's list.
+        match unsafe { Node::find_ptr(self.inner.head_ptr(), cmp) } {
+            Some(node) => Entry::Occupied(OccupiedEntry {
+                set: self,
+                value,
+                node,
+            }),
+            None => Entry::Vacant(VacantEntry { set: self, value }),
         }
     }
 }
@@ -476,6 +497,16 @@ mod tests {
 
     use super::Entry;
     use crate::{comparator::FnComparator, skip_set::SkipSet};
+
+    #[test]
+    fn entry_is_send_and_sync() {
+        const fn assert_send_sync<X>()
+        where
+            X: Send + Sync,
+        {
+        }
+        assert_send_sync::<Entry<'static, i32>>();
+    }
 
     fn make_set(values: &[i32]) -> SkipSet<i32> {
         let mut set = SkipSet::new();
@@ -915,14 +946,33 @@ mod tests {
         );
     }
 
-    #[test]
-    fn occupied_get_panics_when_element_vanishes() {
-        assert_flipped_entry_panics(|entry| *entry.get());
+    /// Finds `5` through [`SkipSet::entry`], flips the comparator, then runs
+    /// `op` on the occupied entry.  `op` must still see the element the entry
+    /// found, since reading it does not consult the comparator.
+    fn assert_flipped_entry_reads(op: impl FnOnce(FlippingEntry<'_>) -> i32) {
+        FLIPPED.with(|f| f.set(false));
+        let mut set = FlippingSet::with_comparator(FnComparator(flipping_cmp));
+        set.extend(0..10);
+
+        let Entry::Occupied(entry) = set.entry(5) else {
+            panic!("5 must be found before the flip");
+        };
+        FLIPPED.with(|f| f.set(true));
+        let read = op(entry);
+        FLIPPED.with(|f| f.set(false));
+
+        assert_eq!(read, 5);
+        set.assert_well_formed();
     }
 
     #[test]
-    fn occupied_into_ref_panics_when_element_vanishes() {
-        assert_flipped_entry_panics(|entry| *entry.into_ref());
+    fn occupied_get_reads_found_element_after_flip() {
+        assert_flipped_entry_reads(|entry| *entry.get());
+    }
+
+    #[test]
+    fn occupied_into_ref_reads_found_element_after_flip() {
+        assert_flipped_entry_reads(|entry| *entry.into_ref());
     }
 
     #[test]
