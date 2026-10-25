@@ -1161,8 +1161,9 @@ pub struct IntoIter<
     C: Comparator<K> = OrdComparator,
     G: LevelGenerator = Geometric,
 > {
-    /// The remaining entries.  `pop_first` / `pop_last` drive iteration;
-    /// dropping [`IntoIter`] drops the remaining entries via [`SkipMap::Drop`].
+    /// The remaining entries, popped along the base chain.  Skip links go
+    /// stale as nodes leave and are never followed again: iteration,
+    /// `Debug` and the drop of the rest use only `next` and `prev`.
     list: SkipMap<K, V, N, C, G>,
 }
 
@@ -1196,7 +1197,14 @@ impl<K, V, C: Comparator<K>, G: LevelGenerator, const N: usize> Iterator
 
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
-        self.list.pop_first()
+        // SAFETY: `list` is owned here and never follows its skip links
+        // again, so the links this pop leaves dangling are never read.
+        let mut node = unsafe { Node::pop_chain_front(self.list.head) }?;
+        self.list.len = self.list.len.saturating_sub(1);
+        if self.list.len == 0 {
+            self.list.tail = None;
+        }
+        node.take_value()
     }
 
     #[inline]
@@ -1210,7 +1218,13 @@ impl<K, V, C: Comparator<K>, G: LevelGenerator, const N: usize> DoubleEndedItera
 {
     #[inline]
     fn next_back(&mut self) -> Option<Self::Item> {
-        self.list.pop_last()
+        let tail = self.list.tail?;
+        // SAFETY: `tail` is the last node of `list`, which is owned here and
+        // never follows its skip links again.
+        let (mut node, prev) = unsafe { Node::pop_chain_back(tail) };
+        self.list.len = self.list.len.saturating_sub(1);
+        self.list.tail = if self.list.len == 0 { None } else { prev };
+        node.take_value()
     }
 }
 

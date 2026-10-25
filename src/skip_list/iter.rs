@@ -700,9 +700,9 @@ impl<T, const N: usize> FusedIterator for IterMut<'_, T, N> {}
 /// ```
 #[must_use = "iterators are lazy and do nothing unless consumed"]
 pub struct IntoIter<T, const N: usize = 16, G: LevelGenerator = Geometric> {
-    /// The remaining elements.  `pop_front` / `pop_back` drive iteration;
-    /// dropping `IntoIter` drops the remaining elements via the
-    /// [`SkipList::Drop`] impl.
+    /// The remaining elements, popped along the base chain.  Skip links go
+    /// stale as nodes leave and are never followed again: iteration,
+    /// `Debug` and the drop of the rest use only `next` and `prev`.
     list: SkipList<T, N, G>,
 }
 
@@ -728,7 +728,14 @@ impl<T, G: LevelGenerator, const N: usize> Iterator for IntoIter<T, N, G> {
 
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
-        self.list.pop_front()
+        // SAFETY: `list` is owned here and never follows its skip links
+        // again, so the links this pop leaves dangling are never read.
+        let mut node = unsafe { Node::pop_chain_front(self.list.head) }?;
+        self.list.len = self.list.len.saturating_sub(1);
+        if self.list.len == 0 {
+            self.list.tail = None;
+        }
+        node.take_value()
     }
 
     #[inline]
@@ -740,7 +747,13 @@ impl<T, G: LevelGenerator, const N: usize> Iterator for IntoIter<T, N, G> {
 impl<T, G: LevelGenerator, const N: usize> DoubleEndedIterator for IntoIter<T, N, G> {
     #[inline]
     fn next_back(&mut self) -> Option<Self::Item> {
-        self.list.pop_back()
+        let tail = self.list.tail?;
+        // SAFETY: `tail` is the last node of `list`, which is owned here and
+        // never follows its skip links again.
+        let (mut node, prev) = unsafe { Node::pop_chain_back(tail) };
+        self.list.len = self.list.len.saturating_sub(1);
+        self.list.tail = if self.list.len == 0 { None } else { prev };
+        node.take_value()
     }
 }
 
