@@ -184,18 +184,23 @@ pub(crate) enum NodeType {
 }
 
 /// A node in the skip list.
+///
+/// Fields are in hot-first order: a traversal step reads `value`, `next`
+/// and the lowest `links`, so for small values they share one cache line.
+/// `prev` serves only backward steps, so it goes last.
+#[repr(C)]
 pub(crate) struct Node<V, const N: usize> {
+    /// The value of the node.
+    value: Option<V>,
     /// Owning reference to the next node.
     next: Option<NonNull<Self>>,
-    /// Non-owning reference to the previous node.
-    prev: Option<NonNull<Self>>,
     /// Links to subsequent nodes.
     ///
     /// Uses a fixed-capacity inline array (no separate heap allocation) for
     /// better cache locality and fewer allocations per node.
     links: LevelArray<Option<Link<V, N>>, N>,
-    /// The value of the node.
-    value: Option<V>,
+    /// Non-owning reference to the previous node.
+    prev: Option<NonNull<Self>>,
 }
 
 // Node interface methods.

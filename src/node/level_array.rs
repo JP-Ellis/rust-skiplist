@@ -10,11 +10,14 @@ use core::{
 /// Replaces a heap-free vector for per-level bookkeeping: skip-link slots
 /// on a node, and precursor stacks in the mutable visitors.  Dereferences to
 /// the in-use prefix, so callers index and iterate it as a slice.
+///
+/// `len` comes first so that it shares a cache line with the low slots.
+#[repr(C)]
 pub(crate) struct LevelArray<T, const N: usize> {
-    /// Backing storage; only `items[..len]` is exposed.
-    items: [T; N],
     /// Number of in-use slots, always `<= N`.
     len: u8,
+    /// Backing storage; only `items[..len]` is exposed.
+    items: [T; N],
 }
 
 impl<T, const N: usize> LevelArray<T, N> {
