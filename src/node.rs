@@ -352,6 +352,39 @@ impl<V, const N: usize> Node<V, N> {
         self.value.as_ref()
     }
 
+    /// Get the value of a node that is not the head sentinel.
+    ///
+    /// # Safety
+    ///
+    /// The node must not be the head. The head is the only linked node without
+    /// a value. Links and `next` pointers never target the head, so every node
+    /// reached through either qualifies. Removals take a node's value only
+    /// after unlinking it, so a node still reachable from a list holds one.
+    #[inline]
+    pub(crate) unsafe fn value_unchecked(&self) -> &V {
+        debug_assert!(
+            self.value.is_some(),
+            "value_unchecked on a node without a value"
+        );
+        // SAFETY: the caller guarantees the node is not the head, so it holds
+        // a value.
+        unsafe { self.value.as_ref().unwrap_unchecked() }
+    }
+
+    /// Get the value of the node at `node`, which is not the head sentinel.
+    ///
+    /// # Safety
+    ///
+    /// `node` must be live for `'a` and must not be the head (see
+    /// [`value_unchecked`][Self::value_unchecked]).
+    #[inline]
+    pub(crate) unsafe fn value_at<'a>(node: NonNull<Self>) -> &'a V {
+        // SAFETY: the caller guarantees `node` is live for `'a`.
+        let node_ref: &'a Self = unsafe { node.as_ref() };
+        // SAFETY: the caller guarantees `node` is not the head.
+        unsafe { node_ref.value_unchecked() }
+    }
+
     /// Get a mutable reference to the value.
     #[inline]
     pub(crate) fn value_mut(&mut self) -> Option<&mut V> {
@@ -744,11 +777,10 @@ impl<V, const N: usize> Node<V, N> {
                     continue;
                 };
                 let node = link.node();
-                // SAFETY: link targets are live nodes of this list.
-                match unsafe { node.as_ref() }
-                    .value()
-                    .map_or(Ordering::Less, &cmp)
-                {
+                // SAFETY: a live link target, never the head; see
+                // `Node::value_unchecked`.
+                let value = unsafe { Node::value_at(node) };
+                match cmp(value) {
                     Ordering::Less => {
                         current = node;
                         level = l.wrapping_add(1);
@@ -760,11 +792,10 @@ impl<V, const N: usize> Node<V, N> {
             }
             // SAFETY: as above.
             let next = unsafe { current.as_ref() }.next()?;
-            // SAFETY: `next` is a live node of this list.
-            match unsafe { next.as_ref() }
-                .value()
-                .map_or(Ordering::Less, &cmp)
-            {
+            // SAFETY: `next` is a live list node, never the head; see
+            // `Node::value_unchecked`.
+            let value = unsafe { Node::value_at(next) };
+            match cmp(value) {
                 Ordering::Less => {
                     current = next;
                     level = 0;
@@ -1814,6 +1845,16 @@ pub(crate) mod tests {
         assert!(node.prev.is_none());
         assert_eq!(node.links.len(), MAX_LEVELS);
         assert!(node.value.is_none());
+    }
+
+    #[cfg(debug_assertions)]
+    #[test]
+    #[should_panic(expected = "value_unchecked on a node without a value")]
+    fn value_unchecked_on_head_panics() {
+        let head = Node::<u64, MAX_LEVELS>::new(MAX_LEVELS);
+        // SAFETY: deliberately violated; the debug assertion must fire before
+        // the value is read.
+        let _value: &u64 = unsafe { head.value_unchecked() };
     }
 
     #[test]

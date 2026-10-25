@@ -832,8 +832,10 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
                     if let Some(link) = links.get(l).and_then(|lk| lk.as_ref()) {
                         // link.node() carries Reserved (writable) provenance.
                         let next = link.node();
-                        // SAFETY: next is a valid heap-allocated node.
-                        let ord = unsafe { next.as_ref() }.value().map_or(Ordering::Less, cmp);
+                        // SAFETY: `next` is a live list node, never the head;
+                        // see `Node::value_unchecked`.
+                        let next_value = unsafe { Node::value_at(next) };
+                        let ord = cmp(next_value);
                         if ord != Ordering::Greater {
                             current = next;
                             rank = rank.saturating_add(link.distance().get());
@@ -855,8 +857,10 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
                     match unsafe { current.as_ref() }.next() {
                         None => break 'search,
                         Some(next) => {
-                            // SAFETY: next is a valid heap-allocated node.
-                            let ord = unsafe { next.as_ref() }.value().map_or(Ordering::Less, cmp);
+                            // SAFETY: `next` is a live list node, never the
+                            // head; see `Node::value_unchecked`.
+                            let next_value = unsafe { Node::value_at(next) };
+                            let ord = cmp(next_value);
                             current = next;
                             rank = rank.saturating_add(1);
                             match ord {

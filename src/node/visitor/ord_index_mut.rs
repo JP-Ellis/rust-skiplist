@@ -224,12 +224,10 @@ impl<T, Q: ?Sized, F: Fn(&T, &Q) -> Ordering, const N: usize> Visitor
                 let maybe_link = links.get(l).and_then(Option::as_ref);
                 if let Some(link) = maybe_link {
                     let node = link.node();
-                    // A value-less node compares `Less`. Links never target
-                    // the head, so this is defensive.
-                    // SAFETY: a link targets a live node of the list.
-                    let ord = unsafe { node.as_ref() }
-                        .value()
-                        .map_or(Ordering::Less, |v| cmp(v, target));
+                    // SAFETY: a link targets a live node of the list and never
+                    // the head, so the node holds a value.
+                    let value = unsafe { Node::value_at(node) };
+                    let ord = cmp(value, target);
                     if ord == Ordering::Less {
                         // A link from before `bound` at a level below every
                         // recorded one cannot pass `bound`; reaching it with
@@ -263,10 +261,10 @@ impl<T, Q: ?Sized, F: Fn(&T, &Q) -> Ordering, const N: usize> Visitor
             let Some(next) = unsafe { current.as_ref() }.next() else {
                 break None;
             };
-            // SAFETY: a `next` pointer targets a live node of the list.
-            let ord = unsafe { next.as_ref() }
-                .value()
-                .map_or(Ordering::Less, |v| cmp(v, target));
+            // SAFETY: a `next` pointer targets a live node of the list and
+            // never the head, so the node holds a value.
+            let value = unsafe { Node::value_at(next) };
+            let ord = cmp(value, target);
             if ord == Ordering::Greater {
                 break None;
             }
