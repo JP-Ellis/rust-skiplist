@@ -11,6 +11,52 @@ use crate::{
     },
 };
 
+/// The precursors an [`OrdIndexMutVisitor`] records, with their ranks.
+///
+/// The caller owns it, so the walk's result outlives the visitor (and the
+/// borrow of the target) without a copy out of the visitor.
+pub(crate) struct Path<T, const N: usize> {
+    /// For each level `l`: the last node at level `l` whose skip-link at
+    /// level `l` points to `>= target` (or has no link at that level).
+    /// Pre-filled with `head` so that every level has a valid precursor even
+    /// when the target is before the first real node.
+    precursors: LevelArray<NonNull<Node<T, N>>, N>,
+    /// Internal rank at the time each level's precursor was recorded.
+    /// Pre-filled with 0 (rank of the head sentinel).
+    distances: LevelArray<usize, N>,
+}
+
+impl<T, const N: usize> Path<T, N> {
+    /// Create a path with `head` as the precursor at every level of `head`.
+    ///
+    /// # Safety
+    ///
+    /// `head` must point to a valid node.
+    pub(crate) unsafe fn new(head: NonNull<Node<T, N>>) -> Self {
+        // SAFETY: the caller guarantees `head` is valid.
+        let max_levels = unsafe { head.as_ref() }.level();
+        Self {
+            precursors: LevelArray::from_fn(max_levels, |_| head),
+            distances: LevelArray::from_fn(max_levels, |_| 0_usize),
+        }
+    }
+
+    /// The precursor at each level.
+    pub(crate) fn precursors(&self) -> &[NonNull<Node<T, N>>] {
+        &self.precursors
+    }
+
+    /// The internal rank of each level's precursor.
+    pub(crate) fn distances(&self) -> &[usize] {
+        &self.distances
+    }
+
+    /// Split into `(precursors, distances)`.
+    pub(crate) fn into_parts(self) -> (LevelArray<NonNull<Node<T, N>>, N>, LevelArray<usize, N>) {
+        (self.precursors, self.distances)
+    }
+}
+
 /// Mutable ordered visitor that also tracks skip-link distances.
 ///
 /// Traverses the list in value order while recording, for each skip-link
@@ -58,11 +104,8 @@ pub(crate) struct OrdIndexMutVisitor<'a, T, Q: ?Sized, F: Fn(&T, &Q) -> Ordering
     target: &'a Q,
     /// Comparator: `cmp(node_value, target)`.
     cmp: F,
-    /// For each level `l`: the last node at level `l` whose skip-link at
-    /// level `l` points to `>= target` (or has no link at that level).
-    /// Pre-filled with `head` so that every level has a valid precursor even
-    /// when the target is before the first real node.
-    precursors: LevelArray<NonNull<Node<T, N>>, N>,
+    /// The precursors and their ranks, owned by the caller.
+    path: &'a mut Path<T, N>,
     /// The link target of the lowest-level precursor recorded so far, or
     /// `None` while every recorded precursor's link is absent. The traversal
     /// panics rather than advance onto it after a `Less` answer.
@@ -71,9 +114,6 @@ pub(crate) struct OrdIndexMutVisitor<'a, T, Q: ?Sized, F: Fn(&T, &Q) -> Ordering
     /// data node). Incremented by `link.distance()` when following a skip
     /// link and by 1 when stepping via the sequential `next` pointer.
     rank: usize,
-    /// Internal rank at the time each level's precursor was recorded.
-    /// Pre-filled with 0 (rank of the head sentinel).
-    precursor_distances: LevelArray<usize, N>,
     /// Suppresses `Send`/`Sync` auto-impls and marks variance as invariant
     /// in `T` (the visitor holds raw mutable pointers into the list).
     _marker: PhantomData<*mut Node<T, N>>,
@@ -83,13 +123,14 @@ impl<'a, T, Q: ?Sized, F: Fn(&T, &Q) -> Ordering, const N: usize>
     OrdIndexMutVisitor<'a, T, Q, F, N>
 {
     /// Create a new mutable ordered visitor with rank tracking, starting at
-    /// `head`.
+    /// `head` and recording into `path`.
     ///
     /// # Arguments
     ///
     /// - `head`: Raw pointer to the head node of the skip list. The pointer
     ///   must carry mutable (Reserved/Active) provenance so that it can be
     ///   accessed for writes without violating Tree Borrows.
+    /// - `path`: A fresh [`Path::new`] for the same `head`.
     /// - `target`: The value to search for.
     /// - `cmp`: Comparator returning `Ordering` for a node value vs. the target.
     ///
@@ -97,20 +138,27 @@ impl<'a, T, Q: ?Sized, F: Fn(&T, &Q) -> Ordering, const N: usize>
     ///
     /// `head` must be valid and exclusively accessible for the lifetime `'a`
     /// of the returned visitor.
-    pub(crate) fn new(head: NonNull<Node<T, N>>, target: &'a Q, cmp: F) -> Self {
+    pub(crate) fn new(
+        head: NonNull<Node<T, N>>,
+        path: &'a mut Path<T, N>,
+        target: &'a Q,
+        cmp: F,
+    ) -> Self {
         // SAFETY: caller guarantees head is valid for 'a.
         let max_levels = unsafe { head.as_ref() }.level();
-        let current = head;
+        debug_assert!(
+            path.precursors.len() == max_levels,
+            "path is not for this head"
+        );
         Self {
-            current,
+            current: head,
             level: max_levels,
             found: false,
             target,
             cmp,
-            precursors: LevelArray::from_fn(max_levels, |_| current),
+            path,
             bound: None,
             rank: 0,
-            precursor_distances: LevelArray::from_fn(max_levels, |_| 0_usize),
             _marker: PhantomData,
         }
     }
@@ -121,7 +169,7 @@ impl<'a, T, Q: ?Sized, F: Fn(&T, &Q) -> Ordering, const N: usize>
     /// precursor for level `l` was recorded. Used by insert and remove to
     /// compute the new skip-link distances after structural changes.
     pub(crate) fn precursor_distances(&self) -> &[usize] {
-        &self.precursor_distances
+        &self.path.distances
     }
 
     /// Returns the 0-based rank of the found node.
@@ -146,32 +194,6 @@ impl<'a, T, Q: ?Sized, F: Fn(&T, &Q) -> Ordering, const N: usize>
     /// This is `self.rank` directly: head sentinel = 0, first data node = 1.
     pub(crate) fn current_rank_internal(&self) -> usize {
         self.rank
-    }
-
-    /// Consume the visitor, releasing the borrow on the list and returning
-    /// the internal state as owned values.
-    ///
-    /// Returns `(current, found, precursors, precursor_distances)` where:
-    /// - `current` is the last node advanced to during traversal (the found
-    ///   node if `found`, otherwise the last node before the target position).
-    /// - `found` is `true` if the target value was present in the list.
-    /// - `precursors[l]` is the last node at level `l` before the target.
-    /// - `precursor_distances[l]` is the internal rank at that precursor.
-    #[expect(clippy::type_complexity, reason = "internal code")]
-    pub(crate) fn into_parts(
-        self,
-    ) -> (
-        NonNull<Node<T, N>>,
-        bool,
-        LevelArray<NonNull<Node<T, N>>, N>,
-        LevelArray<usize, N>,
-    ) {
-        (
-            self.current,
-            self.found,
-            self.precursors,
-            self.precursor_distances,
-        )
     }
 }
 
@@ -210,10 +232,11 @@ impl<T, Q: ?Sized, F: Fn(&T, &Q) -> Ordering, const N: usize> Visitor
         let mut level = self.level;
         let mut bound = self.bound;
         let mut rank = self.rank;
-        let distances: &mut [usize] = &mut self.precursor_distances;
+        let path = &mut *self.path;
+        let distances: &mut [usize] = &mut path.distances;
         let cmp = &self.cmp;
         let target = self.target;
-        let precursors: &mut [NonNull<Node<T, N>>] = &mut self.precursors;
+        let precursors: &mut [NonNull<Node<T, N>>] = &mut path.precursors;
         let result = 'walk: loop {
             // SAFETY: as in `step`.
             let links = unsafe { current.as_ref() }.links();
@@ -337,8 +360,8 @@ impl<T, Q: ?Sized, F: Fn(&T, &Q) -> Ordering, const N: usize> Visitor
                 // Link overshoots the target (Greater), points exactly to the
                 // target (Equal), or is absent (node has no link at this
                 // level): current is the precursor for this level.
-                self.precursors[level] = self.current;
-                self.precursor_distances[level] = self.rank;
+                self.path.precursors[level] = self.current;
+                self.path.distances[level] = self.rank;
                 if let Some(link) = maybe_link {
                     self.bound = Some(link.node());
                 } else {
@@ -386,7 +409,7 @@ impl<T, Q: ?Sized, F: Fn(&T, &Q) -> Ordering, const N: usize> VisitorMut
     }
 
     fn precursors(&self) -> &[Self::Precursor] {
-        &self.precursors
+        &self.path.precursors
     }
 }
 
@@ -403,7 +426,7 @@ mod tests {
     use pretty_assertions::assert_eq;
     use rstest::rstest;
 
-    use super::OrdIndexMutVisitor;
+    use super::{OrdIndexMutVisitor, Path};
     use crate::{
         node::{
             Node,
@@ -434,7 +457,8 @@ mod tests {
     #[rstest]
     fn find_existing_value(skiplist: Result<NonNull<Node<u8, MAX_LEVELS>>>) -> Result<()> {
         let head = skiplist?;
-        let mut visitor = OrdIndexMutVisitor::new(head, &30_u8, Ord::cmp);
+        let mut path = unsafe { Path::new(head) };
+        let mut visitor = OrdIndexMutVisitor::new(head, &mut path, &30_u8, Ord::cmp);
 
         let found = visitor.traverse();
 
@@ -449,7 +473,8 @@ mod tests {
     #[rstest]
     fn find_first_value(skiplist: Result<NonNull<Node<u8, MAX_LEVELS>>>) -> Result<()> {
         let head = skiplist?;
-        let mut visitor = OrdIndexMutVisitor::new(head, &10_u8, Ord::cmp);
+        let mut path = unsafe { Path::new(head) };
+        let mut visitor = OrdIndexMutVisitor::new(head, &mut path, &10_u8, Ord::cmp);
 
         let found = visitor.traverse();
 
@@ -463,7 +488,8 @@ mod tests {
     #[rstest]
     fn find_last_value(skiplist: Result<NonNull<Node<u8, MAX_LEVELS>>>) -> Result<()> {
         let head = skiplist?;
-        let mut visitor = OrdIndexMutVisitor::new(head, &40_u8, Ord::cmp);
+        let mut path = unsafe { Path::new(head) };
+        let mut visitor = OrdIndexMutVisitor::new(head, &mut path, &40_u8, Ord::cmp);
 
         let found = visitor.traverse();
 
@@ -477,7 +503,8 @@ mod tests {
     #[rstest]
     fn value_not_found(skiplist: Result<NonNull<Node<u8, MAX_LEVELS>>>) -> Result<()> {
         let head = skiplist?;
-        let mut visitor = OrdIndexMutVisitor::new(head, &25_u8, Ord::cmp);
+        let mut path = unsafe { Path::new(head) };
+        let mut visitor = OrdIndexMutVisitor::new(head, &mut path, &25_u8, Ord::cmp);
 
         let found = visitor.traverse();
 
@@ -490,7 +517,8 @@ mod tests {
     #[rstest]
     fn value_beyond_list(skiplist: Result<NonNull<Node<u8, MAX_LEVELS>>>) -> Result<()> {
         let head = skiplist?;
-        let mut visitor = OrdIndexMutVisitor::new(head, &99_u8, Ord::cmp);
+        let mut path = unsafe { Path::new(head) };
+        let mut visitor = OrdIndexMutVisitor::new(head, &mut path, &99_u8, Ord::cmp);
 
         let found = visitor.traverse();
 
@@ -504,7 +532,8 @@ mod tests {
     #[rstest]
     fn rank_first_element(skiplist: Result<NonNull<Node<u8, MAX_LEVELS>>>) -> Result<()> {
         let head = skiplist?;
-        let mut visitor = OrdIndexMutVisitor::new(head, &10_u8, Ord::cmp);
+        let mut path = unsafe { Path::new(head) };
+        let mut visitor = OrdIndexMutVisitor::new(head, &mut path, &10_u8, Ord::cmp);
         visitor.traverse();
 
         assert!(visitor.found());
@@ -516,7 +545,8 @@ mod tests {
     #[rstest]
     fn rank_second_element(skiplist: Result<NonNull<Node<u8, MAX_LEVELS>>>) -> Result<()> {
         let head = skiplist?;
-        let mut visitor = OrdIndexMutVisitor::new(head, &20_u8, Ord::cmp);
+        let mut path = unsafe { Path::new(head) };
+        let mut visitor = OrdIndexMutVisitor::new(head, &mut path, &20_u8, Ord::cmp);
         visitor.traverse();
 
         assert!(visitor.found());
@@ -528,7 +558,8 @@ mod tests {
     #[rstest]
     fn rank_third_element(skiplist: Result<NonNull<Node<u8, MAX_LEVELS>>>) -> Result<()> {
         let head = skiplist?;
-        let mut visitor = OrdIndexMutVisitor::new(head, &30_u8, Ord::cmp);
+        let mut path = unsafe { Path::new(head) };
+        let mut visitor = OrdIndexMutVisitor::new(head, &mut path, &30_u8, Ord::cmp);
         visitor.traverse();
 
         assert!(visitor.found());
@@ -540,7 +571,8 @@ mod tests {
     #[rstest]
     fn rank_last_element(skiplist: Result<NonNull<Node<u8, MAX_LEVELS>>>) -> Result<()> {
         let head = skiplist?;
-        let mut visitor = OrdIndexMutVisitor::new(head, &40_u8, Ord::cmp);
+        let mut path = unsafe { Path::new(head) };
+        let mut visitor = OrdIndexMutVisitor::new(head, &mut path, &40_u8, Ord::cmp);
         visitor.traverse();
 
         assert!(visitor.found());
@@ -555,7 +587,8 @@ mod tests {
     fn precursors_are_before_target(skiplist: Result<NonNull<Node<u8, MAX_LEVELS>>>) -> Result<()> {
         let head = skiplist?;
         // Target = 30 (node v3).
-        let mut visitor = OrdIndexMutVisitor::new(head, &30_u8, Ord::cmp);
+        let mut path = unsafe { Path::new(head) };
+        let mut visitor = OrdIndexMutVisitor::new(head, &mut path, &30_u8, Ord::cmp);
         while let Step::Advanced(_) = visitor.step() {}
 
         for &ptr in visitor.precursors() {
@@ -581,7 +614,8 @@ mod tests {
         // Internal ranks: head=0, v1=1, v2=2, v3=3, v4=4.
         // Searching for v3 (30): found at internal rank 3.
         // precursor_distances should all be <= 3.
-        let mut visitor = OrdIndexMutVisitor::new(head, &30_u8, Ord::cmp);
+        let mut path = unsafe { Path::new(head) };
+        let mut visitor = OrdIndexMutVisitor::new(head, &mut path, &30_u8, Ord::cmp);
         visitor.traverse();
 
         assert!(visitor.found());
@@ -603,7 +637,8 @@ mod tests {
         skiplist: Result<NonNull<Node<u8, MAX_LEVELS>>>,
     ) -> Result<()> {
         let head = skiplist?;
-        let mut visitor = OrdIndexMutVisitor::new(head, &99_u8, Ord::cmp);
+        let mut path = unsafe { Path::new(head) };
+        let mut visitor = OrdIndexMutVisitor::new(head, &mut path, &99_u8, Ord::cmp);
 
         loop {
             let s = visitor.step();
@@ -624,7 +659,8 @@ mod tests {
     #[rstest]
     fn current_mut_matches_current(skiplist: Result<NonNull<Node<u8, MAX_LEVELS>>>) -> Result<()> {
         let head = skiplist?;
-        let mut visitor = OrdIndexMutVisitor::new(head, &20_u8, Ord::cmp);
+        let mut path = unsafe { Path::new(head) };
+        let mut visitor = OrdIndexMutVisitor::new(head, &mut path, &20_u8, Ord::cmp);
         visitor.traverse();
 
         assert_eq!(visitor.current(), visitor.current_mut());
@@ -638,7 +674,8 @@ mod tests {
         let head = skiplist?;
         // SAFETY: head is valid for the duration of this test.
         let max_levels = unsafe { head.as_ref() }.level();
-        let mut visitor = OrdIndexMutVisitor::new(head, &20_u8, Ord::cmp);
+        let mut path = unsafe { Path::new(head) };
+        let mut visitor = OrdIndexMutVisitor::new(head, &mut path, &20_u8, Ord::cmp);
         visitor.traverse();
 
         assert_eq!(visitor.precursors().len(), max_levels);
@@ -673,7 +710,8 @@ mod tests {
         };
 
         let result = catch_unwind(AssertUnwindSafe(|| {
-            let mut visitor = OrdIndexMutVisitor::new(head, &35_u8, cmp);
+            let mut path = unsafe { Path::new(head) };
+            let mut visitor = OrdIndexMutVisitor::new(head, &mut path, &35_u8, cmp);
             visitor.traverse();
         }));
 
@@ -697,7 +735,8 @@ mod tests {
 
         let mut outcomes = Vec::new();
         for target in 0_u8..=50 {
-            let mut visitor = OrdIndexMutVisitor::new(head, &target, Ord::cmp);
+            let mut path = unsafe { Path::new(head) };
+            let mut visitor = OrdIndexMutVisitor::new(head, &mut path, &target, Ord::cmp);
             visitor.traverse();
             let current = unsafe { visitor.current().as_ref() }.value().copied();
             let outcome = (visitor.found(), current);
