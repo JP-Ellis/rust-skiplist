@@ -230,7 +230,9 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
         // height ∈ [0, total]: number of skip links to allocate.
         let height = self.generator.level();
         // SAFETY: the head is live and no reference to it is held.
-        unsafe { (*self.head.as_ptr()).grow_to(height) };
+        let head_mut = unsafe { &mut *self.head.as_ptr() };
+        head_mut.trim();
+        head_mut.grow_to(height);
 
         // Use OrdIndexMutVisitor to locate the insertion point, collect precursors,
         // and track rank distances for accurate skip-link maintenance.
@@ -1192,6 +1194,8 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
     where
         F: FnOnce(T) -> T,
     {
+        // SAFETY: the head is live and no reference to it is held.
+        unsafe { (*self.head.as_ptr()).trim() };
         // Single traversal: find the first equal element or the insertion point.
         let head = self.head;
         // SAFETY: `head` is this list's live head node.

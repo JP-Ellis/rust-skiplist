@@ -955,4 +955,26 @@ mod tests {
             }
         }
     }
+
+    // MARK: head trimming
+
+    #[test]
+    fn insert_trims_the_head_after_removals() {
+        let mut map = seeded(0..1000, 3);
+        while map.len() > 1 {
+            map.pop_last();
+        }
+        map.insert(1, 1);
+        // SAFETY: `head` is the live head of `map`, which owns every node it
+        // reaches.
+        let head = unsafe { map.head.as_ref() };
+        let mut tallest = 0;
+        let mut current = head.next_as_ref();
+        while let Some(node) = current {
+            tallest = tallest.max(node.level());
+            current = node.next_as_ref();
+        }
+        assert_eq!(head.level(), tallest.max(1));
+        map.assert_well_formed();
+    }
 }

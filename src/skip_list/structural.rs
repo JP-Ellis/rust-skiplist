@@ -700,21 +700,38 @@ mod tests {
 
     // MARK: head height
 
+    /// The head's height and the tallest tower's height in `list`.
+    fn heights(list: &SkipList<usize>) -> (usize, usize) {
+        // SAFETY: `head` is the live head of `list`, which owns every node it
+        // reaches.
+        let head = unsafe { list.head.as_ref() };
+        let mut tallest = 0;
+        let mut current = head.next_as_ref();
+        while let Some(node) = current {
+            tallest = tallest.max(node.level());
+            current = node.next_as_ref();
+        }
+        (head.level(), tallest)
+    }
+
     #[test]
     fn head_is_as_tall_as_the_tallest_tower() {
         for len in [0, 1, 2, 10, 100, 1000] {
-            let list = seeded(len, 3);
-            // SAFETY: `head` is the live head of `list`, which owns every node
-            // it reaches.
-            let head = unsafe { list.head.as_ref() };
-            let mut tallest = 0;
-            let mut current = head.next_as_ref();
-            while let Some(node) = current {
-                tallest = tallest.max(node.level());
-                current = node.next_as_ref();
-            }
-            assert_eq!(head.level(), tallest.max(1), "len {len}");
+            let (head, tallest) = heights(&seeded(len, 3));
+            assert_eq!(head, tallest.max(1), "len {len}");
         }
+    }
+
+    #[test]
+    fn insert_trims_the_head_after_removals() {
+        let mut list = seeded(1000, 3);
+        while list.len() > 1 {
+            list.pop_back();
+        }
+        list.push_back(1);
+        let (head, tallest) = heights(&list);
+        assert_eq!(head, tallest.max(1));
+        assert_well_formed(&list);
     }
 
     // MARK: append
