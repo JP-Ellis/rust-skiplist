@@ -205,9 +205,9 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> Extend<T> for SkipS
     where
         I: IntoIterator<Item = T>,
     {
-        for item in iter {
-            self.insert(item);
-        }
+        self.inner.extend_appending(iter, |inner, item| {
+            inner.get_or_insert(item);
+        });
     }
 }
 
@@ -274,7 +274,11 @@ impl<T, C: Comparator<T> + Default, G: LevelGenerator + Default, const N: usize>
         I: IntoIterator<Item = T>,
     {
         let mut set = Self::with_comparator_and_level_generator(C::default(), G::default());
-        set.extend(iter);
+        // A stable sort keeps equal items in input order, so the first of
+        // each run is the one kept, as with inserting one by one.
+        let mut items: Vec<T> = iter.into_iter().collect();
+        items.sort_by(|a, b| set.inner.comparator().compare(a, b));
+        set.extend(items);
         set
     }
 }
@@ -335,7 +339,21 @@ mod tests {
     use pretty_assertions::{assert_eq, assert_ne};
 
     use super::SkipSet;
-    use crate::comparator::FnComparator;
+    use crate::{comparator::FnComparator, test_util::Tagged};
+
+    #[test]
+    fn from_iter_keeps_first_duplicate() {
+        let items = Tagged::all(&[3, 1, 3, 2, 1, 3]);
+        let built: SkipSet<Tagged> = items.iter().copied().collect();
+        let mut inserted = SkipSet::<Tagged>::new();
+        for t in &items {
+            inserted.insert(*t);
+        }
+        let ids = |s: &SkipSet<Tagged>| s.iter().map(|t| t.id()).collect::<Vec<_>>();
+        assert_eq!(ids(&built), [1, 3, 0]);
+        assert_eq!(ids(&built), ids(&inserted));
+        built.assert_well_formed();
+    }
 
     fn make_set(values: &[i32]) -> SkipSet<i32> {
         let mut s = SkipSet::new();
