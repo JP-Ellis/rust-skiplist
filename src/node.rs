@@ -134,6 +134,7 @@ use alloc::{format, string::String};
 #[cfg(any(debug_assertions, test))]
 use core::fmt::Write;
 use core::{
+    cmp::Ordering,
     fmt::{self, Debug},
     ptr::NonNull,
 };
@@ -668,6 +669,65 @@ impl<V, const N: usize> Node<V, N> {
             // leave the node's own `next` empty so its `Drop` stops here.
             walk.current = boxed.next.take();
             drop(boxed);
+        }
+    }
+
+    /// Finds a node whose value `cmp` reports as `Equal`, or `None`.
+    ///
+    /// Descends from the head's top level and stops at the first `Equal`
+    /// met, so with duplicates it returns any one of them. The pointer comes
+    /// from a link or `next`, so it keeps the provenance needed to write
+    /// through it. A comparator that is not a total order can make the walk
+    /// miss a match or return a wrong node, but the walk only moves forward
+    /// and always ends.
+    ///
+    /// # Safety
+    ///
+    /// `head` must be the head of a live list.
+    pub(crate) unsafe fn find_ptr<F>(head: NonNull<Self>, cmp: F) -> Option<NonNull<Self>>
+    where
+        F: Fn(&V) -> Ordering,
+    {
+        let mut current = head;
+        // SAFETY: the caller guarantees `head` is live.
+        let mut level = unsafe { head.as_ref() }.level();
+        'walk: loop {
+            // SAFETY: `current` is `head` or was reached through a link or
+            // `next`, so it is live.
+            let links = unsafe { current.as_ref() }.links();
+            for l in (0..level).rev() {
+                let Some(link) = links.get(l).and_then(Option::as_ref) else {
+                    continue;
+                };
+                let node = link.node();
+                // SAFETY: link targets are live nodes of this list.
+                match unsafe { node.as_ref() }
+                    .value()
+                    .map_or(Ordering::Less, &cmp)
+                {
+                    Ordering::Less => {
+                        current = node;
+                        level = l.wrapping_add(1);
+                        continue 'walk;
+                    }
+                    Ordering::Equal => return Some(node),
+                    Ordering::Greater => {}
+                }
+            }
+            // SAFETY: as above.
+            let next = unsafe { current.as_ref() }.next()?;
+            // SAFETY: `next` is a live node of this list.
+            match unsafe { next.as_ref() }
+                .value()
+                .map_or(Ordering::Less, &cmp)
+            {
+                Ordering::Less => {
+                    current = next;
+                    level = 0;
+                }
+                Ordering::Equal => return Some(next),
+                Ordering::Greater => return None,
+            }
         }
     }
 
