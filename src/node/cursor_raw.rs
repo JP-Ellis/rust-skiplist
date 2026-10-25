@@ -100,10 +100,10 @@ where
                 break;
             };
             let dest = link.node();
-            // SAFETY: `dest` is a valid heap-allocated node.
-            let ord = unsafe { dest.as_ref() }
-                .value()
-                .map_or(Ordering::Less, |v| compare(v, q));
+            // SAFETY: `dest` is a live link target, never the head; see
+            // `Node::value_unchecked`.
+            let value = unsafe { Node::value_at(dest) };
+            let ord = compare(value, q);
             let should_advance = match ord {
                 Ordering::Less => true,
                 Ordering::Equal => advance_on_equal,
@@ -128,10 +128,10 @@ where
     // so we use it here to land on the precise gap.
     // SAFETY: `current` is valid; each `next` obtained from it is also valid.
     while let Some(next) = unsafe { current.as_ref() }.next() {
-        // SAFETY: `next` is a valid node.
-        let ord = unsafe { next.as_ref() }
-            .value()
-            .map_or(Ordering::Less, |v| compare(v, q));
+        // SAFETY: `next` is a live list node, never the head; see
+        // `Node::value_unchecked`.
+        let value = unsafe { Node::value_at(next) };
+        let ord = compare(value, q);
         let should_advance = match ord {
             Ordering::Less => true,
             Ordering::Equal => advance_on_equal,

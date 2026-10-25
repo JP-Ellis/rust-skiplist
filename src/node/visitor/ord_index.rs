@@ -124,13 +124,10 @@ impl<'a, T, Q: ?Sized, F: Fn(&T, &Q) -> Ordering, const N: usize> Visitor
                     // SAFETY: a link targets a live node of the list, and the
                     // list outlives `'a`.
                     let node: &'a Node<T, N> = unsafe { link.node().as_ref() };
-                    // A node with no value (head sentinel) is treated as
-                    // strictly less than any target. In a well-formed skip
-                    // list every skip-link target has a value, so this branch
-                    // is defensive.
-                    let ord = node
-                        .value()
-                        .map_or(Ordering::Less, |v| (self.cmp)(v, self.target));
+                    // SAFETY: links never target the head, so the node holds a
+                    // value.
+                    let value = unsafe { node.value_unchecked() };
+                    let ord = (self.cmp)(value, self.target);
 
                     if ord == Ordering::Less {
                         // Advance only on strict Less to ensure we land on the
@@ -152,9 +149,10 @@ impl<'a, T, Q: ?Sized, F: Fn(&T, &Q) -> Ordering, const N: usize> Visitor
             // pointer.
             self.level = 0;
             let next = self.current.next_as_ref()?;
-            let ord = next
-                .value()
-                .map_or(Ordering::Less, |v| (self.cmp)(v, self.target));
+            // SAFETY: `next` pointers never target the head, so the node
+            // holds a value.
+            let value = unsafe { next.value_unchecked() };
+            let ord = (self.cmp)(value, self.target);
             if ord == Ordering::Greater {
                 // The next sequential node is already past the target; the
                 // target is absent from the list.
