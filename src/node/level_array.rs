@@ -71,6 +71,19 @@ impl<T, const N: usize> LevelArray<T, N> {
         // `len <= N <= u8::MAX` was just checked, so the narrowing cannot fail.
         self.len = u8::try_from(len).expect("len <= N <= u8::MAX");
     }
+
+    /// Shortens the in-use prefix to `len`. Does nothing if `len` is not below
+    /// the current length. The dropped slots keep their values, unexposed.
+    #[inline]
+    #[expect(
+        clippy::expect_used,
+        reason = "`len` is below the current length, which fits a u8"
+    )]
+    pub(crate) fn truncate(&mut self, len: usize) {
+        if len < usize::from(self.len) {
+            self.len = u8::try_from(len).expect("len < self.len <= u8::MAX");
+        }
+    }
 }
 
 impl<T, const N: usize> Deref for LevelArray<T, N> {
@@ -154,6 +167,15 @@ mod tests {
         assert_eq!(&*arr, &[1, 10, 20]);
         arr.grow(2, |_| 99);
         assert_eq!(&*arr, &[1, 10, 20]);
+    }
+
+    #[test]
+    fn truncate_shortens_only() {
+        let mut arr: LevelArray<usize, 4> = LevelArray::from_fn(3, |i| i);
+        arr.truncate(4);
+        assert_eq!(&*arr, &[0, 1, 2]);
+        arr.truncate(1);
+        assert_eq!(&*arr, &[0]);
     }
 
     #[test]
