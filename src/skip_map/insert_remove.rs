@@ -9,7 +9,7 @@ use crate::{
     node::{
         Node,
         link::Link,
-        visitor::{OrdIndexMutVisitor, OrdMutVisitor, Visitor},
+        visitor::{OrdIndexMutVisitor, OrdMutVisitor, Path, Visitor},
     },
 };
 
@@ -66,15 +66,21 @@ impl<K, V, const N: usize, C: Comparator<K>, G: LevelGenerator> SkipMap<K, V, N,
         // borrow `self`.  The closure borrows only `self.comparator` (shared),
         // which is a distinct field from `self.head`.  Both borrows coexist
         // safely and are released when `visitor` is dropped via `into_parts()`.
-        let (current_rank, current, found, precursors, precursor_distances) = {
-            let head = self.head;
+        let head = self.head;
+        // SAFETY: `head` is this list's live head node.
+        let mut path = unsafe { Path::new(head) };
+        let (current_rank, current, found) = {
             let cmp = |entry: &(K, V), k: &K| self.comparator.compare(&entry.0, k);
-            let mut visitor = OrdIndexMutVisitor::new(head, &key, cmp);
+            let mut visitor = OrdIndexMutVisitor::new(head, &mut path, &key, cmp);
             visitor.traverse();
-            let rank = visitor.current_rank_internal();
-            let (current, found, precursors, precursor_distances) = visitor.into_parts();
-            (rank, current, found, precursors, precursor_distances)
+            (
+                visitor.current_rank_internal(),
+                visitor.current(),
+                visitor.found(),
+            )
         };
+        let precursors = path.precursors();
+        let precursor_distances = path.distances();
         // `visitor` and `cmp` are dropped here, releasing the borrow on
         // `self.comparator`.  `key` is no longer borrowed by the visitor.
 

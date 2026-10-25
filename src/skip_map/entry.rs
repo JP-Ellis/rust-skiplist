@@ -13,7 +13,7 @@ use crate::{
         Node,
         level_array::LevelArray,
         link::Link,
-        visitor::{OrdIndexMutVisitor, Visitor},
+        visitor::{OrdIndexMutVisitor, Path, Visitor},
     },
 };
 
@@ -942,17 +942,20 @@ impl<K, V, const N: usize, C: Comparator<K>, G: LevelGenerator> SkipMap<K, V, N,
     /// ```
     #[inline]
     pub fn entry(&mut self, key: K) -> Entry<'_, K, V, N, C, G> {
-        let (current_rank, current, found, precursors, precursor_distances) = {
-            // Copy head (NonNull is Copy) so the closure borrows only
-            // self.comparator, not the whole of self.
-            let head = self.head;
+        let head = self.head;
+        // SAFETY: `head` is this list's live head node.
+        let mut path = unsafe { Path::new(head) };
+        let (current_rank, current, found) = {
             let cmp = |entry: &(K, V), k: &K| self.comparator.compare(&entry.0, k);
-            let mut visitor = OrdIndexMutVisitor::new(head, &key, cmp);
+            let mut visitor = OrdIndexMutVisitor::new(head, &mut path, &key, cmp);
             visitor.traverse();
-            let rank = visitor.current_rank_internal();
-            let (current, found, precursors, precursor_distances) = visitor.into_parts();
-            (rank, current, found, precursors, precursor_distances)
+            (
+                visitor.current_rank_internal(),
+                visitor.current(),
+                visitor.found(),
+            )
         };
+        let (precursors, precursor_distances) = path.into_parts();
 
         if found {
             Entry::Occupied(OccupiedEntry {

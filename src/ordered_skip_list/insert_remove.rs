@@ -8,7 +8,7 @@ use crate::{
     node::{
         Node,
         link::Link,
-        visitor::{IndexMutVisitor, OrdIndexMutVisitor, OrdMutVisitor, Visitor},
+        visitor::{IndexMutVisitor, OrdIndexMutVisitor, OrdMutVisitor, Path, Visitor},
     },
     ordered_skip_list::OrderedSkipList,
 };
@@ -237,15 +237,21 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
         // borrow `self`.  The closure borrows only `self.comparator` (shared),
         // which is a distinct field from `self.head`.  Both borrows coexist
         // safely and are released when `visitor` is dropped via `into_parts()`.
-        let (current_rank, current, found, precursors, precursor_distances) = {
-            let head = self.head;
+        let head = self.head;
+        // SAFETY: `head` is this list's live head node.
+        let mut path = unsafe { Path::new(head) };
+        let (current_rank, current, found) = {
             let cmp = |v: &T, t: &T| self.comparator.compare(v, t);
-            let mut visitor = OrdIndexMutVisitor::new(head, &value, cmp);
+            let mut visitor = OrdIndexMutVisitor::new(head, &mut path, &value, cmp);
             visitor.traverse();
-            let rank = visitor.current_rank_internal();
-            let (current, found, precursors, precursor_distances) = visitor.into_parts();
-            (rank, current, found, precursors, precursor_distances)
+            (
+                visitor.current_rank_internal(),
+                visitor.current(),
+                visitor.found(),
+            )
         };
+        let precursors = path.precursors();
+        let precursor_distances = path.distances();
         // `visitor` and `cmp` are dropped here, releasing the borrow on
         // `self.comparator`.  `value` is no longer borrowed by the visitor.
 
@@ -1181,15 +1187,21 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
         F: FnOnce(T) -> T,
     {
         // Single traversal: find the first equal element or the insertion point.
-        let (current_rank, current, found, precursors, precursor_distances) = {
-            let head = self.head;
+        let head = self.head;
+        // SAFETY: `head` is this list's live head node.
+        let mut path = unsafe { Path::new(head) };
+        let (current_rank, current, found) = {
             let cmp = |v: &T, t: &T| self.comparator.compare(v, t);
-            let mut visitor = OrdIndexMutVisitor::new(head, &value, cmp);
+            let mut visitor = OrdIndexMutVisitor::new(head, &mut path, &value, cmp);
             visitor.traverse();
-            let rank = visitor.current_rank_internal();
-            let (current, found, precursors, precursor_distances) = visitor.into_parts();
-            (rank, current, found, precursors, precursor_distances)
+            (
+                visitor.current_rank_internal(),
+                visitor.current(),
+                visitor.found(),
+            )
         };
+        let precursors = path.precursors();
+        let precursor_distances = path.distances();
         // `cmp` / `visitor` dropped; borrows on `self.comparator` and `value` end.
 
         if found {
