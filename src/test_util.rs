@@ -17,6 +17,51 @@ use crate::{
     level_generator::LevelGenerator,
 };
 
+/// An element ordered by `key` alone, so that elements with equal keys stay
+/// distinguishable by `id`.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Tagged {
+    /// The ordering key.
+    key: i32,
+    /// Position in the input, ignored by comparisons.
+    id: usize,
+}
+
+impl Tagged {
+    /// One element per key, tagged with its position.
+    pub(crate) fn all(keys: &[i32]) -> Vec<Self> {
+        keys.iter()
+            .enumerate()
+            .map(|(id, &key)| Self { key, id })
+            .collect()
+    }
+
+    /// Position in the input.
+    pub(crate) fn id(self) -> usize {
+        self.id
+    }
+}
+
+impl PartialEq for Tagged {
+    fn eq(&self, other: &Self) -> bool {
+        self.key == other.key
+    }
+}
+
+impl Eq for Tagged {}
+
+impl PartialOrd for Tagged {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for Tagged {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.key.cmp(&other.key)
+    }
+}
+
 /// An element whose destructor panics when armed.
 ///
 /// Used to check that a container stays internally consistent when an element

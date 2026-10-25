@@ -12,7 +12,9 @@ use core::{
 };
 
 use crate::{
-    comparator::Comparator, level_generator::LevelGenerator, node::Node,
+    comparator::Comparator,
+    level_generator::LevelGenerator,
+    node::{Frontier, Node},
     ordered_skip_list::OrderedSkipList,
 };
 
@@ -264,6 +266,47 @@ impl<T: Hash, C: Comparator<T>, G: LevelGenerator, const N: usize> Hash
 
 // MARK: Extend
 
+impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, N, C, G> {
+    /// Adds every item from `iter`, appending in O(1) each item that
+    /// compares greater than the current last element and passing the rest
+    /// to `insert`.
+    ///
+    /// Sorted input therefore costs O(n) after one O(log n) walk.  An item
+    /// that is not greater, such as an equal one, takes the type's own
+    /// insertion path, so duplicates are handled exactly as `insert` would.
+    pub(crate) fn extend_appending<I, F>(&mut self, iter: I, mut insert: F)
+    where
+        I: IntoIterator<Item = T>,
+        F: FnMut(&mut Self, T),
+    {
+        let mut frontier: Option<Frontier<T, N>> = None;
+        for item in iter {
+            let after_tail = self.tail.is_none_or(|tail| {
+                // SAFETY: `tail` is a live data node of this list.
+                unsafe { tail.as_ref() }
+                    .value()
+                    .is_some_and(|v| self.comparator.compare(v, &item) == Ordering::Less)
+            });
+            if !after_tail {
+                frontier = None;
+                insert(self, item);
+                continue;
+            }
+            // SAFETY: `self.head` heads this live list of `self.len` nodes.
+            let appender =
+                frontier.get_or_insert_with(|| unsafe { Frontier::new(self.head, self.len) });
+            let height = self.generator.level();
+            let tail = self.tail.unwrap_or(self.head);
+            // SAFETY: `tail` is the last node at rank `self.len`, and the
+            // list has changed only through `appender` since it was built.
+            // `height` comes from this list's generator, so it fits the head.
+            let node = unsafe { appender.push(tail, self.len, height, item) };
+            self.tail = Some(node);
+            self.len = self.len.saturating_add(1);
+        }
+    }
+}
+
 impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> Extend<T>
     for OrderedSkipList<T, N, C, G>
 {
@@ -289,9 +332,7 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> Extend<T>
     where
         I: IntoIterator<Item = T>,
     {
-        for item in iter {
-            self.insert(item);
-        }
+        self.extend_appending(iter, Self::insert);
     }
 }
 
@@ -337,10 +378,15 @@ impl<T, C: Comparator<T> + Default, G: LevelGenerator + Default, const N: usize>
     /// of the source.  The list uses the default comparator and level generator
     /// for the type parameters `C` and `G`.
     ///
+    /// The input is buffered in a `Vec` and stable-sorted with the comparator
+    /// before the list is built, which costs an extra `$O(n)$` of memory.
+    ///
     /// # Panics
     ///
     /// If the comparator violates its contract, this method may panic after
-    /// earlier steps have taken effect; the collection stays valid.
+    /// earlier steps have taken effect; the collection stays valid.  The
+    /// standard sort used for buffering may also panic when the comparator is
+    /// not a total order.
     ///
     /// # Examples
     ///
@@ -357,7 +403,11 @@ impl<T, C: Comparator<T> + Default, G: LevelGenerator + Default, const N: usize>
         I: IntoIterator<Item = T>,
     {
         let mut list = Self::with_comparator_and_level_generator(C::default(), G::default());
-        list.extend(iter);
+        // A stable sort keeps equal items in input order, so the appends and
+        // inserts that follow produce exactly what inserting one by one would.
+        let mut items: Vec<T> = iter.into_iter().collect();
+        items.sort_by(|a, b| list.comparator.compare(a, b));
+        list.extend(items);
         list
     }
 }
@@ -409,7 +459,37 @@ mod tests {
     use pretty_assertions::{assert_eq, assert_ne};
 
     use super::super::OrderedSkipList;
-    use crate::comparator::FnComparator;
+    use crate::{comparator::FnComparator, test_util::Tagged};
+
+    // MARK: Bulk construction
+
+    /// Ids in list order.
+    fn ids(list: &OrderedSkipList<Tagged>) -> Vec<usize> {
+        list.iter().map(|t| t.id()).collect()
+    }
+
+    #[test]
+    fn from_iter_orders_duplicates_as_insert_does() {
+        let items = Tagged::all(&[3, 1, 3, 2, 1, 3]);
+        let built: OrderedSkipList<Tagged> = items.iter().copied().collect();
+        let mut inserted = OrderedSkipList::<Tagged>::new();
+        for t in &items {
+            inserted.insert(*t);
+        }
+        assert_eq!(ids(&built), ids(&inserted));
+        built.assert_well_formed();
+    }
+
+    #[test]
+    fn extend_mixes_appends_and_inserts() {
+        let mut list = OrderedSkipList::<i32>::new();
+        list.extend([5, 6, 7, 1, 8, 9, 3, 10, 10]);
+        assert_eq!(
+            list.iter().copied().collect::<Vec<_>>(),
+            [1, 3, 5, 6, 7, 8, 9, 10, 10]
+        );
+        list.assert_well_formed();
+    }
 
     // MARK: Debug
 

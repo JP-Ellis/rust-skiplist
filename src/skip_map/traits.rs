@@ -10,7 +10,11 @@ use core::{
 };
 
 use super::SkipMap;
-use crate::{comparator::Comparator, level_generator::LevelGenerator, node::Node};
+use crate::{
+    comparator::Comparator,
+    level_generator::LevelGenerator,
+    node::{Frontier, Node},
+};
 
 // MARK: Debug
 
@@ -307,8 +311,32 @@ impl<K, V, C: Comparator<K>, G: LevelGenerator, const N: usize> Extend<(K, V)>
     where
         I: IntoIterator<Item = (K, V)>,
     {
+        // Each entry whose key is greater than the last key is appended in
+        // O(1); any other goes through `insert`, which replaces on a match.
+        let mut frontier: Option<Frontier<(K, V), N>> = None;
         for (k, v) in iter {
-            self.insert(k, v);
+            let after_tail = self.tail.is_none_or(|tail| {
+                // SAFETY: `tail` is a live data node of this map.
+                unsafe { tail.as_ref() }
+                    .value()
+                    .is_some_and(|(tk, _)| self.comparator.compare(tk, &k) == Ordering::Less)
+            });
+            if !after_tail {
+                frontier = None;
+                self.insert(k, v);
+                continue;
+            }
+            // SAFETY: `self.head` heads this live map of `self.len` nodes.
+            let appender =
+                frontier.get_or_insert_with(|| unsafe { Frontier::new(self.head, self.len) });
+            let height = self.generator.level();
+            let tail = self.tail.unwrap_or(self.head);
+            // SAFETY: `tail` is the last node at rank `self.len`, and the map
+            // has changed only through `appender` since it was built.
+            // `height` comes from this map's generator, so it fits the head.
+            let node = unsafe { appender.push(tail, self.len, height, (k, v)) };
+            self.tail = Some(node);
+            self.len = self.len.saturating_add(1);
         }
     }
 }
@@ -360,10 +388,16 @@ impl<K, V, C: Comparator<K> + Default, G: LevelGenerator + Default, const N: usi
     /// iteration order of the source. The map uses the default comparator and
     /// level generator for the type parameters `C` and `G`.
     ///
+    /// The input is buffered in a `Vec` and stable-sorted by key with the
+    /// comparator before the map is built, which costs an extra `$O(n)$` of
+    /// memory.
+    ///
     /// # Panics
     ///
     /// If the comparator violates its contract, this method may panic after
-    /// earlier steps have taken effect; the collection stays valid.
+    /// earlier steps have taken effect; the collection stays valid.  The
+    /// standard sort used for buffering may also panic when the comparator is
+    /// not a total order.
     ///
     /// # Examples
     ///
@@ -381,7 +415,11 @@ impl<K, V, C: Comparator<K> + Default, G: LevelGenerator + Default, const N: usi
         I: IntoIterator<Item = (K, V)>,
     {
         let mut map = Self::with_comparator_and_level_generator(C::default(), G::default());
-        map.extend(iter);
+        // A stable sort keeps equal keys in input order, so the last value
+        // for each key wins, as with inserting one by one.
+        let mut entries: Vec<(K, V)> = iter.into_iter().collect();
+        entries.sort_by(|a, b| map.comparator.compare(&a.0, &b.0));
+        map.extend(entries);
         map
     }
 }
@@ -435,6 +473,29 @@ mod tests {
 
     use super::super::SkipMap;
     use crate::comparator::FnComparator;
+
+    #[test]
+    fn from_iter_keeps_last_value() {
+        let entries = [(3, 'a'), (1, 'b'), (3, 'c'), (2, 'd'), (1, 'e'), (3, 'f')];
+        let built: SkipMap<i32, char> = entries.into_iter().collect();
+        let mut inserted = SkipMap::<i32, char>::new();
+        for (k, v) in entries {
+            inserted.insert(k, v);
+        }
+        let pairs = |m: &SkipMap<i32, char>| m.iter().map(|(k, v)| (*k, *v)).collect::<Vec<_>>();
+        assert_eq!(pairs(&built), [(1, 'e'), (2, 'd'), (3, 'f')]);
+        assert_eq!(pairs(&built), pairs(&inserted));
+        built.assert_well_formed();
+    }
+
+    #[test]
+    fn extend_mixes_appends_and_replacements() {
+        let mut map = SkipMap::<i32, char>::new();
+        map.extend([(5, 'a'), (6, 'b'), (1, 'c'), (6, 'd'), (7, 'e')]);
+        let pairs: Vec<_> = map.iter().map(|(k, v)| (*k, *v)).collect();
+        assert_eq!(pairs, [(1, 'c'), (5, 'a'), (6, 'd'), (7, 'e')]);
+        map.assert_well_formed();
+    }
 
     fn hash_of<T>(value: &T) -> u64
     where
