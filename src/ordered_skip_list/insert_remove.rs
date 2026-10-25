@@ -488,9 +488,11 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
     #[expect(
         clippy::expect_used,
         clippy::missing_panics_doc,
+        clippy::unwrap_in_result,
         reason = "Link::new distance is pred_to_target + target_to_succ - 1 >= 1; \
                   decrement_distance panics only on underflow to 0 which cannot happen \
-                  for valid skip-link distances; all expects are invariant violations"
+                  for valid skip-link distances; the precursor scan starts before the \
+                  target; all expects are invariant violations"
     )]
     #[expect(
         clippy::indexing_slicing,
@@ -550,12 +552,17 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
         let max_levels = self.head_ref().level();
 
         // Find the direct level-l predecessor of target_ptr for each level
-        // l < target_height via a pointer-equality forward scan.
-        // The scan compares pointers only, so it finds the true predecessors
-        // even when the comparator answered inconsistently above.
+        // l < target_height via a pointer-equality forward scan.  The scan
+        // starts at the visitor's precursor just above the target's tower:
+        // the walk only moves forward, so that node lies before the target
+        // whatever the comparator said, and every level-l chain from it
+        // reaches the target.
         let scan_precursors: [NonNull<Node<T, N>>; N] = {
             let mut arr = [self.head; N];
-            let mut current = self.head;
+            let mut current = cmp_past_precursors
+                .get(target_height)
+                .copied()
+                .unwrap_or(self.head);
 
             for l in (0..target_height).rev() {
                 loop {
@@ -565,11 +572,11 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
                         .links()
                         .get(l)
                         .and_then(|lk| lk.as_ref());
-                    match maybe_link {
-                        None => break,
-                        Some(link) if link.node() == target_ptr => break,
-                        Some(link) => current = link.node(),
+                    let link = maybe_link.expect("a level-l chain before the target reaches it");
+                    if link.node() == target_ptr {
+                        break;
                     }
+                    current = link.node();
                 }
                 arr[l] = current;
             }
