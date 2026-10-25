@@ -126,12 +126,15 @@
 
 #![expect(dead_code, reason = "library is still being implemented")]
 
+use alloc::boxed::Box;
 #[cfg(any(debug_assertions, test))]
 use alloc::collections::BTreeMap;
 #[cfg(any(debug_assertions, test))]
-use alloc::{boxed::Box, format, string::String};
+use alloc::{format, string::String};
+#[cfg(any(debug_assertions, test))]
+use core::fmt::Write;
 use core::{
-    fmt::{self, Debug, Write},
+    fmt::{self, Debug},
     ptr::NonNull,
 };
 
