@@ -1116,6 +1116,18 @@ impl<V, const N: usize> Node<V, N> {
     /// the check calls [`total_order_violation`] instead.  It reads links
     /// only and compares pointers, so it makes no comparator calls.
     ///
+    /// After a completed [`OrdMutVisitor`] walk that found `target`, the
+    /// check always passes, so those callers run it in debug builds only.
+    /// Let `X` be the node `precursors[l]` links to at level
+    /// `l < target.level()`. The walk refuses to advance onto `X` (its
+    /// bound), and no link at level `l` or below can skip `X`, whose height
+    /// exceeds `l`. So `target` lies at or before `X`. A `target` strictly
+    /// before `X` would be reached by that level-`l` link first. So
+    /// `target` is `X`. The argument holds for any comparator. Precursors
+    /// built another way must still run the check.
+    ///
+    /// [`OrdMutVisitor`]: crate::node::visitor::OrdMutVisitor
+    ///
     /// # Panics
     ///
     /// Panics with the total-order message when a precursor does not link
