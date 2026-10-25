@@ -92,6 +92,15 @@ impl<'a, 'b, T, Q: ?Sized, F: Fn(&T, &Q) -> Ordering, const N: usize>
     pub(crate) fn rank(&self) -> usize {
         self.rank.saturating_sub(1)
     }
+
+    /// Returns the internal rank of the current node: 0 for the head, 1 for
+    /// the first data node.
+    ///
+    /// Ranks come from link distances, so they reflect the list's structure
+    /// whatever the comparator answered.
+    pub(crate) fn current_rank(&self) -> usize {
+        self.rank
+    }
 }
 
 impl<'a, T, Q: ?Sized, F: Fn(&T, &Q) -> Ordering, const N: usize> Visitor
