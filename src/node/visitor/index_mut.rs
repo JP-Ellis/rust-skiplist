@@ -168,7 +168,8 @@ impl<T, const N: usize> Visitor for IndexMutVisitor<T, N> {
                 let maybe_link = links.get(level).and_then(|l| l.as_ref());
 
                 if let Some(link) = maybe_link {
-                    let next_index = self.index.saturating_add(link.distance().get());
+                    // Ranks are bounded by the list length, so these sums never wrap.
+                    let next_index = self.index.wrapping_add(link.distance().get());
                     if next_index < self.target {
                         // This link advances us strictly closer to the target.
                         // Do NOT record a precursor here: the current node's
@@ -203,7 +204,7 @@ impl<T, const N: usize> Visitor for IndexMutVisitor<T, N> {
         let next_opt = unsafe { self.current.as_ref() }.next();
         if let Some(next_nn) = next_opt {
             self.current = next_nn;
-            self.index = self.index.saturating_add(1);
+            self.index = self.index.wrapping_add(1);
             return Step::Advanced(self.current);
         }
 
