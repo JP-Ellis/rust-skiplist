@@ -1,6 +1,6 @@
 //! Read-only ordered visitor.
 
-use core::cmp::Ordering;
+use core::{cmp::Ordering, ptr::NonNull};
 
 use crate::node::{
     Node,
@@ -29,6 +29,9 @@ pub(crate) struct OrdVisitor<'a, 'b, T, Q: ?Sized, F: Fn(&T, &Q) -> Ordering, co
     level: usize,
     /// Whether the target has been found.
     found: bool,
+    /// Last node that compared greater than the target. Links at lower levels
+    /// often point to it again, and they are rejected without a comparison.
+    rejected: Option<NonNull<Node<T, N>>>,
     /// The value being searched for. `'b` is independent of `'a` so that
     /// callers can pass a shorter-lived target while the returned node ref
     /// still carries the longer list lifetime `'a`.
@@ -54,6 +57,7 @@ impl<'a, 'b, T, Q: ?Sized, F: Fn(&T, &Q) -> Ordering, const N: usize>
             current: head,
             level: head.level(),
             found: false,
+            rejected: None,
             target,
             cmp,
         }
@@ -84,6 +88,9 @@ impl<'a, T, Q: ?Sized, F: Fn(&T, &Q) -> Ordering, const N: usize> Visitor
 
         for (level, maybe_link) in (0..self.level).zip(self.current.links()).rev() {
             if let Some(link) = maybe_link {
+                if self.rejected == Some(link.node()) {
+                    continue;
+                }
                 // SAFETY: link.node() is a valid heap-allocated node
                 // that lives at least as long as the visitor's `'a`.
                 let node = unsafe { link.node().as_ref() };
@@ -100,11 +107,16 @@ impl<'a, T, Q: ?Sized, F: Fn(&T, &Q) -> Ordering, const N: usize> Visitor
                     }
                     return Step::Advanced(self.current);
                 }
+                self.rejected = Some(link.node());
             }
         }
 
         // No skip-link can advance us; fall back to the sequential next pointer.
         self.level = 0;
+        // A missing `next` also ends the walk.
+        if self.current.next() == self.rejected {
+            return Step::Exhausted;
+        }
         if let Some(next) = self.current.next_as_ref() {
             // SAFETY: link and `next` targets are never the head.
             let value = unsafe { next.value_unchecked() };

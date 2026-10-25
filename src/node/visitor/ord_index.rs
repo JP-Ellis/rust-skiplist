@@ -1,6 +1,6 @@
 //! Read-only ordered visitor with rank/distance tracking.
 
-use core::cmp::Ordering;
+use core::{cmp::Ordering, ptr::NonNull};
 
 use crate::node::{
     Node,
@@ -51,6 +51,10 @@ pub(crate) struct OrdIndexVisitor<'a, 'b, T, Q: ?Sized, F: Fn(&T, &Q) -> Orderin
     /// data node). Incremented by `link.distance()` when following a skip
     /// link and by 1 when stepping via the sequential `next` pointer.
     rank: usize,
+    /// Last node that compared equal to or greater than the target, with that
+    /// ordering. Links at lower levels often point to it again, and they are
+    /// rejected without a comparison.
+    rejected: Option<(NonNull<Node<T, N>>, Ordering)>,
 }
 
 impl<'a, 'b, T, Q: ?Sized, F: Fn(&T, &Q) -> Ordering, const N: usize>
@@ -73,6 +77,7 @@ impl<'a, 'b, T, Q: ?Sized, F: Fn(&T, &Q) -> Ordering, const N: usize>
             target,
             cmp,
             rank: 0,
+            rejected: None,
         }
     }
 
@@ -127,6 +132,9 @@ impl<'a, T, Q: ?Sized, F: Fn(&T, &Q) -> Ordering, const N: usize> Visitor
 
         for (level, maybe_link) in (0..self.level).zip(self.current.links()).rev() {
             if let Some(link) = maybe_link {
+                if self.rejected.is_some_and(|(node, _)| node == link.node()) {
+                    continue;
+                }
                 // SAFETY: link.node() is a valid heap-allocated node that
                 // lives at least as long as the visitor's `'a`.
                 let node: &'a Node<T, N> = unsafe { link.node().as_ref() };
@@ -147,16 +155,22 @@ impl<'a, T, Q: ?Sized, F: Fn(&T, &Q) -> Ordering, const N: usize> Visitor
                     self.level = level.saturating_add(1);
                     return Step::Advanced(self.current);
                 }
+                self.rejected = Some((link.node(), ord));
             }
             // Link absent, Equal, or Greater: drop to next lower level.
         }
 
         // No skip-link can advance us; fall back to the sequential next pointer.
         self.level = 0;
-        if let Some(next) = self.current.next_as_ref() {
-            // SAFETY: link and `next` targets are never the head.
-            let value = unsafe { next.value_unchecked() };
-            let ord = (self.cmp)(value, self.target);
+        if let Some(next_ptr) = self.current.next() {
+            // SAFETY: `next_ptr` is a valid heap-allocated node that lives at
+            // least as long as the visitor's `'a`.
+            let next: &'a Node<T, N> = unsafe { next_ptr.as_ref() };
+            let ord = match self.rejected {
+                Some((node, ord)) if node == next_ptr => ord,
+                // SAFETY: link and `next` targets are never the head.
+                _ => (self.cmp)(unsafe { next.value_unchecked() }, self.target),
+            };
             if ord == Ordering::Greater {
                 // The next sequential node is already past the target; the
                 // target is absent from the list.
