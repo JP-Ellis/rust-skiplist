@@ -1121,10 +1121,50 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
     #[expect(
         clippy::expect_used,
         clippy::missing_panics_doc,
+        reason = "the node is a data node, so value() is Some"
+    )]
+    #[inline]
+    pub fn get_or_insert_with<F>(&mut self, value: T, f: F) -> &T
+    where
+        F: FnOnce(T) -> T,
+    {
+        let (node, _) = self.find_or_insert_with(value, f);
+        // SAFETY: `node` is a valid data node for the lifetime of &mut self.
+        unsafe { node.as_ref() }
+            .value()
+            .expect("data node has value")
+    }
+
+    /// Replaces the first element equal to `value` with `value` and returns
+    /// the old element, or inserts `value` and returns `None`.
+    ///
+    /// One traversal either way: a hit swaps the value in place.
+    #[expect(
+        clippy::expect_used,
+        clippy::unwrap_in_result,
+        reason = "the node is a data node, so value_mut() is Some"
+    )]
+    pub(crate) fn replace(&mut self, value: T) -> Option<T> {
+        let (mut node, unused) = self.find_or_insert_with(value, |v| v);
+        let replacement = unused?;
+        // SAFETY: `node` is a data node of this list, exclusively borrowed
+        // through &mut self.  `replacement` compares equal to the element
+        // it replaces, so the order is unchanged.
+        let slot = unsafe { node.as_mut() }
+            .value_mut()
+            .expect("data node has value");
+        Some(core::mem::replace(slot, replacement))
+    }
+
+    /// Finds the first element equal to `value`, or inserts `f(value)` in a
+    /// single traversal.
+    ///
+    /// Returns the found or inserted node, and gives `value` back unused when
+    /// an equal element was already present.
+    #[expect(
+        clippy::expect_used,
         reason = "Link::new distances are computed to be >= 1; \
                   increment_distance overflow requires > usize::MAX nodes; \
-                  precursors[0] always exists because max_levels >= 1; \
-                  current / new node are data nodes so value() is Some; \
                   all expects fire only on internal invariant violations, not on user input"
     )]
     #[expect(
@@ -1139,8 +1179,7 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
         reason = "insertion and link wiring touch provably disjoint heap nodes; \
                   splitting across blocks would require unsafe-crossing raw-pointer variables"
     )]
-    #[inline]
-    pub fn get_or_insert_with<F>(&mut self, value: T, f: F) -> &T
+    fn find_or_insert_with<F>(&mut self, value: T, f: F) -> (NonNull<Node<T, N>>, Option<T>)
     where
         F: FnOnce(T) -> T,
     {
@@ -1157,11 +1196,7 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
         // `cmp` / `visitor` dropped; borrows on `self.comparator` and `value` end.
 
         if found {
-            // `value` is not consumed; it is dropped via the early return.
-            // SAFETY: `current` is a valid data node for the lifetime of &mut self.
-            return unsafe { current.as_ref() }
-                .value()
-                .expect("data node has value");
+            return (current, Some(value));
         }
 
         // Generate height only when we actually need to insert so the RNG is
@@ -1225,11 +1260,7 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
             self.tail = Some(new_node);
         }
         self.len = self.len.saturating_add(1);
-
-        // SAFETY: `new_node` is a valid data node for the lifetime of &mut self.
-        unsafe { new_node.as_ref() }
-            .value()
-            .expect("new node has value")
+        (new_node, None)
     }
 }
 
