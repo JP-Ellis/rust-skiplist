@@ -145,7 +145,7 @@ impl<T, const N: usize> Visitor for IndexMutVisitor<T, N> {
     #[inline]
     #[expect(
         clippy::indexing_slicing,
-        reason = "`level <= max_levels == precursors.len()`, as in `step`"
+        reason = "`l < level <= max_levels == precursors.len()`, as in `step`"
     )]
     fn traverse(&mut self) -> Option<Self::NodeRef> {
         let target = self.target;
@@ -160,23 +160,8 @@ impl<T, const N: usize> Visitor for IndexMutVisitor<T, N> {
             }
             // SAFETY: as in `step`.
             let links = unsafe { current.as_ref() }.links();
-            // Levels above this node's tower have no link, so `current` is
-            // their precursor. A walk never rises above the tower it arrived
-            // on, so this range is normally empty.
-            let height = level.min(links.len());
-            precursors[height..level].fill(current);
-            distances[height..level].fill(index);
-            for (l, (maybe_link, (precursor, distance))) in links[..height]
-                .iter()
-                .zip(
-                    precursors[..height]
-                        .iter_mut()
-                        .zip(&mut distances[..height]),
-                )
-                .enumerate()
-                .rev()
-            {
-                if let Some(link) = maybe_link {
+            for l in (0..level).rev() {
+                if let Some(link) = links.get(l).and_then(Option::as_ref) {
                     let next_index = index.wrapping_add(link.distance().get());
                     if next_index < target {
                         current = link.node();
@@ -185,8 +170,8 @@ impl<T, const N: usize> Visitor for IndexMutVisitor<T, N> {
                         continue 'walk;
                     }
                 }
-                *precursor = current;
-                *distance = index;
+                precursors[l] = current;
+                distances[l] = index;
             }
             level = 0;
             // SAFETY: as in `step`.
