@@ -250,6 +250,20 @@ impl<V, const N: usize> Node<V, N> {
         self.links.len()
     }
 
+    /// Raises the node's level to `height`, filling the new top levels with
+    /// absent links. Does nothing if the node is already at least that tall.
+    ///
+    /// A head stays as tall as the tallest tower in its list: every insert
+    /// calls this on the head before linking a new tower.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `height > N`.
+    #[inline]
+    pub(crate) fn grow_to(&mut self, height: usize) {
+        self.links.grow(height, |_| None);
+    }
+
     /// Get a shared reference to the next node.
     ///
     /// The returned reference has **Frozen** provenance under Tree Borrows.
@@ -907,7 +921,8 @@ impl<V, const N: usize> Node<V, N> {
     /// Moves every node of the list headed by `other_head` to the end of the
     /// list headed by `head`, leaving the other list empty.
     ///
-    /// Only the links that end the first list are rewritten, so the splice is
+    /// The shorter head is first raised to the taller one's height. Only the
+    /// links that end the first list are then rewritten, so the splice is
     /// `$O(\log n)$`. No comparator is consulted. Both lists' lengths and
     /// tails are updated to match.
     ///
@@ -917,7 +932,7 @@ impl<V, const N: usize> Node<V, N> {
     ///   `*len` data nodes whose last node is `*tail` (`None` when empty).
     /// - `other_head` must be the exclusively-owned head of a different,
     ///   non-empty, well-formed list of `*other_len` data nodes whose last
-    ///   node is `*other_tail`, with the same height as `head`.
+    ///   node is `*other_tail`.
     #[expect(
         clippy::expect_used,
         reason = "the other list is non-empty, and a link from its head ends at rank 1 or \
@@ -925,8 +940,8 @@ impl<V, const N: usize> Node<V, N> {
     )]
     #[expect(
         clippy::indexing_slicing,
-        reason = "l < head.level() == other_head.level(); the last node at level l has a \
-                  link slot at l"
+        reason = "l < head.level() == other_head.level() once both are raised; the last node \
+                  at level l has a link slot at l"
     )]
     #[expect(
         clippy::multiple_unsafe_ops_per_block,
@@ -941,6 +956,14 @@ impl<V, const N: usize> Node<V, N> {
         other_len: &mut usize,
         other_tail: &mut Option<NonNull<Self>>,
     ) {
+        // SAFETY: the caller guarantees both heads are live and exclusively
+        // owned, and no reference to either is held.
+        let (head_mut, other_head_mut) =
+            unsafe { (&mut *head.as_ptr(), &mut *other_head.as_ptr()) };
+        let height = head_mut.level().max(other_head_mut.level());
+        head_mut.grow_to(height);
+        other_head_mut.grow_to(height);
+
         // Every rank is below `len + 1`, so the walk ends at the tail having
         // recorded the last node at each level.
         let mut visitor = IndexMutVisitor::new(head, len.wrapping_add(1));
@@ -1318,6 +1341,8 @@ impl<V, const N: usize> Drop for DropChain<'_, V, N> {
 /// Valid only while nothing else changes the list: any other insertion or
 /// removal leaves it stale.
 pub(crate) struct Frontier<V, const N: usize> {
+    /// Head of the list, raised when a pushed tower is taller.
+    head: NonNull<Node<V, N>>,
     /// Last node at each level and its rank (the head has rank 0).
     last: LevelArray<(NonNull<Node<V, N>>, usize), N>,
 }
@@ -1328,10 +1353,6 @@ impl<V, const N: usize> Frontier<V, N> {
     /// # Safety
     ///
     /// `head` must be the head of a live list of `len` data nodes.
-    #[expect(
-        clippy::indexing_slicing,
-        reason = "both arrays have the head's height, which bounds l"
-    )]
     pub(crate) unsafe fn new(head: NonNull<Node<V, N>>, len: usize) -> Self {
         // Every rank is below `len + 1`, so the walk ends at the tail having
         // recorded the last node at each level.
@@ -1339,7 +1360,14 @@ impl<V, const N: usize> Frontier<V, N> {
         visitor.traverse();
         let (_, precursors, distances) = visitor.into_parts();
         Self {
-            last: LevelArray::from_fn(precursors.len(), |l| (precursors[l], distances[l])),
+            head,
+            // `from_fn` also fills the unused slots above the head's height.
+            last: LevelArray::from_fn(precursors.len(), |l| {
+                (
+                    precursors.get(l).copied().unwrap_or(head),
+                    distances.get(l).copied().unwrap_or(0),
+                )
+            }),
         }
     }
 
@@ -1350,7 +1378,11 @@ impl<V, const N: usize> Frontier<V, N> {
     ///
     /// `tail` must be the last node (or the head of an empty list) at rank
     /// `rank` of the list this frontier was built for, unchanged since except
-    /// through this method, and `height` must not exceed the head's height.
+    /// through this method.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `height > N`.
     #[expect(
         clippy::expect_used,
         reason = "each recorded rank is at most `rank`, so the distance is at least 1"
@@ -1366,6 +1398,10 @@ impl<V, const N: usize> Frontier<V, N> {
         height: usize,
         value: V,
     ) -> NonNull<Node<V, N>> {
+        let head = self.head;
+        // SAFETY: the head is live and no reference to it is held.
+        unsafe { (*head.as_ptr()).grow_to(height) };
+        self.last.grow(height, |_| (head, 0));
         // SAFETY: the caller guarantees `tail` is the live last node.
         let new = unsafe { Node::insert_after(tail, Node::with_value(height, value)) };
         let new_rank = rank.wrapping_add(1);
@@ -1388,8 +1424,7 @@ impl<V, const N: usize> Frontier<V, N> {
 /// # Safety
 ///
 /// [`chain`][Self::chain] must return the head, length and tail of one live
-/// list, and [`level`][Self::level] must draw heights no taller than its
-/// head.
+/// list.
 pub(crate) unsafe trait Appendable<V, const N: usize> {
     /// Whether `item` sorts strictly after the last element; `true` for an
     /// empty list.
@@ -1436,8 +1471,7 @@ pub(crate) fn extend_appending<L, V, const N: usize>(
         let appender = frontier.get_or_insert_with(|| unsafe { Frontier::new(head, *len) });
         let last = tail.unwrap_or(head);
         // SAFETY: `last` is the last node at rank `*len`, and the list has
-        // changed only through `appender` since it was built. `Appendable`
-        // guarantees `height` fits the head.
+        // changed only through `appender` since it was built.
         let node = unsafe { appender.push(last, *len, height, item) };
         *tail = Some(node);
         *len = len.saturating_add(1);

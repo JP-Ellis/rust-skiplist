@@ -278,8 +278,7 @@ impl<K: Hash, V: Hash, C: Comparator<K>, G: LevelGenerator, const N: usize> Hash
 
 // MARK: Extend
 
-// SAFETY: `chain` returns this map's own head, length and tail, and `level`
-// draws from its generator, whose heights fit the head.
+// SAFETY: `chain` returns this map's own head, length and tail.
 unsafe impl<K, V, C: Comparator<K>, G: LevelGenerator, const N: usize> Appendable<(K, V), N>
     for SkipMap<K, V, N, C, G>
 {

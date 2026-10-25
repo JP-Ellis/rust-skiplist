@@ -266,8 +266,7 @@ impl<T: Hash, C: Comparator<T>, G: LevelGenerator, const N: usize> Hash
 
 // MARK: Extend
 
-// SAFETY: `chain` returns this list's own head, length and tail, and `level`
-// draws from its generator, whose heights fit the head.
+// SAFETY: `chain` returns this list's own head, length and tail.
 unsafe impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> Appendable<T, N>
     for OrderedSkipList<T, N, C, G>
 {
