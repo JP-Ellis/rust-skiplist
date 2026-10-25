@@ -62,9 +62,6 @@ impl<K, V, const N: usize, C: Comparator<K>, G: LevelGenerator> SkipMap<K, V, N,
     )]
     #[inline]
     pub fn insert(&mut self, key: K, value: V) -> Option<V> {
-        // height ∈ [0, total]: number of skip links to allocate.
-        let height = self.generator.level();
-
         // `self.head` is a `NonNull` (a `Copy` type), so copying it does not
         // borrow `self`.  The closure borrows only `self.comparator` (shared),
         // which is a distinct field from `self.head`.  Both borrows coexist
@@ -99,6 +96,11 @@ impl<K, V, const N: usize, C: Comparator<K>, G: LevelGenerator> SkipMap<K, V, N,
             };
             return Some(old);
         }
+
+        // height ∈ [0, total]: number of skip links to allocate.
+        // A replace links no node, so the height is drawn after the replace
+        // check.
+        let height = self.generator.level();
 
         // `found == false`: current is the last node with key < `key`.
         // new_rank = current_rank + 1.
