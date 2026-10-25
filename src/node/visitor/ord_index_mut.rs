@@ -2,10 +2,13 @@
 
 use core::{cmp::Ordering, marker::PhantomData, ptr::NonNull};
 
-use crate::node::{
-    Node,
-    level_array::LevelArray,
-    visitor::{Step, Visitor, VisitorMut},
+use crate::{
+    comparator::total_order_violation,
+    node::{
+        Node,
+        level_array::LevelArray,
+        visitor::{Step, Visitor, VisitorMut},
+    },
 };
 
 /// Mutable ordered visitor that also tracks skip-link distances.
@@ -61,12 +64,9 @@ pub(crate) struct OrdIndexMutVisitor<'a, T, Q: ?Sized, F: Fn(&T, &Q) -> Ordering
     /// when the target is before the first real node.
     precursors: LevelArray<NonNull<Node<T, N>>, N>,
     /// The link target of the lowest-level precursor recorded so far, or
-    /// `None` while every recorded precursor's link is absent.  The walk
-    /// never asks about it again; it reuses the recorded answer, so it cannot
-    /// advance onto it.
+    /// `None` while every recorded precursor's link is absent. The traversal
+    /// panics rather than advance onto it after a `Less` answer.
     bound: Option<NonNull<Node<T, N>>>,
-    /// Whether `bound` answered `Equal` (otherwise `Greater`).
-    bound_equal: bool,
     /// Current rank during traversal (1-based: 0 = head sentinel, 1 = first
     /// data node). Incremented by `link.distance()` when following a skip
     /// link and by 1 when stepping via the sequential `next` pointer.
@@ -109,7 +109,6 @@ impl<'a, T, Q: ?Sized, F: Fn(&T, &Q) -> Ordering, const N: usize>
             cmp,
             precursors: LevelArray::from_fn(max_levels, |_| current),
             bound: None,
-            bound_equal: false,
             rank: 0,
             precursor_distances: LevelArray::from_fn(max_levels, |_| 0_usize),
             _marker: PhantomData,
@@ -210,7 +209,6 @@ impl<T, Q: ?Sized, F: Fn(&T, &Q) -> Ordering, const N: usize> Visitor
         let mut current = self.current;
         let mut level = self.level;
         let mut bound = self.bound;
-        let mut bound_equal = self.bound_equal;
         let mut rank = self.rank;
         let distances: &mut [usize] = &mut self.precursor_distances;
         let cmp = &self.cmp;
@@ -221,21 +219,21 @@ impl<T, Q: ?Sized, F: Fn(&T, &Q) -> Ordering, const N: usize> Visitor
             let links = unsafe { current.as_ref() }.links();
             for l in (0..level).rev() {
                 let maybe_link = links.get(l).and_then(Option::as_ref);
-                if let Some(link) = maybe_link
-                    && Some(link.node()) != bound
-                {
+                if let Some(link) = maybe_link {
                     let node = link.node();
                     // SAFETY: as in `step`.
                     let ord = unsafe { node.as_ref() }
                         .value()
                         .map_or(Ordering::Less, |v| cmp(v, target));
                     if ord == Ordering::Less {
+                        if Some(node) == bound {
+                            total_order_violation();
+                        }
                         current = node;
                         rank = rank.wrapping_add(link.distance().get());
                         level = l.wrapping_add(1);
                         continue 'walk;
                     }
-                    bound_equal = ord == Ordering::Equal;
                 }
                 precursors[l] = current;
                 distances[l] = rank;
@@ -250,20 +248,15 @@ impl<T, Q: ?Sized, F: Fn(&T, &Q) -> Ordering, const N: usize> Visitor
             let Some(next) = unsafe { current.as_ref() }.next() else {
                 break None;
             };
-            let ord = if Some(next) == bound {
-                if bound_equal {
-                    Ordering::Equal
-                } else {
-                    Ordering::Greater
-                }
-            } else {
-                // SAFETY: as in `step`.
-                unsafe { next.as_ref() }
-                    .value()
-                    .map_or(Ordering::Less, |v| cmp(v, target))
-            };
+            // SAFETY: as in `step`.
+            let ord = unsafe { next.as_ref() }
+                .value()
+                .map_or(Ordering::Less, |v| cmp(v, target));
             if ord == Ordering::Greater {
                 break None;
+            }
+            if ord == Ordering::Less && Some(next) == bound {
+                total_order_violation();
             }
             current = next;
             rank = rank.wrapping_add(1);
@@ -275,16 +268,13 @@ impl<T, Q: ?Sized, F: Fn(&T, &Q) -> Ordering, const N: usize> Visitor
         self.current = current;
         self.level = level;
         self.bound = bound;
-        self.bound_equal = bound_equal;
         self.rank = rank;
         result
     }
 
     // In a well-formed list, `current` lies at or before `bound`, and every
-    // recorded precursor's link targets `bound` or later. Reusing the answer
-    // that recorded `bound`, instead of asking again, means the walk never
-    // advances onto it, which keeps the final position at or before each
-    // target.
+    // recorded precursor's link targets `bound` or later. Refusing a `Less`
+    // advance onto `bound` keeps the final position at or before each target.
     #[expect(
         clippy::indexing_slicing,
         reason = "`level` comes from `(0..self.level).rev()` where `self.level` is \
@@ -312,9 +302,7 @@ impl<T, Q: ?Sized, F: Fn(&T, &Q) -> Ordering, const N: usize> Visitor
                 // recorded.
                 let maybe_link = links.get(level).and_then(|l| l.as_ref());
 
-                if let Some(link) = maybe_link
-                    && Some(link.node()) != self.bound
-                {
+                if let Some(link) = maybe_link {
                     let node_ptr = link.node();
                     // Treat a value-less node (head sentinel) as strictly less
                     // than any target. In a well-formed skip list every
@@ -325,6 +313,12 @@ impl<T, Q: ?Sized, F: Fn(&T, &Q) -> Ordering, const N: usize> Visitor
                         .map_or(Ordering::Less, |v| (self.cmp)(v, self.target));
 
                     if ord == Ordering::Less {
+                        // A link from before `bound` at a level below every
+                        // recorded one cannot pass `bound`; reaching it with
+                        // `Less` contradicts the answer that recorded it.
+                        if Some(node_ptr) == self.bound {
+                            total_order_violation();
+                        }
                         // This link advances us strictly closer to the target.
                         // Do NOT record a precursor here: the current node's
                         // link[level] points to < target, so it is not the
@@ -338,7 +332,6 @@ impl<T, Q: ?Sized, F: Fn(&T, &Q) -> Ordering, const N: usize> Visitor
                         self.level = level.saturating_add(1);
                         return Step::Advanced(self.current);
                     }
-                    self.bound_equal = ord == Ordering::Equal;
                 }
 
                 // Link overshoots the target (Greater), points exactly to the
@@ -360,22 +353,17 @@ impl<T, Q: ?Sized, F: Fn(&T, &Q) -> Ordering, const N: usize> Visitor
         self.level = 0;
         // SAFETY: `self.current` is valid for `'a` and no other `&mut` exists.
         if let Some(next_nn) = unsafe { self.current.as_ref() }.next() {
-            let ord = if Some(next_nn) == self.bound {
-                if self.bound_equal {
-                    Ordering::Equal
-                } else {
-                    Ordering::Greater
-                }
-            } else {
-                // SAFETY: next_nn is a valid heap-allocated node.
-                unsafe { next_nn.as_ref() }
-                    .value()
-                    .map_or(Ordering::Less, |v| (self.cmp)(v, self.target))
-            };
+            // SAFETY: next_nn is a valid heap-allocated node.
+            let ord = unsafe { next_nn.as_ref() }
+                .value()
+                .map_or(Ordering::Less, |v| (self.cmp)(v, self.target));
             if ord == Ordering::Greater {
                 // The next sequential node is already past the target; the
                 // target is absent from the list.
                 return Step::Exhausted;
+            }
+            if ord == Ordering::Less && Some(next_nn) == self.bound {
+                total_order_violation();
             }
             self.current = next_nn;
             self.rank = self.rank.wrapping_add(1);
@@ -408,17 +396,21 @@ impl<T, Q: ?Sized, F: Fn(&T, &Q) -> Ordering, const N: usize> VisitorMut
 )]
 #[cfg(test)]
 mod tests {
-    use core::{cell::Cell, cmp::Ordering, ptr::NonNull};
+    use core::{cell::Cell, cmp::Ordering, panic::AssertUnwindSafe, ptr::NonNull};
+    use std::panic::catch_unwind;
 
     use anyhow::Result;
     use pretty_assertions::assert_eq;
     use rstest::rstest;
 
     use super::OrdIndexMutVisitor;
-    use crate::node::{
-        Node,
-        tests::{MAX_LEVELS, skiplist, tall_skiplist, well_formed_skiplist},
-        visitor::{Step, Visitor, VisitorMut},
+    use crate::{
+        node::{
+            Node,
+            tests::{MAX_LEVELS, skiplist, tall_skiplist, well_formed_skiplist},
+            visitor::{Step, Visitor, VisitorMut},
+        },
+        test_util::TOTAL_ORDER_PANIC,
     };
 
     type Ptr = NonNull<Node<u8, MAX_LEVELS>>;
@@ -658,14 +650,12 @@ mod tests {
     /// A comparator that answers `Greater` the first time it sees `30` and
     /// `Less` on every later call.
     ///
-    /// `30` becomes the bound after its first answer.  The walk reaches it
-    /// again from the base chain (`well_formed_skiplist`) or from a level-0
-    /// skip link (`tall_skiplist`), but reuses that answer instead of asking,
-    /// so the contradiction is never heard.
+    /// On `well_formed_skiplist` the second call comes from the base chain;
+    /// on `tall_skiplist` it comes from a level-0 skip link.
     #[rstest]
     #[case::base_chain(well_formed_skiplist())]
     #[case::skip_link(tall_skiplist())]
-    fn contradiction_on_bound_is_never_asked(#[case] fixture: Result<(Ptr, Ptr)>) -> Result<()> {
+    fn contradiction_on_bound_panics(#[case] fixture: Result<(Ptr, Ptr)>) -> Result<()> {
         let (head, tail) = fixture?;
         let calls = Cell::new(0_u32);
         let cmp = |value: &u8, target: &u8| {
@@ -682,11 +672,14 @@ mod tests {
             }
         };
 
-        let mut visitor = OrdIndexMutVisitor::new(head, &35_u8, cmp);
-        assert!(visitor.traverse().is_none());
-        assert_eq!(calls.get(), 1);
-        assert_eq!(unsafe { visitor.current().as_ref() }.value(), Some(&20));
-        assert_eq!(visitor.current_rank_internal(), 2);
+        let result = catch_unwind(AssertUnwindSafe(|| {
+            let mut visitor = OrdIndexMutVisitor::new(head, &35_u8, cmp);
+            visitor.traverse();
+        }));
+
+        let payload = result.expect_err("traversal must panic on the contradiction");
+        assert_eq!(payload.downcast_ref::<&str>(), Some(&TOTAL_ORDER_PANIC));
+        assert_eq!(calls.get(), 2);
         unsafe { Node::assert_well_formed(head, 4, Some(tail)) };
         assert_eq!(base_chain(head), [10, 20, 30, 40]);
         unsafe { drop(Box::from_raw(head.as_ptr())) };
