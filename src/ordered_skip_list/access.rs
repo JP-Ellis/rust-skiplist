@@ -250,7 +250,7 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
         // Treat Equal as Less so that traversal advances through *all* equal
         // nodes. After exhaustion, current() is the last equal node (or a
         // node that compares Less if none exist).
-        let cmp_past = |v: &T, q: &Q| match self.comparator.compare_key(v, q) {
+        let cmp_past = |e: &T, q: &Q| match self.comparator.compare_key(e, q) {
             core::cmp::Ordering::Equal | core::cmp::Ordering::Less => core::cmp::Ordering::Less,
             core::cmp::Ordering::Greater => core::cmp::Ordering::Greater,
         };
@@ -338,7 +338,7 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
     ///
     /// Returns `0` if no such element is present.
     ///
-    /// This operation is `$O(\log n + k)$` where k is the count of equal elements.
+    /// This operation is `$O(\log n)$` on average.
     ///
     /// # Examples
     ///
@@ -368,6 +368,10 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
         Q: ?Sized,
         C: ComparatorKey<T, Q>,
     {
+        // Walking a short run of equal elements is cheaper than a second
+        // descent; past `WALK` of them, find the last one by rank instead.
+        const WALK: usize = 16;
+
         if self.is_empty() {
             return 0;
         }
@@ -382,11 +386,27 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
             return 0;
         }
         let first_node = first.expect("found implies Some");
+        let first_rank = visitor.current_rank();
+
         let mut count = 1_usize;
         let mut cur = first_node.next_as_ref();
         while let Some(node) = cur {
             match node.value() {
                 Some(v) if self.comparator.compare_key(v, value) == Ordering::Equal => {
+                    if count == WALK {
+                        let cmp_past = |e: &T, q: &Q| match self.comparator.compare_key(e, q) {
+                            Ordering::Less | Ordering::Equal => Ordering::Less,
+                            Ordering::Greater => Ordering::Greater,
+                        };
+                        let mut last = OrdIndexVisitor::new(head, value, cmp_past);
+                        last.traverse();
+                        // Ranks are structural, so the difference is a node
+                        // count whatever the comparator answered.
+                        return last
+                            .current_rank()
+                            .saturating_sub(first_rank)
+                            .saturating_add(1);
+                    }
                     count = count.saturating_add(1);
                     cur = node.next_as_ref();
                 }
@@ -442,6 +462,7 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> Index<usize>
 #[cfg(test)]
 mod tests {
     use pretty_assertions::assert_eq;
+    use rstest::rstest;
 
     use super::super::OrderedSkipList;
     use crate::{comparator::FnComparator, level_generator::geometric::Geometric};
@@ -978,6 +999,26 @@ mod tests {
         list.insert(2);
         assert_eq!(list.count(&1), 2);
         assert_eq!(list.count(&2), 1);
+    }
+
+    #[rstest]
+    #[case::at_walk_limit(16)]
+    #[case::past_walk_limit(17)]
+    #[case::long_run(200)]
+    fn count_long_runs(#[case] copies: i32) {
+        let mut list = OrderedSkipList::<i32>::new();
+        for v in [1, 3] {
+            list.insert(v);
+        }
+        for _ in 0..copies {
+            list.insert(2);
+        }
+        assert_eq!(
+            list.count(&2),
+            usize::try_from(copies).expect("copies is positive")
+        );
+        assert_eq!(list.count(&1), 1);
+        assert_eq!(list.count(&3), 1);
     }
 
     #[test]
