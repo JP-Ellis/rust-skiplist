@@ -672,6 +672,46 @@ impl<V, const N: usize> Node<V, N> {
         }
     }
 
+    /// Detaches the first data node after `head` along the base chain, or
+    /// returns `None` when the list is empty.
+    ///
+    /// Skip links are not touched, so links to the node are left dangling.
+    ///
+    /// # Safety
+    ///
+    /// `head` must be the head of a live list, and nothing may follow that
+    /// list's skip links afterwards: only `next`, `prev` and `Drop`.
+    pub(crate) unsafe fn pop_chain_front(head: NonNull<Self>) -> Option<Box<Self>> {
+        // SAFETY: the caller guarantees `head` is live.
+        let mut first = unsafe { head.as_ref() }.next()?;
+        // SAFETY: `first` is a live data node of this list.
+        let node = unsafe { first.as_mut() };
+        // SAFETY: `node` is a data node; the caller accepts the dangling skip
+        // links `pop` leaves behind.
+        Some(unsafe { node.pop() })
+    }
+
+    /// Detaches `tail` along the base chain and returns it with its
+    /// predecessor (the head when `tail` was the only data node).
+    ///
+    /// Skip links are not touched, so links to the node are left dangling.
+    ///
+    /// # Safety
+    ///
+    /// `tail` must be the last data node of a live list, and nothing may
+    /// follow that list's skip links afterwards: only `next`, `prev` and
+    /// `Drop`.
+    pub(crate) unsafe fn pop_chain_back(
+        mut tail: NonNull<Self>,
+    ) -> (Box<Self>, Option<NonNull<Self>>) {
+        // SAFETY: the caller guarantees `tail` is live.
+        let node = unsafe { tail.as_mut() };
+        let prev = node.prev();
+        // SAFETY: `node` is a data node; the caller accepts the dangling skip
+        // links `pop` leaves behind.
+        (unsafe { node.pop() }, prev)
+    }
+
     /// Finds a node whose value `cmp` reports as `Equal`, or `None`.
     ///
     /// Descends from the head's top level and stops at the first `Equal`
