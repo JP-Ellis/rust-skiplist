@@ -4,7 +4,10 @@ use super::SkipMap;
 use crate::{
     comparator::{Comparator, ComparatorKey},
     level_generator::LevelGenerator,
-    node::visitor::{IndexVisitor, OrdIndexVisitor, OrdMutVisitor, OrdVisitor, Visitor},
+    node::{
+        Node,
+        visitor::{IndexVisitor, OrdIndexVisitor, OrdVisitor, Visitor},
+    },
 };
 
 impl<K, V, const N: usize, C: Comparator<K>, G: LevelGenerator> SkipMap<K, V, N, C, G> {
@@ -203,18 +206,13 @@ impl<K, V, const N: usize, C: Comparator<K>, G: LevelGenerator> SkipMap<K, V, N,
         Q: ?Sized,
         C: ComparatorKey<K, Q>,
     {
-        let cmp = |entry: &(K, V), q: &Q| self.comparator.compare_key(&entry.0, q);
-        let mut visitor = OrdMutVisitor::new(self.head, key, cmp);
-        visitor.traverse();
-        let (mut current, found, _precursors) = visitor.into_parts();
-        if found {
-            // SAFETY: `current` is a valid, exclusively-owned node pointer.
-            // We only mutate the value component; the key is never touched, so
-            // the ordering invariant is preserved.
-            unsafe { Some(&mut current.as_mut().value_mut()?.1) }
-        } else {
-            None
-        }
+        let cmp = |entry: &(K, V)| self.comparator.compare_key(&entry.0, key);
+        // SAFETY: `self.head` heads this live map.
+        let mut node = unsafe { Node::find_ptr(self.head, cmp) }?;
+        // SAFETY: `node` is a live node of this map, exclusively borrowed
+        // through `&mut self`.  Only the value is exposed, so the ordering
+        // invariant is preserved.
+        unsafe { Some(&mut node.as_mut().value_mut()?.1) }
     }
 
     /// Returns the key-value pair at the given 0-based `index`, or `None` if
