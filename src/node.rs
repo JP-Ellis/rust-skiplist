@@ -141,7 +141,11 @@ use core::{
 
 use crate::{
     comparator::total_order_violation,
-    node::{level_array::LevelArray, link::Link},
+    node::{
+        level_array::LevelArray,
+        link::Link,
+        visitor::{IndexMutVisitor, Visitor},
+    },
 };
 
 pub(crate) mod cursor_raw;
@@ -1146,6 +1150,77 @@ impl<V, const N: usize> Drop for DropChain<'_, V, N> {
             Node::set_head_next(self.attach, first);
             Node::filter_rebuild(self.head, self.out_len, self.out_tail, |_| true, |_| {});
         }
+    }
+}
+
+/// The last node at every level of a list, with its rank, for appending
+/// after the tail without a walk per element.
+///
+/// Valid only while nothing else changes the list: any other insertion or
+/// removal leaves it stale.
+pub(crate) struct Frontier<V, const N: usize> {
+    /// Last node at each level and its rank (the head has rank 0).
+    last: LevelArray<(NonNull<Node<V, N>>, usize), N>,
+}
+
+impl<V, const N: usize> Frontier<V, N> {
+    /// Records the last node at every level of the list headed by `head`.
+    ///
+    /// # Safety
+    ///
+    /// `head` must be the head of a live list of `len` data nodes.
+    #[expect(
+        clippy::indexing_slicing,
+        reason = "both arrays have the head's height, which bounds l"
+    )]
+    pub(crate) unsafe fn new(head: NonNull<Node<V, N>>, len: usize) -> Self {
+        // Every rank is below `len + 1`, so the walk ends at the tail having
+        // recorded the last node at each level.
+        let mut visitor = IndexMutVisitor::new(head, len.wrapping_add(1));
+        visitor.traverse();
+        let (_, precursors, distances) = visitor.into_parts();
+        Self {
+            last: LevelArray::from_fn(precursors.len(), |l| (precursors[l], distances[l])),
+        }
+    }
+
+    /// Links a new node holding `value`, with a tower of `height`, after
+    /// `tail`, and returns it.
+    ///
+    /// # Safety
+    ///
+    /// `tail` must be the last node (or the head of an empty list) at rank
+    /// `rank` of the list this frontier was built for, unchanged since except
+    /// through this method, and `height` must not exceed the head's height.
+    #[expect(
+        clippy::expect_used,
+        reason = "each recorded rank is at most `rank`, so the distance is at least 1"
+    )]
+    #[expect(
+        clippy::indexing_slicing,
+        reason = "l < height, the height of both the new node and `pred`"
+    )]
+    pub(crate) unsafe fn push(
+        &mut self,
+        tail: NonNull<Node<V, N>>,
+        rank: usize,
+        height: usize,
+        value: V,
+    ) -> NonNull<Node<V, N>> {
+        // SAFETY: the caller guarantees `tail` is the live last node.
+        let new = unsafe { Node::insert_after(tail, Node::with_value(height, value)) };
+        let new_rank = rank.wrapping_add(1);
+        // Levels at or above `height` keep their links: no link spans past
+        // the old tail.
+        for (l, (pred, pred_rank)) in self.last.iter_mut().enumerate().take(height) {
+            let link = Link::new(new, new_rank.wrapping_sub(*pred_rank)).expect("distance >= 1");
+            // SAFETY: `pred` is a live node of the list, the last at level
+            // `l`, so it has a link slot at that level.
+            unsafe { pred.as_mut() }.links_mut()[l] = Some(link);
+            *pred = new;
+            *pred_rank = new_rank;
+        }
+        new
     }
 }
 
