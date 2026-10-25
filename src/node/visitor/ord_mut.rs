@@ -166,10 +166,9 @@ impl<T, Q: ?Sized, F: Fn(&T, &Q) -> Ordering, const N: usize> Visitor
                 let maybe_link = links.get(l).and_then(Option::as_ref);
                 if let Some(link) = maybe_link {
                     let node = link.node();
-                    // SAFETY: as in `step`.
-                    let ord = unsafe { node.as_ref() }
-                        .value()
-                        .map_or(Ordering::Less, |v| cmp(v, target));
+                    // SAFETY: as in `step`; link and `next` targets are never the head.
+                    let value = unsafe { Node::value_at(node) };
+                    let ord = cmp(value, target);
                     if ord == Ordering::Less {
                         if Some(node) == bound {
                             total_order_violation();
@@ -191,10 +190,9 @@ impl<T, Q: ?Sized, F: Fn(&T, &Q) -> Ordering, const N: usize> Visitor
             let Some(next) = unsafe { current.as_ref() }.next() else {
                 break None;
             };
-            // SAFETY: as in `step`.
-            let ord = unsafe { next.as_ref() }
-                .value()
-                .map_or(Ordering::Less, |v| cmp(v, target));
+            // SAFETY: as in `step`; link and `next` targets are never the head.
+            let value = unsafe { Node::value_at(next) };
+            let ord = cmp(value, target);
             if ord == Ordering::Greater {
                 break None;
             }
@@ -245,13 +243,9 @@ impl<T, Q: ?Sized, F: Fn(&T, &Q) -> Ordering, const N: usize> Visitor
 
                 if let Some(link) = maybe_link {
                     let node_ptr = link.node();
-                    // Treat a value-less node (head sentinel) as strictly less
-                    // than any target. In a well-formed skip list every
-                    // skip-link target has a value, so this is defensive.
-                    // SAFETY: node_ptr is a valid heap-allocated node.
-                    let ord = unsafe { node_ptr.as_ref() }
-                        .value()
-                        .map_or(Ordering::Less, |v| (self.cmp)(v, self.target));
+                    // SAFETY: node_ptr is a valid heap-allocated node; link and `next` targets are never the head.
+                    let value = unsafe { Node::value_at(node_ptr) };
+                    let ord = (self.cmp)(value, self.target);
 
                     if ord == Ordering::Less {
                         // A link from before `bound` at a level below every
@@ -291,10 +285,9 @@ impl<T, Q: ?Sized, F: Fn(&T, &Q) -> Ordering, const N: usize> Visitor
         self.level = 0;
         // SAFETY: `self.current` is valid for `'a` and no other `&mut` exists.
         if let Some(next_nn) = unsafe { self.current.as_ref() }.next() {
-            // SAFETY: next_nn is a valid heap-allocated node.
-            let ord = unsafe { next_nn.as_ref() }
-                .value()
-                .map_or(Ordering::Less, |v| (self.cmp)(v, self.target));
+            // SAFETY: next_nn is a valid heap-allocated node; link and `next` targets are never the head.
+            let value = unsafe { Node::value_at(next_nn) };
+            let ord = (self.cmp)(value, self.target);
             if ord == Ordering::Greater {
                 // The next sequential node is already past the target; the
                 // target is absent from the list.

@@ -352,6 +352,38 @@ impl<V, const N: usize> Node<V, N> {
         self.value.as_ref()
     }
 
+    /// Get the value of a node that is not the head sentinel.
+    ///
+    /// # Safety
+    ///
+    /// The node must not be the head. A linked node other than the head always
+    /// holds a value; removals take it only after unlinking the node. Every
+    /// node reached through a link or a `next` pointer qualifies.
+    #[inline]
+    pub(crate) unsafe fn value_unchecked(&self) -> &V {
+        debug_assert!(
+            self.value.is_some(),
+            "value_unchecked on a node without a value"
+        );
+        // SAFETY: the caller guarantees the node is not the head, so it holds
+        // a value.
+        unsafe { self.value.as_ref().unwrap_unchecked() }
+    }
+
+    /// Get the value of the node at `node`, which is not the head sentinel.
+    ///
+    /// # Safety
+    ///
+    /// `node` must be live for `'a` and must not be the head (see
+    /// [`value_unchecked`][Self::value_unchecked]).
+    #[inline]
+    pub(crate) unsafe fn value_at<'a>(node: NonNull<Self>) -> &'a V {
+        // SAFETY: the caller guarantees `node` is live for `'a`.
+        let node_ref: &'a Self = unsafe { node.as_ref() };
+        // SAFETY: the caller guarantees `node` is not the head.
+        unsafe { node_ref.value_unchecked() }
+    }
+
     /// Get a mutable reference to the value.
     #[inline]
     pub(crate) fn value_mut(&mut self) -> Option<&mut V> {
@@ -744,11 +776,9 @@ impl<V, const N: usize> Node<V, N> {
                     continue;
                 };
                 let node = link.node();
-                // SAFETY: link targets are live nodes of this list.
-                match unsafe { node.as_ref() }
-                    .value()
-                    .map_or(Ordering::Less, &cmp)
-                {
+                // SAFETY: link targets are live nodes of this list; link and `next` targets are never the head.
+                let value = unsafe { Node::value_at(node) };
+                match cmp(value) {
                     Ordering::Less => {
                         current = node;
                         level = l.wrapping_add(1);
@@ -760,11 +790,9 @@ impl<V, const N: usize> Node<V, N> {
             }
             // SAFETY: as above.
             let next = unsafe { current.as_ref() }.next()?;
-            // SAFETY: `next` is a live node of this list.
-            match unsafe { next.as_ref() }
-                .value()
-                .map_or(Ordering::Less, &cmp)
-            {
+            // SAFETY: `next` is a live node of this list; link and `next` targets are never the head.
+            let value = unsafe { Node::value_at(next) };
+            match cmp(value) {
                 Ordering::Less => {
                     current = next;
                     level = 0;
