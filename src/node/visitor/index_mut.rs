@@ -140,6 +140,53 @@ impl<T, const N: usize> Visitor for IndexMutVisitor<T, N> {
         self.index == self.target
     }
 
+    // Runs `step` to completion with the walk state held in locals, so the
+    // hot loop does not reload and store it through `self` on every link.
+    #[inline]
+    #[expect(
+        clippy::indexing_slicing,
+        reason = "`l < level <= max_levels == precursors.len()`, as in `step`"
+    )]
+    fn traverse(&mut self) -> Option<Self::NodeRef> {
+        let target = self.target;
+        let mut current = self.current;
+        let mut index = self.index;
+        let mut level = self.level;
+        let precursors: &mut [NonNull<Node<T, N>>] = &mut self.precursors;
+        let distances: &mut [usize] = &mut self.precursor_distances;
+        let result = 'walk: loop {
+            if index == target {
+                break Some(current);
+            }
+            // SAFETY: as in `step`.
+            let links = unsafe { current.as_ref() }.links();
+            for l in (0..level).rev() {
+                if let Some(link) = links.get(l).and_then(Option::as_ref) {
+                    let next_index = index.wrapping_add(link.distance().get());
+                    if next_index < target {
+                        current = link.node();
+                        level = l.wrapping_add(1);
+                        index = next_index;
+                        continue 'walk;
+                    }
+                }
+                precursors[l] = current;
+                distances[l] = index;
+            }
+            level = 0;
+            // SAFETY: as in `step`.
+            let Some(next) = unsafe { current.as_ref() }.next() else {
+                break None;
+            };
+            current = next;
+            index = index.wrapping_add(1);
+        };
+        self.current = current;
+        self.index = index;
+        self.level = level;
+        result
+    }
+
     #[expect(
         clippy::indexing_slicing,
         reason = "`level` comes from `(0..self.level).rev()` where `self.level` is \

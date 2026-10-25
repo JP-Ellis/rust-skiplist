@@ -55,6 +55,41 @@ impl<'a, T, const N: usize> Visitor for IndexVisitor<'a, T, N> {
         self.index == self.target
     }
 
+    // Runs `step` to completion with the walk state held in locals.
+    #[inline]
+    fn traverse(&mut self) -> Option<Self::NodeRef> {
+        let target = self.target;
+        let mut current = self.current;
+        let mut index = self.index;
+        let mut level = self.level;
+        let result = 'walk: loop {
+            if index == target {
+                break Some(current);
+            }
+            for (l, maybe_link) in (0..level).zip(current.links()).rev() {
+                if let Some(link) = maybe_link
+                    && index.wrapping_add(link.distance().get()) <= target
+                {
+                    // SAFETY: as in `step`.
+                    current = unsafe { link.node().as_ref() };
+                    level = l.wrapping_add(1);
+                    index = index.wrapping_add(link.distance().get());
+                    continue 'walk;
+                }
+            }
+            level = 0;
+            let Some(next) = current.next_as_ref() else {
+                break None;
+            };
+            current = next;
+            index = index.wrapping_add(1);
+        };
+        self.current = current;
+        self.index = index;
+        self.level = level;
+        result
+    }
+
     fn step(&mut self) -> Step<Self::NodeRef> {
         if self.found() {
             return Step::FoundTarget;
