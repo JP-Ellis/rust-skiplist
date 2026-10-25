@@ -1067,58 +1067,15 @@ impl<K, V, const N: usize, C: Comparator<K>, G: LevelGenerator> SkipMap<K, V, N,
     /// assert_eq!(entry.remove(), "c");
     /// assert_eq!(map.last_key_value(), Some((&1, &"a")));
     /// ```
-    #[expect(
-        clippy::indexing_slicing,
-        reason = "l is in 0..max_levels; precursors[l] is always in bounds (len == \
-                  max_levels); links_mut()[l] is safe because the precursor at level l \
-                  is always a node with height > l: every node advanced to via a level-l \
-                  link has height >= l+1, and head (the fallback when no advance occurs) \
-                  has height max_levels > any valid l"
-    )]
     #[inline]
     pub fn last_entry(&mut self) -> Option<OccupiedEntry<'_, K, V, N, C, G>> {
         let tail_ptr = self.tail?;
-        // SAFETY: tail_ptr is a valid data node for &mut self's lifetime.
-        let tail_height = unsafe { tail_ptr.as_ref() }.level();
-        // SAFETY: self.head is valid for &mut self's lifetime.
-        let max_levels = unsafe { self.head.as_ref() }.level();
-
-        // Initialise all precursor entries to head; the single traversal
-        // below overwrites them all.
-        let mut precursors = LevelArray::from_fn(max_levels, |_| self.head);
-        let mut current = self.head;
-
-        // Traverse all levels from the highest to the lowest, advancing
-        // `current` forward at each level until we can go no further.
+        // Below the tail's height each precursor links to the tail, which
+        // `remove_entry` bridges; above it each is the last node on its level.
         //
-        // * For l >= tail_height: the tail has no tower slot at those levels,
-        //   so no link can point to it.  We advance to the end of the level-l
-        //   chain (link is None) and record the last node there.  Its link[l]
-        //   is None, so remove_entry's distance-decrement branch is skipped.
-        //
-        // * For l < tail_height: we stop when the level-l link points
-        //   directly to the tail.  This node is the correct level-l precursor
-        //   for the bridging step in remove_entry.
-        //
-        // Invariant: at the start of each outer-loop iteration, current.level()
-        // > l, so links.get(l) is always in bounds and links_mut()[l] in
-        // remove_entry is always safe.
-        for l in (0..max_levels).rev() {
-            loop {
-                // SAFETY: current is a valid node in this list, live for
-                // the duration of &mut self.  No exclusive reference exists.
-                let maybe_link = unsafe { current.as_ref() }
-                    .links()
-                    .get(l)
-                    .and_then(|lk| lk.as_ref());
-                match maybe_link {
-                    None => break,
-                    Some(link) if l < tail_height && link.node() == tail_ptr => break,
-                    Some(link) => current = link.node(),
-                }
-            }
-            precursors[l] = current;
-        }
+        // SAFETY: `self.head` heads this live map and `tail_ptr` is its last
+        // node.
+        let precursors = unsafe { Node::tail_precursors(self.head, tail_ptr) };
 
         Some(OccupiedEntry {
             node: tail_ptr,
