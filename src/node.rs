@@ -1419,10 +1419,13 @@ impl<V, const N: usize> Frontier<V, N> {
         height: usize,
         value: V,
     ) -> NonNull<Node<V, N>> {
-        let head = self.head;
-        // SAFETY: the head is live and no reference to it is held.
-        unsafe { (*head.as_ptr()).grow_to(height) };
-        self.last.grow(height, |_| (head, 0));
+        // `last` is always as tall as the head.
+        if height > self.last.len() {
+            let head = self.head;
+            // SAFETY: the head is live and no reference to it is held.
+            unsafe { (*head.as_ptr()).grow_to(height) };
+            self.last.grow(height, |_| (head, 0));
+        }
         // SAFETY: the caller guarantees `tail` is the live last node.
         let new = unsafe { Node::insert_after(tail, Node::with_value(height, value)) };
         let new_rank = rank.wrapping_add(1);
