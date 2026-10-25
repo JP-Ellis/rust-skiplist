@@ -18,48 +18,26 @@ use crate::{
     level_generator::{LevelGenerator, geometric::Geometric},
     node::{
         Node,
-        visitor::{OrdVisitor, Visitor},
+        visitor::{OrdIndexVisitor, Visitor},
     },
 };
 
 // MARK: Private helpers
 
-/// Counts the elements between `front` and `back` (both inclusive) by
-/// following `next` links.  Returns `Some(count)` if `back` is reachable from
-/// `front`, or `None` if the chain ends without encountering `back`.
-///
-/// # Safety
-///
-/// `front` and `back` must be valid, live `Node` pointers in the same skip
-/// map, both of which remain valid for the duration of this call.
-unsafe fn count_inclusive<T, const N: usize>(
-    front: NonNull<Node<T, N>>,
-    back: NonNull<Node<T, N>>,
-) -> Option<usize> {
-    let mut count: usize = 0;
-    let mut ptr = front;
-    loop {
-        count = count.saturating_add(1);
-        if ptr == back {
-            return Some(count);
-        }
-        // SAFETY: ptr is a live node pointer; caller guarantees validity.
-        ptr = unsafe { ptr.as_ref() }.next()?;
-    }
-}
-
 impl<K, V, const N: usize, C: Comparator<K>, G: LevelGenerator> SkipMap<K, V, N, C, G> {
     /// Returns a raw pointer to the first node satisfying the lower bound, or
-    /// `None` when no such node exists.
+    /// `None` when no such node exists, with the rank that node has or would
+    /// have (1 for the first data node).
     ///
     /// - Unbounded   : first data node (head's successor)
     /// - Included(k) : first node with key >= k
     /// - Excluded(k) : first node with key > k
-    fn lower_bound_ptr(&self, bound: Bound<&K>) -> Option<NonNull<Node<(K, V), N>>> {
+    #[expect(clippy::type_complexity, reason = "internal code")]
+    fn lower_bound_ptr(&self, bound: Bound<&K>) -> (Option<NonNull<Node<(K, V), N>>>, usize) {
         match bound {
             Bound::Unbounded => {
                 // SAFETY: self.head is always valid for &self.
-                unsafe { self.head.as_ref() }.next()
+                (unsafe { self.head.as_ref() }.next(), 1)
             }
             Bound::Included(k) => {
                 // Advance only through nodes strictly < k; stop as soon as we
@@ -74,9 +52,12 @@ impl<K, V, const N: usize, C: Comparator<K>, G: LevelGenerator> SkipMap<K, V, N,
                         Ordering::Equal | Ordering::Greater => Ordering::Greater,
                     }
                 };
-                let mut visitor = OrdVisitor::new(head, k, cmp);
+                let mut visitor = OrdIndexVisitor::new(head, k, cmp);
                 visitor.traverse();
-                visitor.current().next()
+                (
+                    visitor.current().next(),
+                    visitor.current_rank().wrapping_add(1),
+                )
             }
             Bound::Excluded(k) => {
                 // Advance through nodes <= k; stop just before > k.
@@ -88,9 +69,12 @@ impl<K, V, const N: usize, C: Comparator<K>, G: LevelGenerator> SkipMap<K, V, N,
                         Ordering::Less | Ordering::Equal => Ordering::Less,
                         Ordering::Greater => Ordering::Greater,
                     };
-                let mut visitor = OrdVisitor::new(head, k, cmp);
+                let mut visitor = OrdIndexVisitor::new(head, k, cmp);
                 visitor.traverse();
-                visitor.current().next()
+                (
+                    visitor.current().next(),
+                    visitor.current_rank().wrapping_add(1),
+                )
             }
         }
     }
@@ -112,14 +96,15 @@ impl<K, V, const N: usize, C: Comparator<K>, G: LevelGenerator> SkipMap<K, V, N,
     }
 
     /// Returns a raw pointer to the last node satisfying the upper bound, or
-    /// `None` when no such node exists.
+    /// `None` when no such node exists, with its rank (0 when `None`).
     ///
     /// - Unbounded   : tail (last data node)
     /// - Included(k) : last node with key <= k
     /// - Excluded(k) : last node with key < k
-    fn upper_bound_ptr(&self, bound: Bound<&K>) -> Option<NonNull<Node<(K, V), N>>> {
+    #[expect(clippy::type_complexity, reason = "internal code")]
+    fn upper_bound_ptr(&self, bound: Bound<&K>) -> (Option<NonNull<Node<(K, V), N>>>, usize) {
         match bound {
-            Bound::Unbounded => self.tail,
+            Bound::Unbounded => (self.tail, self.len),
             Bound::Included(k) => {
                 // Advance through all nodes <= k; stop before > k.
                 // After traversal, current() is the last node <= k (or head).
@@ -129,10 +114,10 @@ impl<K, V, const N: usize, C: Comparator<K>, G: LevelGenerator> SkipMap<K, V, N,
                         Ordering::Less | Ordering::Equal => Ordering::Less,
                         Ordering::Greater => Ordering::Greater,
                     };
-                let mut visitor = OrdVisitor::new(head, k, cmp);
+                let mut visitor = OrdIndexVisitor::new(head, k, cmp);
                 visitor.traverse();
                 // `None` when traversal stays on the head sentinel (all nodes > k).
-                self.stored_ptr(visitor.current())
+                (self.stored_ptr(visitor.current()), visitor.current_rank())
             }
             Bound::Excluded(k) => {
                 // Advance only through nodes strictly < k.
@@ -143,9 +128,9 @@ impl<K, V, const N: usize, C: Comparator<K>, G: LevelGenerator> SkipMap<K, V, N,
                         Ordering::Less => Ordering::Less,
                         Ordering::Equal | Ordering::Greater => Ordering::Greater,
                     };
-                let mut visitor = OrdVisitor::new(head, k, cmp);
+                let mut visitor = OrdIndexVisitor::new(head, k, cmp);
                 visitor.traverse();
-                self.stored_ptr(visitor.current())
+                (self.stored_ptr(visitor.current()), visitor.current_rank())
             }
         }
     }
@@ -347,8 +332,7 @@ impl<K, V, const N: usize, C: Comparator<K>, G: LevelGenerator> SkipMap<K, V, N,
     /// Returns an iterator over shared key-value references whose keys fall
     /// within the given bound range, in key order.
     ///
-    /// Finding the start and end nodes is `$O(\log n)$`; counting elements in the
-    /// range is `$O(k)$` where k is the number of elements in the range.
+    /// This operation is `$O(\log n)$` on average.
     ///
     /// # Panics
     ///
@@ -415,19 +399,18 @@ impl<K, V, const N: usize, C: Comparator<K>, G: LevelGenerator> SkipMap<K, V, N,
             }
         }
 
-        let front = self.lower_bound_ptr(lo);
-        let back = self.upper_bound_ptr(hi);
+        let (front, front_rank) = self.lower_bound_ptr(lo);
+        let (back, back_rank) = self.upper_bound_ptr(hi);
 
+        // Ranks are structural, so `back` is reachable from `front` exactly
+        // when its rank is not lower, whatever the comparator answered.
         let (front, back, len) = match (front, back) {
-            (None, _) | (_, None) => (None, None, 0),
-            (Some(f), Some(b)) => {
-                // SAFETY: f and b are valid node pointers in this map, live for
-                // &self.  count_inclusive walks the next chain.
-                match unsafe { count_inclusive(f, b) } {
-                    Some(len) => (Some(f), Some(b), len),
-                    None => (None, None, 0),
-                }
-            }
+            (Some(f), Some(b)) if front_rank <= back_rank => (
+                Some(f),
+                Some(b),
+                back_rank.wrapping_sub(front_rank).wrapping_add(1),
+            ),
+            _ => (None, None, 0),
         };
 
         Iter {
@@ -441,8 +424,7 @@ impl<K, V, const N: usize, C: Comparator<K>, G: LevelGenerator> SkipMap<K, V, N,
     /// Returns an iterator over shared-key / mutable-value references for
     /// pairs whose keys fall within the given bound range, in key order.
     ///
-    /// Finding the start and end nodes is `$O(\log n)$`; counting elements in the
-    /// range is `$O(k)$`.
+    /// This operation is `$O(\log n)$` on average.
     ///
     /// # Panics
     ///
@@ -501,19 +483,18 @@ impl<K, V, const N: usize, C: Comparator<K>, G: LevelGenerator> SkipMap<K, V, N,
 
         // lower_bound_ptr and upper_bound_ptr are &self methods that return raw
         // pointers (no lingering borrow), so they compose fine with &mut self.
-        let front = self.lower_bound_ptr(lo);
-        let back = self.upper_bound_ptr(hi);
+        let (front, front_rank) = self.lower_bound_ptr(lo);
+        let (back, back_rank) = self.upper_bound_ptr(hi);
 
+        // Ranks are structural, so `back` is reachable from `front` exactly
+        // when its rank is not lower, whatever the comparator answered.
         let (front, back, len) = match (front, back) {
-            (None, _) | (_, None) => (None, None, 0),
-            (Some(f), Some(b)) => {
-                // SAFETY: f and b are valid node pointers in this map, live for
-                // &mut self.  count_inclusive walks the next chain.
-                match unsafe { count_inclusive(f, b) } {
-                    Some(len) => (Some(f), Some(b), len),
-                    None => (None, None, 0),
-                }
-            }
+            (Some(f), Some(b)) if front_rank <= back_rank => (
+                Some(f),
+                Some(b),
+                back_rank.wrapping_sub(front_rank).wrapping_add(1),
+            ),
+            _ => (None, None, 0),
         };
 
         IterMut {

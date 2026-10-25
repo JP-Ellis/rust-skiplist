@@ -20,49 +20,26 @@ use crate::{
     level_generator::{LevelGenerator, geometric::Geometric},
     node::{
         Node,
-        visitor::{OrdVisitor, Visitor},
+        visitor::{OrdIndexVisitor, Visitor},
     },
     ordered_skip_list::OrderedSkipList,
 };
 
 // MARK: Private helpers
 
-/// Counts elements between `front` and `back` (both inclusive) by following
-/// next links. Returns Some(count) if `back` is reachable from `front`, or
-/// None if the chain ends without encountering `back`.
-///
-/// # Safety
-///
-/// Both `front` and `back` must be valid, live Node pointers in the same
-/// skip list, both remaining valid for the duration of this call.
-unsafe fn count_inclusive<T, const N: usize>(
-    front: NonNull<Node<T, N>>,
-    back: NonNull<Node<T, N>>,
-) -> Option<usize> {
-    let mut count: usize = 0;
-    let mut ptr = front;
-    loop {
-        count = count.saturating_add(1);
-        if ptr == back {
-            return Some(count);
-        }
-        // SAFETY: ptr is a live node pointer; caller guarantees validity.
-        ptr = unsafe { ptr.as_ref() }.next()?;
-    }
-}
-
 impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, N, C, G> {
     /// Returns a raw pointer to the first node that satisfies the given lower
-    /// bound, or `None` when no such node exists.
+    /// bound, or `None` when no such node exists, with the rank that node has
+    /// or would have (1 for the first data node).
     ///
     /// - `Unbounded`   -> first data node (head's successor)
     /// - `Included(v)` -> first node with value >= v
     /// - `Excluded(v)` -> first node with value > v
-    fn lower_bound_ptr(&self, bound: Bound<&T>) -> Option<NonNull<Node<T, N>>> {
+    fn lower_bound_ptr(&self, bound: Bound<&T>) -> (Option<NonNull<Node<T, N>>>, usize) {
         match bound {
             Bound::Unbounded => {
                 // SAFETY: self.head is always valid for &self.
-                unsafe { self.head.as_ref() }.next()
+                (unsafe { self.head.as_ref() }.next(), 1)
             }
             Bound::Included(v) => {
                 // Advance only through nodes strictly < v; stop as soon as we
@@ -77,9 +54,12 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
                         Ordering::Equal | Ordering::Greater => Ordering::Greater,
                     }
                 };
-                let mut visitor = OrdVisitor::new(head, v, cmp);
+                let mut visitor = OrdIndexVisitor::new(head, v, cmp);
                 visitor.traverse();
-                visitor.current().next()
+                (
+                    visitor.current().next(),
+                    visitor.current_rank().wrapping_add(1),
+                )
             }
             Bound::Excluded(v) => {
                 // Advance through nodes ≤ v; stop just before > v.
@@ -91,22 +71,26 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
                     Ordering::Less | Ordering::Equal => Ordering::Less,
                     Ordering::Greater => Ordering::Greater,
                 };
-                let mut visitor = OrdVisitor::new(head, v, cmp);
+                let mut visitor = OrdIndexVisitor::new(head, v, cmp);
                 visitor.traverse();
-                visitor.current().next()
+                (
+                    visitor.current().next(),
+                    visitor.current_rank().wrapping_add(1),
+                )
             }
         }
     }
 
     /// Returns a raw pointer to the last node that satisfies the given upper
-    /// bound, or `None` when no such node exists.
+    /// bound, or `None` when no such node exists, with its rank (0 when
+    /// `None`).
     ///
     /// - `Unbounded`   -> tail (last data node)
     /// - `Included(v)` -> last node with value <= v
     /// - `Excluded(v)` -> last node with value < v
-    fn upper_bound_ptr(&self, bound: Bound<&T>) -> Option<NonNull<Node<T, N>>> {
+    fn upper_bound_ptr(&self, bound: Bound<&T>) -> (Option<NonNull<Node<T, N>>>, usize) {
         match bound {
-            Bound::Unbounded => self.tail,
+            Bound::Unbounded => (self.tail, self.len),
             Bound::Included(v) => {
                 // Advance through all nodes ≤ v; stop before > v.
                 // After traversal, current() is the last node ≤ v (or head).
@@ -116,12 +100,13 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
                     Ordering::Less | Ordering::Equal => Ordering::Less,
                     Ordering::Greater => Ordering::Greater,
                 };
-                let mut visitor = OrdVisitor::new(head, v, cmp);
+                let mut visitor = OrdIndexVisitor::new(head, v, cmp);
                 visitor.traverse();
                 let current = visitor.current();
                 // NonNull::from a shared reference is safe; no unsafe needed here.
                 // Return None when the sentinel head has no value (all nodes > v).
-                current.value().is_some().then(|| NonNull::from(current))
+                let back = current.value().is_some().then(|| NonNull::from(current));
+                (back, visitor.current_rank())
             }
             Bound::Excluded(v) => {
                 // Advance only through nodes strictly < v.
@@ -132,10 +117,11 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
                     Ordering::Less => Ordering::Less,
                     Ordering::Equal | Ordering::Greater => Ordering::Greater,
                 };
-                let mut visitor = OrdVisitor::new(head, v, cmp);
+                let mut visitor = OrdIndexVisitor::new(head, v, cmp);
                 visitor.traverse();
                 let current = visitor.current();
-                current.value().is_some().then(|| NonNull::from(current))
+                let back = current.value().is_some().then(|| NonNull::from(current));
+                (back, visitor.current_rank())
             }
         }
     }
@@ -183,8 +169,7 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
     /// Bounds are inclusive or exclusive on either end; all standard Rust range
     /// expressions (`..`, `a..`, `..b`, `..=b`, `a..b`, `a..=b`) are accepted.
     ///
-    /// Finding the start and end nodes is `$O(\log n)$`; counting the elements in
-    /// the range is `$O(k)$` where k is the number of elements in the range.
+    /// This operation is `$O(\log n)$` on average.
     ///
     /// # Panics
     ///
@@ -259,21 +244,18 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
         }
         // at least one Unbounded → always valid
 
-        let front = self.lower_bound_ptr(lo);
-        let back = self.upper_bound_ptr(hi);
+        let (front, front_rank) = self.lower_bound_ptr(lo);
+        let (back, back_rank) = self.upper_bound_ptr(hi);
 
+        // Ranks are structural, so `back` is reachable from `front` exactly
+        // when its rank is not lower, whatever the comparator answered.
         let (front, back, len) = match (front, back) {
-            (None, _) | (_, None) => (None, None, 0),
-            (Some(f), Some(b)) => {
-                // SAFETY: f and b are valid node pointers in this list, live
-                // for &self.  count_inclusive walks the next chain.  If back
-                // is not reachable from front the range is valid but empty
-                // (bounds are in range but no elements happen to fall there).
-                match unsafe { count_inclusive(f, b) } {
-                    Some(len) => (Some(f), Some(b), len),
-                    None => (None, None, 0),
-                }
-            }
+            (Some(f), Some(b)) if front_rank <= back_rank => (
+                Some(f),
+                Some(b),
+                back_rank.wrapping_sub(front_rank).wrapping_add(1),
+            ),
+            _ => (None, None, 0),
         };
 
         Iter {
