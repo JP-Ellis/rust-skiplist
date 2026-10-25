@@ -70,6 +70,11 @@ harness = false
 name = "level_generator"
 required-features = ["std"]
 
+[[bench]]
+harness = false
+name = "hot"
+required-features = ["std"]
+
 [dependencies]
 rand = { version = "0.10", default-features = false }
 
