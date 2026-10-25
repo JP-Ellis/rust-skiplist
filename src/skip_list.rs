@@ -468,6 +468,18 @@ impl<T, G: LevelGenerator, const N: usize> SkipList<T, N, G> {
             "index {index} out of bounds (len={})",
             self.len
         );
+        // Both ends are reachable without a walk.
+        if index == 0
+            // SAFETY: `self.head` is the live head of this list.
+            && let Some(first) = unsafe { self.head.as_ref() }.next()
+        {
+            return first;
+        }
+        if index.wrapping_add(1) == self.len
+            && let Some(tail) = self.tail
+        {
+            return tail;
+        }
         // Rank is 1-based: rank 1 is the first data node (immediately after
         // the sentinel head).  Add 1 to convert the 0-based index.
         IndexMutVisitor::new(self.head, index.saturating_add(1))

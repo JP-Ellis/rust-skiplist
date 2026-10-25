@@ -41,6 +41,13 @@ impl<T, G: LevelGenerator, const N: usize> SkipList<T, N, G> {
         if index >= self.len {
             return None;
         }
+        // Both ends are reachable without a walk.
+        if index == 0 {
+            return self.front();
+        }
+        if index.wrapping_add(1) == self.len {
+            return self.back();
+        }
         IndexVisitor::new(self.head_ref(), index.saturating_add(1))
             .traverse()
             .and_then(|node| node.value())
