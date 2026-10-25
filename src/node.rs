@@ -253,8 +253,8 @@ impl<V, const N: usize> Node<V, N> {
     /// Raises the node's level to `height`, filling the new top levels with
     /// absent links. Does nothing if the node is already at least that tall.
     ///
-    /// A head stays as tall as the tallest tower in its list: every insert
-    /// calls this on the head before linking a new tower.
+    /// A head is at least as tall as the tallest tower in its list: every
+    /// insert calls this on the head before linking a new tower.
     ///
     /// # Panics
     ///
@@ -262,6 +262,27 @@ impl<V, const N: usize> Node<V, N> {
     #[inline]
     pub(crate) fn grow_to(&mut self, height: usize) {
         self.links.grow(height, |_| None);
+    }
+
+    /// Drops a head's empty top levels, keeping at least one level.
+    ///
+    /// An empty level `l` means no tower reaches `l`, so every level above it
+    /// is empty too. Removals leave a head too tall. `SkipList::insert_mut`,
+    /// `push_front_mut`, `push_back_mut`, `OrderedSkipList::insert` and
+    /// `SkipMap::insert` call this before their walk, as does the
+    /// ordered-list insert behind `get_or_insert_with` and `replace`. Cursor,
+    /// entry and bulk (`extend`, `from_iter`) inserts do not. A steady insert
+    /// and remove workload therefore does not ratchet the head up to the
+    /// tallest tower it ever held.
+    #[inline]
+    pub(crate) fn trim(&mut self) {
+        let floor = self.links.len().min(1);
+        let height = self
+            .links
+            .iter()
+            .rposition(Option::is_some)
+            .map_or(0, |top| top.wrapping_add(1));
+        self.links.truncate(height.max(floor));
     }
 
     /// Get a shared reference to the next node.

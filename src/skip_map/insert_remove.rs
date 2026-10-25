@@ -62,6 +62,8 @@ impl<K, V, const N: usize, C: Comparator<K>, G: LevelGenerator> SkipMap<K, V, N,
     )]
     #[inline]
     pub fn insert(&mut self, key: K, value: V) -> Option<V> {
+        // SAFETY: the head is live and no reference to it is held.
+        unsafe { (*self.head.as_ptr()).trim() };
         // `self.head` is a `NonNull` (a `Copy` type), so copying it does not
         // borrow `self`.  The closure borrows only `self.comparator` (shared),
         // which is a distinct field from `self.head`.  Both borrows coexist
