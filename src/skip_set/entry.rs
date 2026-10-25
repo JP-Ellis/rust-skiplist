@@ -179,7 +179,9 @@ impl<'a, T, C: Comparator<T>, G: LevelGenerator, const N: usize> Entry<'a, T, N,
     {
         match self {
             Self::Occupied(e) => e.into_ref(),
-            Self::Vacant(VacantEntry { set, value }) => set.inner.get_or_insert(value),
+            Self::Vacant(VacantEntry { set, value }) => {
+                set.inner.get_or_insert_any_with(value, |v| v)
+            }
         }
     }
 
@@ -207,7 +209,7 @@ impl<'a, T, C: Comparator<T>, G: LevelGenerator, const N: usize> Entry<'a, T, N,
     {
         match self {
             Self::Occupied(e) => e.into_ref(),
-            Self::Vacant(VacantEntry { set, .. }) => set.inner.get_or_insert(f()),
+            Self::Vacant(VacantEntry { set, .. }) => set.inner.get_or_insert_any_with(f(), |v| v),
         }
     }
 
@@ -292,7 +294,7 @@ impl<'a, T, C: Comparator<T>, G: LevelGenerator, const N: usize> VacantEntry<'a,
     /// ```
     #[inline]
     pub fn insert(self) -> &'a T {
-        self.set.inner.get_or_insert(self.value)
+        self.set.inner.get_or_insert_any_with(self.value, |v| v)
     }
 }
 

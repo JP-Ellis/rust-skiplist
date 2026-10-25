@@ -28,7 +28,7 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> SkipSet<T, N, C, G>
     #[inline]
     pub fn insert(&mut self, value: T) -> bool {
         let old_len = self.inner.len();
-        self.inner.get_or_insert(value);
+        self.inner.get_or_insert_any_with(value, |v| v);
         self.inner.len() > old_len
     }
 
@@ -126,7 +126,7 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> SkipSet<T, N, C, G>
     /// ```
     #[inline]
     pub fn get_or_insert(&mut self, value: T) -> &T {
-        self.inner.get_or_insert(value)
+        self.inner.get_or_insert_any_with(value, |v| v)
     }
 
     /// Returns a shared reference to the element equal to `value`, or calls
@@ -156,7 +156,7 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> SkipSet<T, N, C, G>
     where
         F: FnOnce(T) -> T,
     {
-        self.inner.get_or_insert_with(value, f)
+        self.inner.get_or_insert_any_with(value, f)
     }
 
     /// Removes and returns the first (smallest) element, or `None` if the

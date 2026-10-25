@@ -70,7 +70,9 @@ impl<K, V, const N: usize, C: Comparator<K>, G: LevelGenerator> SkipMap<K, V, N,
             let head = self.head;
             let cmp = |entry: &(K, V), k: &K| self.comparator.compare(&entry.0, k);
             let mut visitor = OrdIndexMutVisitor::new(head, &key, cmp);
-            visitor.traverse();
+            // Keys are unique, and a hit only swaps the value, so the walk
+            // may stop at the first equal key it meets.
+            visitor.traverse_to_any_equal();
             let rank = visitor.current_rank_internal();
             let (current, found, precursors, precursor_distances) = visitor.into_parts();
             (rank, current, found, precursors, precursor_distances)

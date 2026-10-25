@@ -206,7 +206,7 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> Extend<T> for SkipS
         I: IntoIterator<Item = T>,
     {
         self.inner.extend_appending(iter, |inner, item| {
-            inner.get_or_insert(item);
+            inner.get_or_insert_any_with(item, |v| v);
         });
     }
 }

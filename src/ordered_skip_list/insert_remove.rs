@@ -1128,24 +1128,52 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
     where
         F: FnOnce(T) -> T,
     {
-        let (node, _) = self.find_or_insert_with(value, f);
+        let (node, _) = self.find_or_insert_with::<F, false>(value, f);
         // SAFETY: `node` is a valid data node for the lifetime of &mut self.
         unsafe { node.as_ref() }
             .value()
             .expect("data node has value")
     }
 
-    /// Replaces the first element equal to `value` with `value` and returns
-    /// the old element, or inserts `value` and returns `None`.
+    /// Like [`get_or_insert_with`](Self::get_or_insert_with), but returns
+    /// whichever equal element the walk meets first, stopping there.
     ///
-    /// One traversal either way: a hit swaps the value in place.
+    /// For containers whose elements are unique, such as [`SkipSet`], that
+    /// element is the only equal one, and stopping early saves the rest of
+    /// the descent.
+    ///
+    /// [`SkipSet`]: crate::skip_set::SkipSet
+    #[expect(
+        clippy::expect_used,
+        reason = "the node is a data node, so value() is Some"
+    )]
+    #[inline]
+    pub(crate) fn get_or_insert_any_with<F>(&mut self, value: T, f: F) -> &T
+    where
+        F: FnOnce(T) -> T,
+    {
+        let (node, _) = self.find_or_insert_with::<F, true>(value, f);
+        // SAFETY: `node` is a valid data node for the lifetime of &mut self.
+        unsafe { node.as_ref() }
+            .value()
+            .expect("data node has value")
+    }
+
+    /// Replaces an element equal to `value` with `value` and returns the old
+    /// element, or inserts `value` and returns `None`.
+    ///
+    /// One traversal either way: a hit swaps the value in place.  The walk
+    /// stops at the first equal element it meets, so with duplicates it may
+    /// not be the first in order; [`SkipSet`] has none.
+    ///
+    /// [`SkipSet`]: crate::skip_set::SkipSet
     #[expect(
         clippy::expect_used,
         clippy::unwrap_in_result,
         reason = "the node is a data node, so value_mut() is Some"
     )]
     pub(crate) fn replace(&mut self, value: T) -> Option<T> {
-        let (mut node, unused) = self.find_or_insert_with(value, |v| v);
+        let (mut node, unused) = self.find_or_insert_with::<_, true>(value, |v| v);
         let replacement = unused?;
         // SAFETY: `node` is a data node of this list, exclusively borrowed
         // through &mut self.  `replacement` compares equal to the element
@@ -1160,7 +1188,9 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
     /// single traversal.
     ///
     /// Returns the found or inserted node, and gives `value` back unused when
-    /// an equal element was already present.
+    /// an equal element was already present.  With `ANY_EQUAL`, the walk
+    /// stops at the first equal element it meets, which need not be the
+    /// first in order.
     #[expect(
         clippy::expect_used,
         reason = "Link::new distances are computed to be >= 1; \
@@ -1179,7 +1209,11 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
         reason = "insertion and link wiring touch provably disjoint heap nodes; \
                   splitting across blocks would require unsafe-crossing raw-pointer variables"
     )]
-    fn find_or_insert_with<F>(&mut self, value: T, f: F) -> (NonNull<Node<T, N>>, Option<T>)
+    fn find_or_insert_with<F, const ANY_EQUAL: bool>(
+        &mut self,
+        value: T,
+        f: F,
+    ) -> (NonNull<Node<T, N>>, Option<T>)
     where
         F: FnOnce(T) -> T,
     {
@@ -1188,7 +1222,11 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
             let head = self.head;
             let cmp = |v: &T, t: &T| self.comparator.compare(v, t);
             let mut visitor = OrdIndexMutVisitor::new(head, &value, cmp);
-            visitor.traverse();
+            if ANY_EQUAL {
+                visitor.traverse_to_any_equal();
+            } else {
+                visitor.traverse();
+            }
             let rank = visitor.current_rank_internal();
             let (current, found, precursors, precursor_distances) = visitor.into_parts();
             (rank, current, found, precursors, precursor_distances)

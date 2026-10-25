@@ -148,6 +148,103 @@ impl<'a, T, Q: ?Sized, F: Fn(&T, &Q) -> Ordering, const N: usize>
         self.rank
     }
 
+    /// Runs `step` to completion with the walk state held in locals, so the
+    /// hot loop does not reload and store it through `self` on every link.
+    ///
+    /// With `STOP_ON_EQUAL`, the walk ends at the first node it meets that
+    /// compares equal, at any level, leaving the precursors below that level
+    /// unrecorded.  That is enough for a container with unique keys that
+    /// only needs the node on a hit.
+    #[inline]
+    #[expect(
+        clippy::indexing_slicing,
+        reason = "`l < level <= max_levels == precursors.len()`, as in `step`"
+    )]
+    fn walk<const STOP_ON_EQUAL: bool>(&mut self) -> Option<NonNull<Node<T, N>>> {
+        if self.found {
+            return Some(self.current);
+        }
+        let mut current = self.current;
+        let mut level = self.level;
+        let mut bound = self.bound;
+        let mut rank = self.rank;
+        let distances: &mut [usize] = &mut self.precursor_distances;
+        let cmp = &self.cmp;
+        let target = self.target;
+        let precursors: &mut [NonNull<Node<T, N>>] = &mut self.precursors;
+        let result = 'walk: loop {
+            // SAFETY: as in `step`.
+            let links = unsafe { current.as_ref() }.links();
+            for l in (0..level).rev() {
+                let maybe_link = links.get(l).and_then(Option::as_ref);
+                if let Some(link) = maybe_link {
+                    let node = link.node();
+                    // SAFETY: as in `step`.
+                    let ord = unsafe { node.as_ref() }
+                        .value()
+                        .map_or(Ordering::Less, |v| cmp(v, target));
+                    if ord == Ordering::Less {
+                        if Some(node) == bound {
+                            total_order_violation();
+                        }
+                        current = node;
+                        rank = rank.wrapping_add(link.distance().get());
+                        level = l.wrapping_add(1);
+                        continue 'walk;
+                    }
+                    if STOP_ON_EQUAL && ord == Ordering::Equal {
+                        current = node;
+                        rank = rank.wrapping_add(link.distance().get());
+                        self.found = true;
+                        break 'walk Some(node);
+                    }
+                }
+                precursors[l] = current;
+                distances[l] = rank;
+                if let Some(link) = maybe_link {
+                    bound = Some(link.node());
+                } else {
+                    debug_assert!(bound.is_none(), "absent link below the bound");
+                }
+            }
+            level = 0;
+            // SAFETY: as in `step`.
+            let Some(next) = unsafe { current.as_ref() }.next() else {
+                break None;
+            };
+            // SAFETY: as in `step`.
+            let ord = unsafe { next.as_ref() }
+                .value()
+                .map_or(Ordering::Less, |v| cmp(v, target));
+            if ord == Ordering::Greater {
+                break None;
+            }
+            if ord == Ordering::Less && Some(next) == bound {
+                total_order_violation();
+            }
+            current = next;
+            rank = rank.wrapping_add(1);
+            if ord == Ordering::Equal {
+                self.found = true;
+                break Some(next);
+            }
+        };
+        self.current = current;
+        self.level = level;
+        self.bound = bound;
+        self.rank = rank;
+        result
+    }
+
+    /// Like `traverse`, but ends at the first equal node met at any level.
+    ///
+    /// On a hit, `current` is that node and the precursors are incomplete, so
+    /// only callers that never restructure the list on a hit may use it.
+    #[inline]
+    pub(crate) fn traverse_to_any_equal(&mut self) -> Option<NonNull<Node<T, N>>> {
+        self.walk::<true>()
+    }
+
     /// Consume the visitor, releasing the borrow on the list and returning
     /// the internal state as owned values.
     ///
@@ -195,81 +292,9 @@ impl<T, Q: ?Sized, F: Fn(&T, &Q) -> Ordering, const N: usize> Visitor
         self.found
     }
 
-    // Runs `step` to completion with the walk state held in locals, so the
-    // hot loop does not reload and store it through `self` on every link.
     #[inline]
-    #[expect(
-        clippy::indexing_slicing,
-        reason = "`l < level <= max_levels == precursors.len()`, as in `step`"
-    )]
     fn traverse(&mut self) -> Option<Self::NodeRef> {
-        if self.found {
-            return Some(self.current);
-        }
-        let mut current = self.current;
-        let mut level = self.level;
-        let mut bound = self.bound;
-        let mut rank = self.rank;
-        let distances: &mut [usize] = &mut self.precursor_distances;
-        let cmp = &self.cmp;
-        let target = self.target;
-        let precursors: &mut [NonNull<Node<T, N>>] = &mut self.precursors;
-        let result = 'walk: loop {
-            // SAFETY: as in `step`.
-            let links = unsafe { current.as_ref() }.links();
-            for l in (0..level).rev() {
-                let maybe_link = links.get(l).and_then(Option::as_ref);
-                if let Some(link) = maybe_link {
-                    let node = link.node();
-                    // SAFETY: as in `step`.
-                    let ord = unsafe { node.as_ref() }
-                        .value()
-                        .map_or(Ordering::Less, |v| cmp(v, target));
-                    if ord == Ordering::Less {
-                        if Some(node) == bound {
-                            total_order_violation();
-                        }
-                        current = node;
-                        rank = rank.wrapping_add(link.distance().get());
-                        level = l.wrapping_add(1);
-                        continue 'walk;
-                    }
-                }
-                precursors[l] = current;
-                distances[l] = rank;
-                if let Some(link) = maybe_link {
-                    bound = Some(link.node());
-                } else {
-                    debug_assert!(bound.is_none(), "absent link below the bound");
-                }
-            }
-            level = 0;
-            // SAFETY: as in `step`.
-            let Some(next) = unsafe { current.as_ref() }.next() else {
-                break None;
-            };
-            // SAFETY: as in `step`.
-            let ord = unsafe { next.as_ref() }
-                .value()
-                .map_or(Ordering::Less, |v| cmp(v, target));
-            if ord == Ordering::Greater {
-                break None;
-            }
-            if ord == Ordering::Less && Some(next) == bound {
-                total_order_violation();
-            }
-            current = next;
-            rank = rank.wrapping_add(1);
-            if ord == Ordering::Equal {
-                self.found = true;
-                break Some(next);
-            }
-        };
-        self.current = current;
-        self.level = level;
-        self.bound = bound;
-        self.rank = rank;
-        result
+        self.walk::<false>()
     }
 
     // In a well-formed list, `current` lies at or before `bound`, and every
