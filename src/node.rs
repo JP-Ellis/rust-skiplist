@@ -184,18 +184,24 @@ pub(crate) enum NodeType {
 }
 
 /// A node in the skip list.
+///
+/// Fields are in hot-first order: a traversal step reads `value`, `next`
+/// and the lowest `links`. For small values these sit within the first 64
+/// bytes of the node, so a step touches one or two cache lines.
+/// `prev` serves only backward steps, so it goes last.
+#[repr(C)]
 pub(crate) struct Node<V, const N: usize> {
+    /// The value of the node.
+    value: Option<V>,
     /// Owning reference to the next node.
     next: Option<NonNull<Self>>,
-    /// Non-owning reference to the previous node.
-    prev: Option<NonNull<Self>>,
     /// Links to subsequent nodes.
     ///
     /// Uses a fixed-capacity inline array (no separate heap allocation) for
     /// better cache locality and fewer allocations per node.
     links: LevelArray<Option<Link<V, N>>, N>,
-    /// The value of the node.
-    value: Option<V>,
+    /// Non-owning reference to the previous node.
+    prev: Option<NonNull<Self>>,
 }
 
 // Node interface methods.
@@ -2012,14 +2018,54 @@ pub(crate) mod tests {
 
     #[test]
     fn node_size_is_unchanged_by_level_array() {
-        // prev + next + value + links + height, with Option<Link> niche-packed.
+        // value + next + links (len + items) + prev, with Option<Link> niche-packed.
         // 16 slots of Option<Link<u64, 16>> (16 bytes each) = 256 bytes.
         let links = 16 * core::mem::size_of::<Option<Link<u64, 16>>>();
         let base = 2 * core::mem::size_of::<Option<NonNull<Node<u64, 16>>>>()
             + core::mem::size_of::<Option<u64>>();
-        // The u8 height pads to the pointer alignment.
+        // The u8 `len` pads to the pointer alignment.
         assert_eq!(core::mem::size_of::<Node<u64, 16>>(), base + links + 8);
         assert_eq!(core::mem::size_of::<Option<Link<u64, 16>>>(), 16);
+    }
+
+    #[test]
+    fn node_fields_are_in_hot_first_order() {
+        use core::mem::offset_of;
+
+        type N = Node<u64, 16>;
+        let value = offset_of!(N, value);
+        let next = offset_of!(N, next);
+        let links = offset_of!(N, links);
+        let prev = offset_of!(N, prev);
+        assert_eq!(value, 0, "`value` must be the first field");
+        assert!(value < next, "`value` must precede `next`");
+        assert!(next < links, "`next` must precede `links`");
+        assert!(links < prev, "`links` must precede `prev`");
+    }
+
+    #[test]
+    fn hot_bytes_fit_in_first_cache_line() {
+        use core::mem::{offset_of, size_of};
+
+        type N = Node<u64, 16>;
+        let node = N::new(16);
+        let base = (&raw const node).addr();
+        let slot_end = |i: usize| {
+            (&raw const node.links[i])
+                .addr()
+                .saturating_sub(base)
+                .saturating_add(size_of::<Option<Link<u64, 16>>>())
+        };
+        assert!(
+            offset_of!(N, next).saturating_add(size_of::<Option<NonNull<N>>>()) <= 64,
+            "`next` must end within the first 64 bytes"
+        );
+        assert!(
+            offset_of!(N, links).saturating_add(size_of::<u8>()) <= 64,
+            "`links.len` must end within the first 64 bytes"
+        );
+        assert!(slot_end(0) <= 64, "link slot 0 must end within 64 bytes");
+        assert!(slot_end(1) <= 64, "link slot 1 must end within 64 bytes");
     }
 
     // MARK: new
