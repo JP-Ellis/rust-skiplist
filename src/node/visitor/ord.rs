@@ -84,6 +84,15 @@ impl<'a, T, Q: ?Sized, F: Fn(&T, &Q) -> Ordering, const N: usize> Visitor
 
         for (level, maybe_link) in (0..self.level).zip(self.current.links()).rev() {
             if let Some(link) = maybe_link {
+                // On `Greater` the next comparison is at the link below;
+                // start its load while this one compares.
+                if let Some(lower) = level
+                    .checked_sub(1)
+                    .and_then(|k| self.current.links().get(k))
+                    .and_then(Option::as_ref)
+                {
+                    Node::prefetch_value(lower.node());
+                }
                 // SAFETY: link.node() is a valid heap-allocated node
                 // that lives at least as long as the visitor's `'a`.
                 let node = unsafe { link.node().as_ref() };

@@ -151,6 +151,7 @@ use crate::{
 pub(crate) mod cursor_raw;
 pub(crate) mod level_array;
 pub(crate) mod link;
+pub(crate) mod prefetch;
 pub(crate) mod visitor;
 
 /// The type of node in the skip list.
@@ -418,6 +419,23 @@ impl<V, const N: usize> Node<V, N> {
         let node_ref: &'a Self = unsafe { node.as_ref() };
         // SAFETY: the caller guarantees `node` is not the head.
         unsafe { node_ref.value_unchecked() }
+    }
+
+    /// Hints the CPU to load the value of the node at `node`.
+    ///
+    /// The address is computed without a dereference, so this is safe for
+    /// any pointer.
+    ///
+    /// # Arguments
+    ///
+    /// * `node` - A node the caller expects to compare soon.
+    #[inline]
+    pub(crate) fn prefetch_value(node: NonNull<Self>) {
+        let addr = node
+            .as_ptr()
+            .cast::<u8>()
+            .wrapping_add(core::mem::offset_of!(Self, value));
+        prefetch::prefetch_read(addr);
     }
 
     /// Get a mutable reference to the value.
