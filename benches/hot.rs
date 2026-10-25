@@ -202,6 +202,22 @@ impl Workload for ListClone {
     }
 }
 
+/// `SkipList::split_off` at a random index, then `append` the tail back.
+struct ListSplitAppend(SkipList<u64>);
+
+impl Workload for ListSplitAppend {
+    const NAME: &'static str = "list/split_append";
+
+    fn setup(n: usize) -> Self {
+        Self(skip_list(n))
+    }
+
+    fn step(&mut self, key: u64) {
+        let mut tail = self.0.split_off(key as usize);
+        self.0.append(black_box(&mut tail));
+    }
+}
+
 /// `OrderedSkipList::insert` of an absent key, then `take`.
 struct OslInsertTake(OrderedSkipList<u64>);
 
@@ -452,6 +468,22 @@ impl Workload for SetRangeNext {
     }
 }
 
+/// `SkipSet::split_off` at a random key, then `append` the tail back.
+struct SetSplitAppend(SkipSet<u64>);
+
+impl Workload for SetSplitAppend {
+    const NAME: &'static str = "set/split_append";
+
+    fn setup(n: usize) -> Self {
+        Self(skip_set(n))
+    }
+
+    fn step(&mut self, key: u64) {
+        let mut tail = self.0.split_off(&(2 * key + 1));
+        self.0.append(black_box(&mut tail));
+    }
+}
+
 /// `SkipSet` built from `n` sorted keys, then dropped.
 struct SetFromIter(usize);
 
@@ -630,6 +662,22 @@ impl Workload for MapEntryHit {
     }
 }
 
+/// `SkipMap::split_off` at a random key, then `append` the tail back.
+struct MapSplitAppend(SkipMap<u64, u64>);
+
+impl Workload for MapSplitAppend {
+    const NAME: &'static str = "map/split_append";
+
+    fn setup(n: usize) -> Self {
+        Self(skip_map(n))
+    }
+
+    fn step(&mut self, key: u64) {
+        let mut tail = self.0.split_off(&(2 * key + 1));
+        self.0.append(black_box(&mut tail));
+    }
+}
+
 /// Full `SkipMap` iteration.
 struct MapIter(SkipMap<u64, u64>);
 
@@ -694,6 +742,7 @@ const ENTRIES: &[Entry] = &[
     entry::<ListStack>(&[(SMALL, POINT)]),
     entry::<ListIter>(&[(SMALL, BULK)]),
     entry::<ListClone>(&[(SMALL, BULK)]),
+    entry::<ListSplitAppend>(&[(SMALL, BULK), (LARGE, SLOW)]),
     entry::<OslInsertTake>(&[(SMALL, POINT)]),
     entry::<OslInsertTakeLast>(&[(SMALL, POINT), (LARGE, SLOW)]),
     entry::<OslContains>(&[(SMALL, POINT), (LARGE, POINT)]),
@@ -713,6 +762,7 @@ const ENTRIES: &[Entry] = &[
     entry::<SetClone>(&[(SMALL, BULK)]),
     entry::<SetIntoIter>(&[(SMALL, BULK)]),
     entry::<SetBitOr>(&[(SMALL, BULK)]),
+    entry::<SetSplitAppend>(&[(SMALL, BULK), (LARGE, SLOW)]),
     entry::<MapInsertRemove>(&[(SMALL, POINT), (LARGE, POINT)]),
     entry::<MapInsertReplace>(&[(SMALL, POINT)]),
     entry::<MapGet>(&[(SMALL, POINT), (LARGE, POINT)]),
@@ -720,6 +770,7 @@ const ENTRIES: &[Entry] = &[
     entry::<MapEntryHit>(&[(SMALL, POINT)]),
     entry::<MapPopLast>(&[(SMALL, POINT), (LARGE, SLOW)]),
     entry::<MapIter>(&[(SMALL, BULK)]),
+    entry::<MapSplitAppend>(&[(SMALL, BULK), (LARGE, SLOW)]),
 ];
 
 // MARK: Drivers
