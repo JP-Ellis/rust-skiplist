@@ -164,8 +164,10 @@ impl<T, const N: usize> Visitor for IndexMutVisitor<T, N> {
             // their precursor. A walk never rises above the tower it arrived
             // on, so this range is normally empty.
             let height = level.min(links.len());
-            precursors[height..level].fill(current);
-            distances[height..level].fill(index);
+            if height < level {
+                precursors[height..level].fill(current);
+                distances[height..level].fill(index);
+            }
             for (l, (maybe_link, (precursor, distance))) in links[..height]
                 .iter()
                 .zip(

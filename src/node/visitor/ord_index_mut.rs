@@ -221,8 +221,10 @@ impl<T, Q: ?Sized, F: Fn(&T, &Q) -> Ordering, const N: usize> Visitor
             // their precursor. A walk never rises above the tower it arrived
             // on, so this range is normally empty.
             let height = level.min(links.len());
-            precursors[height..level].fill(current);
-            distances[height..level].fill(rank);
+            if height < level {
+                precursors[height..level].fill(current);
+                distances[height..level].fill(rank);
+            }
             for (l, (slot, (precursor, distance))) in links[..height]
                 .iter()
                 .zip(

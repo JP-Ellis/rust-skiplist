@@ -166,7 +166,9 @@ impl<T, Q: ?Sized, F: Fn(&T, &Q) -> Ordering, const N: usize> Visitor
             // their precursor. A walk never rises above the tower it arrived
             // on, so this range is normally empty.
             let height = level.min(links.len());
-            precursors[height..level].fill(current);
+            if height < level {
+                precursors[height..level].fill(current);
+            }
             for (l, (slot, precursor)) in links[..height]
                 .iter()
                 .zip(&mut precursors[..height])
