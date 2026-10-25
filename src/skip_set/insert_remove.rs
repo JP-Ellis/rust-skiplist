@@ -42,8 +42,8 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> SkipSet<T, N, C, G>
     ///
     /// # Panics
     ///
-    /// If the comparator violates its contract, this method may panic after
-    /// earlier steps have taken effect; the collection stays valid.
+    /// If the comparator violates its contract, this method may panic; the
+    /// collection stays valid.
     ///
     /// # Examples
     ///
@@ -60,9 +60,7 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> SkipSet<T, N, C, G>
     where
         C: ComparatorKey<T, T>,
     {
-        let old = self.inner.take_first(&value);
-        self.inner.insert(value);
-        old
+        self.inner.replace(value)
     }
 
     /// Removes the element equal to `value` from the set and returns it, or
