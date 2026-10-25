@@ -142,6 +142,77 @@ impl<T, Q: ?Sized, F: Fn(&T, &Q) -> Ordering, const N: usize> Visitor
         self.found
     }
 
+    // Runs `step` to completion with the walk state held in locals, so the
+    // hot loop does not reload and store it through `self` on every link.
+    #[inline]
+    #[expect(
+        clippy::indexing_slicing,
+        reason = "`l < level <= max_levels == precursors.len()`, as in `step`"
+    )]
+    fn traverse(&mut self) -> Option<Self::NodeRef> {
+        if self.found {
+            return Some(self.current);
+        }
+        let mut current = self.current;
+        let mut level = self.level;
+        let mut bound = self.bound;
+        let cmp = &self.cmp;
+        let target = self.target;
+        let precursors: &mut [NonNull<Node<T, N>>] = &mut self.precursors;
+        let result = 'walk: loop {
+            // SAFETY: as in `step`.
+            let links = unsafe { current.as_ref() }.links();
+            for l in (0..level).rev() {
+                let maybe_link = links.get(l).and_then(Option::as_ref);
+                if let Some(link) = maybe_link {
+                    let node = link.node();
+                    // SAFETY: as in `step`.
+                    let ord = unsafe { node.as_ref() }
+                        .value()
+                        .map_or(Ordering::Less, |v| cmp(v, target));
+                    if ord == Ordering::Less {
+                        if Some(node) == bound {
+                            total_order_violation();
+                        }
+                        current = node;
+                        level = l.wrapping_add(1);
+                        continue 'walk;
+                    }
+                }
+                precursors[l] = current;
+                if let Some(link) = maybe_link {
+                    bound = Some(link.node());
+                } else {
+                    debug_assert!(bound.is_none(), "absent link below the bound");
+                }
+            }
+            level = 0;
+            // SAFETY: as in `step`.
+            let Some(next) = unsafe { current.as_ref() }.next() else {
+                break None;
+            };
+            // SAFETY: as in `step`.
+            let ord = unsafe { next.as_ref() }
+                .value()
+                .map_or(Ordering::Less, |v| cmp(v, target));
+            if ord == Ordering::Greater {
+                break None;
+            }
+            if ord == Ordering::Less && Some(next) == bound {
+                total_order_violation();
+            }
+            current = next;
+            if ord == Ordering::Equal {
+                self.found = true;
+                break Some(next);
+            }
+        };
+        self.current = current;
+        self.level = level;
+        self.bound = bound;
+        result
+    }
+
     // In a well-formed list, `current` lies at or before `bound`, and every
     // recorded precursor's link targets `bound` or later. Refusing a `Less`
     // advance onto `bound` keeps the final position at or before each target.
