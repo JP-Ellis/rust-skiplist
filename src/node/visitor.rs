@@ -39,7 +39,7 @@ pub(crate) use index::IndexVisitor;
 pub(crate) use index_mut::IndexMutVisitor;
 pub(crate) use ord::OrdVisitor;
 pub(crate) use ord_index::OrdIndexVisitor;
-pub(crate) use ord_index_mut::OrdIndexMutVisitor;
+pub(crate) use ord_index_mut::{OrdIndexMutVisitor, Path};
 pub(crate) use ord_mut::OrdMutVisitor;
 
 /// Basic interface for a visitor.
