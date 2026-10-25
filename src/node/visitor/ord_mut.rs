@@ -166,6 +166,15 @@ impl<T, Q: ?Sized, F: Fn(&T, &Q) -> Ordering, const N: usize> Visitor
                 let maybe_link = links.get(l).and_then(Option::as_ref);
                 if let Some(link) = maybe_link {
                     let node = link.node();
+                    // On `Greater` the next comparison is at the link below;
+                    // start its load while this one compares.
+                    if let Some(lower) = l
+                        .checked_sub(1)
+                        .and_then(|k| links.get(k))
+                        .and_then(Option::as_ref)
+                    {
+                        Node::prefetch_value(lower.node());
+                    }
                     // SAFETY: as in `step`; link and `next` targets are never the head.
                     let value = unsafe { Node::value_at(node) };
                     let ord = cmp(value, target);
