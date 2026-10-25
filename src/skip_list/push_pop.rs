@@ -9,7 +9,7 @@ use crate::{
     node::{
         Node,
         link::Link,
-        visitor::{IndexMutVisitor, Visitor},
+        visitor::{IndexMutVisitor, Visitor, VisitorMut},
     },
     skip_list::SkipList,
 };
@@ -217,12 +217,12 @@ impl<T, G: LevelGenerator, const N: usize> SkipList<T, N, G> {
 
         // IndexMutVisitor with target = len + 1 advances to the end of the list
         // (all ranks are ≤ len < len+1), recording the rightmost predecessor at
-        // each level.  into_parts() releases the &mut borrow.
-        let (tail_ptr, precursors, precursor_distances) = {
-            let mut visitor = IndexMutVisitor::new(self.head, self.len.saturating_add(1));
-            visitor.traverse();
-            visitor.into_parts()
-        };
+        // each level.
+        let mut visitor = IndexMutVisitor::new(self.head, self.len.saturating_add(1));
+        visitor.traverse();
+        let tail_ptr = visitor.current();
+        let precursors = visitor.precursors();
+        let precursor_distances = visitor.precursor_distances();
 
         // SAFETY: All raw pointers come from NonNull<Node<T, N>> captured during
         // traversal.  They originate from heap allocations owned by this SkipList.

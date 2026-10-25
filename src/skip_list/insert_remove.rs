@@ -8,7 +8,7 @@ use crate::{
     node::{
         Node,
         link::Link,
-        visitor::{IndexMutVisitor, Visitor},
+        visitor::{IndexMutVisitor, Visitor, VisitorMut},
     },
     skip_list::SkipList,
 };
@@ -97,13 +97,11 @@ impl<T, G: LevelGenerator, const N: usize> SkipList<T, N, G> {
 
         // IndexMutVisitor records, for each level l, the last node whose
         // level-l skip-link would overshoot or is absent at new_rank.
-        // into_parts() releases the &mut borrow so the subsequent unsafe block
-        // can take raw pointers to nodes.
-        let (current, precursors, precursor_distances) = {
-            let mut visitor = IndexMutVisitor::new(self.head, new_rank);
-            visitor.traverse();
-            visitor.into_parts()
-        };
+        let mut visitor = IndexMutVisitor::new(self.head, new_rank);
+        visitor.traverse();
+        let current = visitor.current();
+        let precursors = visitor.precursors();
+        let precursor_distances = visitor.precursor_distances();
 
         // SAFETY: All raw pointers come from NonNull<Node<T, N>> captured during
         // traversal.  They originate from heap allocations owned by this SkipList.
@@ -235,13 +233,12 @@ impl<T, G: LevelGenerator, const N: usize> SkipList<T, N, G> {
         let target_rank = index.saturating_add(1);
 
         // IndexMutVisitor records the predecessor at each level.
-        // `current` from into_parts() is the target node itself.
-        // into_parts() releases the &mut borrow so the unsafe block can use raw ptrs.
-        let (target_node, precursors, precursor_distances) = {
-            let mut visitor = IndexMutVisitor::new(self.head, target_rank);
-            visitor.traverse();
-            visitor.into_parts()
-        };
+        // Its `current` is the target node itself.
+        let mut visitor = IndexMutVisitor::new(self.head, target_rank);
+        visitor.traverse();
+        let target_node = visitor.current();
+        let precursors = visitor.precursors();
+        let precursor_distances = visitor.precursor_distances();
 
         // SAFETY: All raw pointers come from NonNull<Node<T, N>> captured during
         // traversal.  They originate from heap allocations owned by this SkipList.

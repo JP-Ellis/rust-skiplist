@@ -8,7 +8,7 @@ use crate::{
     node::{
         Node,
         link::Link,
-        visitor::{IndexMutVisitor, OrdIndexMutVisitor, OrdMutVisitor, Path, Visitor},
+        visitor::{IndexMutVisitor, OrdIndexMutVisitor, OrdMutVisitor, Path, Visitor, VisitorMut},
     },
     ordered_skip_list::OrderedSkipList,
 };
@@ -236,7 +236,7 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
         // `self.head` is a `NonNull` (a `Copy` type), so copying it does not
         // borrow `self`.  The closure borrows only `self.comparator` (shared),
         // which is a distinct field from `self.head`.  Both borrows coexist
-        // safely and are released when `visitor` is dropped via `into_parts()`.
+        // safely; the path outlives both.
         let head = self.head;
         // SAFETY: `head` is this list's live head node.
         let mut path = unsafe { Path::new(head) };
@@ -394,13 +394,13 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
         Q: ?Sized,
         C: ComparatorKey<T, Q>,
     {
-        let (target_ptr, found, precursors) = {
-            let head = self.head;
-            let cmp = |v: &T, q: &Q| self.comparator.compare_key(v, q);
-            let mut visitor = OrdMutVisitor::new(head, value, cmp);
-            visitor.traverse();
-            visitor.into_parts()
-        };
+        let head = self.head;
+        let cmp = |v: &T, q: &Q| self.comparator.compare_key(v, q);
+        let mut visitor = OrdMutVisitor::new(head, value, cmp);
+        visitor.traverse();
+        let target_ptr = visitor.current();
+        let found = visitor.found();
+        let precursors = visitor.precursors();
 
         if !found {
             return None;
@@ -409,7 +409,7 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
         // SAFETY: `target_ptr` and every precursor come from the visitor's
         // walk of this list and are live for `&mut self`; no `&mut`
         // reference to any node exists.
-        unsafe { Node::check_precursors(&precursors, target_ptr) };
+        unsafe { Node::check_precursors(precursors, target_ptr) };
 
         let max_levels = self.head_ref().level();
 
