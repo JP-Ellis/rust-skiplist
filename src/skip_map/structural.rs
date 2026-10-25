@@ -10,7 +10,7 @@ use crate::{
     level_generator::LevelGenerator,
     node::{
         Node,
-        visitor::{OrdMutVisitor, Visitor},
+        visitor::{OrdIndexVisitor, Visitor},
     },
 };
 
@@ -74,12 +74,14 @@ impl<K, V, const N: usize, C: Comparator<K>, G: LevelGenerator> SkipMap<K, V, N,
     ///
     /// When the key ranges are strictly disjoint (every key of `other` is
     /// strictly greater than every key of `self`, or every key of `other` is
-    /// strictly less than every key of `self`), this runs in `$O(n+m)$` time.
+    /// strictly less than every key of `self`), the node chains are spliced in
+    /// `$O(\log n)$` time, or `$O(n+m)$` when the two maps have different
+    /// maximum heights (different capacities).
     /// Otherwise, when the key ranges overlap (including when
     /// `self.last_key == other.first_key`), each entry of `other` is inserted
     /// individually in `$O(m \log(n+m))$` time.
     ///
-    /// The `$O(n+m)$` path compares only the boundary keys and trusts the
+    /// The splice compares only the boundary keys and trusts the
     /// comparator for the rest.  A [`Comparator`] that is not a total order
     /// can therefore leave the result unordered.
     ///
@@ -135,8 +137,8 @@ impl<K, V, const N: usize, C: Comparator<K>, G: LevelGenerator> SkipMap<K, V, N,
         // matching the BTreeMap::append contract.
         //
         // Comparator trust: the comparison below runs before any write and only
-        // picks a path.  Each splice ends in a rebuild of every skip link from
-        // the base chain, so a wrong answer can unsort the list but not mislink it.
+        // picks a path.  The splices never consult the comparator, so a wrong
+        // answer can unsort the map but not mislink it.
         let can_concat = self.is_empty()
             || self.tail.is_some_and(|tail_nn| {
                 // SAFETY: tail_nn is a live data node owned by self; the
@@ -155,7 +157,11 @@ impl<K, V, const N: usize, C: Comparator<K>, G: LevelGenerator> SkipMap<K, V, N,
                 self.comparator.compare(self_last_key, other_first_key) == Ordering::Less
             });
 
-        if can_concat {
+        let same_height = self.head_ref().level() == other.head_ref().level();
+
+        if can_concat && same_height {
+            self.concat(other);
+        } else if can_concat {
             // SAFETY: other.head is a valid head sentinel; we hold &mut other.
             let first_of_other = unsafe { (*other.head.as_ptr()).take_next_chain() };
 
@@ -214,7 +220,13 @@ impl<K, V, const N: usize, C: Comparator<K>, G: LevelGenerator> SkipMap<K, V, N,
                 self.comparator.compare(other_last_key, self_first_key) == Ordering::Less
             });
 
-            if can_prepend {
+            if can_prepend && same_height {
+                // `other` goes first: swap the two chains, then append.
+                core::mem::swap(&mut self.head, &mut other.head);
+                core::mem::swap(&mut self.tail, &mut other.tail);
+                core::mem::swap(&mut self.len, &mut other.len);
+                self.concat(other);
+            } else if can_prepend {
                 let other_tail_nn = other_tail_saved.expect("other is non-empty in this branch");
 
                 // Detach other's chain and clear its sentinel's skip links.
@@ -271,11 +283,24 @@ impl<K, V, const N: usize, C: Comparator<K>, G: LevelGenerator> SkipMap<K, V, N,
         }
     }
 
+    /// Moves every entry of the non-empty `other`, whose head has the same
+    /// height, to the end of `self` in `$O(\log n)$`.
+    fn concat(&mut self, other: &mut Self) {
+        // SAFETY: we hold `&mut self` and `&mut other`, two distinct maps of
+        // the same height, and the caller guarantees `other` is non-empty.
+        unsafe { Node::concat(self.head, self.len, self.tail, other.head) };
+        self.len = self.len.saturating_add(other.len);
+        self.tail = other.tail.take();
+        other.len = 0;
+    }
+
     /// Splits the map at the given key, returning a new map containing all
     /// entries with key `>= key`.
     ///
     /// After the call, `self` retains all entries with key `< key`, and the
     /// returned map contains all entries with key `>= key`.
+    ///
+    /// This operation runs in `$O(\log n)$` time.
     ///
     /// # Examples
     ///
@@ -295,12 +320,6 @@ impl<K, V, const N: usize, C: Comparator<K>, G: LevelGenerator> SkipMap<K, V, N,
     /// assert_eq!(a_keys, [1, 2]);
     /// assert_eq!(b_keys, [3, 4, 5]);
     /// ```
-    #[expect(
-        clippy::multiple_unsafe_ops_per_block,
-        reason = "take_next_chain is an unsafe fn called on a raw-pointer dereference; \
-                  both operations act on one exclusively-owned node and are \
-                  provably disjoint from the set_head_next and filter_rebuild calls around them"
-    )]
     #[inline]
     #[must_use]
     pub fn split_off<Q>(&mut self, key: &Q) -> Self
@@ -309,79 +328,41 @@ impl<K, V, const N: usize, C: Comparator<K>, G: LevelGenerator> SkipMap<K, V, N,
         C: Clone + ComparatorKey<K, Q>,
         G: Clone,
     {
-        let max_levels = self.head_ref().level();
-
-        // Use OrdMutVisitor to find the last node strictly < key.
-        // The comparator projects entry.0 (the key) before comparing.
-        //
-        // `self.head` is `NonNull` (a `Copy` type) so copying it does not
-        // borrow `self`.  The closure only borrows `self.comparator` (shared),
-        // which is a distinct field.  Both borrows are released when `visitor`
-        // is consumed by `into_parts()`.
-        let pivot_nn = {
-            let head = self.head;
-            let cmp = |entry: &(K, V), q: &Q| self.comparator.compare_key(&entry.0, q);
-            let mut visitor = OrdMutVisitor::new(head, key, cmp);
+        // The comparator only picks the split rank; the split itself goes by
+        // rank, so a wrong answer moves the wrong entries but keeps both maps
+        // well formed.
+        let at = {
+            let cmp = |entry: &(K, V), q: &Q| match self.comparator.compare_key(&entry.0, q) {
+                Ordering::Less => Ordering::Less,
+                Ordering::Equal | Ordering::Greater => Ordering::Greater,
+            };
+            let mut visitor = OrdIndexVisitor::new(self.head_ref(), key, cmp);
             visitor.traverse();
-            let (current, found, _precursors) = visitor.into_parts();
-            // `found=true`:  current = first node with key == split_key;
-            //                pivot = the node just before it (prev()).
-            // `found=false`: current = last node with key < split_key
-            //                (or head if all keys >= split_key);
-            //                pivot = current.
-            if found {
-                // SAFETY: `current` is a `NonNull` pointing to a live node in
-                // `self`, returned by the visitor that traversed `self` while
-                // it was exclusively borrowed. The node is heap-allocated and
-                // valid for shared access here.
-                unsafe { current.as_ref() }.prev().unwrap_or(head)
-            } else {
-                current
-            }
+            visitor.current_rank()
         };
 
+        let max_levels = self.head_ref().level();
         // SAFETY: `Box::into_raw` transfers ownership; freed in `Drop`.
-        let result_head =
+        let head =
             unsafe { NonNull::new_unchecked(Box::into_raw(Box::new(Node::new(max_levels)))) };
         let mut result = Self {
-            head: result_head,
+            head,
             tail: None,
             len: 0,
             comparator: self.comparator.clone(),
             generator: self.generator.clone(),
         };
-
-        // Detach the ">= key" suffix from pivot_nn (the last node < key).
-        //
-        // SAFETY: `pivot_nn` is a valid, live node in this map (either the
-        // head sentinel or a data node) for the duration of `&mut self`.  No
-        // other live `&mut` references to any node exist.
-        let first_nn = unsafe { (*pivot_nn.as_ptr()).take_next_chain() };
-
-        if let Some(nn) = first_nn {
-            // SAFETY: `result.head` is a freshly allocated, exclusively-owned
-            // sentinel node.  `nn` is the first node of the detached chain
-            // with no other live references.
-            unsafe { Node::set_head_next(result.head, nn) };
+        if at == self.len {
+            return result;
         }
 
-        // Rebuild skip links for both halves and compute their element counts.
-        //
-        // SAFETY: `self.head` is exclusively owned; every node reachable from
-        // it is a live heap allocation with no other live references.
-        unsafe { Node::filter_rebuild(self.head, &mut self.len, &mut self.tail, |_| true, |_| {}) };
-        // SAFETY: `result.head` is exclusively owned; every node reachable
-        // from it is a live heap allocation with no other live references.
-        unsafe {
-            Node::filter_rebuild(
-                result.head,
-                &mut result.len,
-                &mut result.tail,
-                |_| true,
-                |_| {},
-            );
-        }
-
+        // SAFETY: we hold `&mut self`, `at < self.len`, and `result.head` is a
+        // fresh empty head of the same height.
+        let last_kept = unsafe { Node::split_after(self.head, at, result.head) };
+        result.len = self.len.wrapping_sub(at);
+        result.tail = self.tail;
+        self.len = at;
+        self.tail = (at > 0).then_some(last_kept);
         result
     }
 
@@ -446,6 +427,52 @@ mod tests {
 
     use super::super::SkipMap;
     use crate::test_util::{PanicOnDrop, bombs};
+
+    /// A map of `k -> k` for `k` in `keys`, with tower heights from `seed`.
+    fn seeded(keys: core::ops::Range<usize>, seed: u32) -> SkipMap<usize, usize> {
+        let mut map = SkipMap::with_level_generator(crate::test_util::seeded_geometric(seed));
+        for k in keys {
+            map.insert(k, k);
+        }
+        map
+    }
+
+    #[test]
+    fn split_off_every_key_is_well_formed() {
+        for (len, seed) in (0..40).zip(0_u32..) {
+            for at in 0..=len {
+                let mut kept = seeded(0..len, seed);
+                let moved = kept.split_off(&at);
+                kept.assert_well_formed();
+                moved.assert_well_formed();
+                assert!(kept.keys().copied().eq(0..at));
+                assert!(moved.keys().copied().eq(at..len));
+            }
+        }
+    }
+
+    #[test]
+    fn append_spliced_in_both_directions_is_well_formed() {
+        for left in 0..20 {
+            for right in 0..20 {
+                let mut low = seeded(0..left, 1);
+                let mut high = seeded(left..left + right, 2);
+                low.append(&mut high);
+                low.assert_well_formed();
+                high.assert_well_formed();
+                assert!(low.keys().copied().eq(0..left + right));
+
+                let mut first = seeded(0..left, 3);
+                let mut second = seeded(left..left + right, 4);
+                second.append(&mut first);
+                second.assert_well_formed();
+                first.assert_well_formed();
+                assert!(second.keys().copied().eq(0..left + right));
+                second.insert(left + right, 0);
+                second.assert_well_formed();
+            }
+        }
+    }
 
     // MARK: clear
 

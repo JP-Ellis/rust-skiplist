@@ -43,12 +43,13 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> SkipSet<T, N, C, G>
     /// (the existing element in `self` is kept).  After the call, `self`
     /// contains the union of both sets.
     ///
-    /// This operation is `$O(n+m)$` when the element ranges are strictly
+    /// This operation is `$O(\log n)$` when the element ranges are strictly
     /// disjoint (`self.last() < other.first()` or `other.last() < self.first()`
-    /// according to the comparator), and `$O(m \log(n+m))$` when the ranges
-    /// overlap.
+    /// according to the comparator), `$O(n+m)$` if the two sets also have
+    /// different maximum heights (different capacities), and
+    /// `$O(m \log(n+m))$` when the ranges overlap.
     ///
-    /// The `$O(n+m)$` path compares only the boundary elements and trusts the
+    /// The disjoint path compares only the boundary elements and trusts the
     /// comparator for the rest.  A [`Comparator`] that is not a total order
     /// can therefore leave the result unordered.
     ///
@@ -90,11 +91,11 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> SkipSet<T, N, C, G>
         // in either direction (self.last < other.first, or other.last <
         // self.first), no duplicates can arise.  We delegate directly to the
         // underlying OrderedSkipList, which picks the appropriate splice
-        // direction and rebuilds skip links in O(n+m).
+        // direction.
         //
         // Comparator trust: the comparisons run before any write and only pick
-        // a path.  Both paths are safe for any answer: the splice rebuilds every
-        // skip link, and the slow path inserts through the checked visitors.
+        // a path.  Both paths are safe for any answer: the splice consults no
+        // comparator, and the slow path inserts through the checked visitors.
         let disjoint = if self.is_empty() {
             true
         } else {
@@ -125,7 +126,7 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> SkipSet<T, N, C, G>
     /// returned set contains the rest.  If `index >= self.len()`, `self` is
     /// unchanged and the returned set is empty.
     ///
-    /// This operation is `$O(n)$` overall.
+    /// This operation is `$O(\log n)$`.
     ///
     /// # Examples
     ///
@@ -159,7 +160,7 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> SkipSet<T, N, C, G>
     /// After the call, `self` retains all elements with value `< value`, and
     /// the returned set contains all elements with value `>= value`.
     ///
-    /// This operation is `$O(n)$` overall.
+    /// This operation is `$O(\log n)$`.
     ///
     /// # Examples
     ///
