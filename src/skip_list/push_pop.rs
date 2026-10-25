@@ -76,6 +76,8 @@ impl<T, G: LevelGenerator, const N: usize> SkipList<T, N, G> {
     pub fn push_front_mut(&mut self, value: T) -> &mut T {
         // height ∈ [0, total]: number of skip links to allocate.
         let height = self.generator.level();
+        // SAFETY: the head is live and no reference to it is held.
+        unsafe { (*self.head.as_ptr()).grow_to(height) };
         let max_levels = self.head_ref().level();
 
         // SAFETY: Node::with_value produces a detached node (prev = next = None),
@@ -199,6 +201,8 @@ impl<T, G: LevelGenerator, const N: usize> SkipList<T, N, G> {
     pub fn push_back_mut(&mut self, value: T) -> &mut T {
         // height ∈ [0, total]: number of skip links to allocate.
         let height = self.generator.level();
+        // SAFETY: the head is live and no reference to it is held.
+        unsafe { (*self.head.as_ptr()).grow_to(height) };
 
         // A node with no tower needs no precursors: link it after the tail.
         if height == 0 {

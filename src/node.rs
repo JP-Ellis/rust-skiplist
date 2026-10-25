@@ -250,6 +250,20 @@ impl<V, const N: usize> Node<V, N> {
         self.links.len()
     }
 
+    /// Raises the node's level to `height`, filling the new top levels with
+    /// absent links. Does nothing if the node is already at least that tall.
+    ///
+    /// A head stays as tall as the tallest tower in its list: every insert
+    /// calls this on the head before linking a new tower.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `height > N`.
+    #[inline]
+    pub(crate) fn grow_to(&mut self, height: usize) {
+        self.links.grow(height, |_| None);
+    }
+
     /// Get a shared reference to the next node.
     ///
     /// The returned reference has **Frozen** provenance under Tree Borrows.
@@ -1305,6 +1319,8 @@ impl<V, const N: usize> Drop for DropChain<'_, V, N> {
 /// Valid only while nothing else changes the list: any other insertion or
 /// removal leaves it stale.
 pub(crate) struct Frontier<V, const N: usize> {
+    /// Head of the list, raised when a pushed tower is taller.
+    head: NonNull<Node<V, N>>,
     /// Last node at each level and its rank (the head has rank 0).
     last: LevelArray<(NonNull<Node<V, N>>, usize), N>,
 }
@@ -1315,10 +1331,6 @@ impl<V, const N: usize> Frontier<V, N> {
     /// # Safety
     ///
     /// `head` must be the head of a live list of `len` data nodes.
-    #[expect(
-        clippy::indexing_slicing,
-        reason = "both arrays have the head's height, which bounds l"
-    )]
     pub(crate) unsafe fn new(head: NonNull<Node<V, N>>, len: usize) -> Self {
         // Every rank is below `len + 1`, so the walk ends at the tail having
         // recorded the last node at each level.
@@ -1326,7 +1338,14 @@ impl<V, const N: usize> Frontier<V, N> {
         visitor.traverse();
         let (_, precursors, distances) = visitor.into_parts();
         Self {
-            last: LevelArray::from_fn(precursors.len(), |l| (precursors[l], distances[l])),
+            head,
+            // `from_fn` also fills the unused slots above the head's height.
+            last: LevelArray::from_fn(precursors.len(), |l| {
+                (
+                    precursors.get(l).copied().unwrap_or(head),
+                    distances.get(l).copied().unwrap_or(0),
+                )
+            }),
         }
     }
 
@@ -1337,7 +1356,11 @@ impl<V, const N: usize> Frontier<V, N> {
     ///
     /// `tail` must be the last node (or the head of an empty list) at rank
     /// `rank` of the list this frontier was built for, unchanged since except
-    /// through this method, and `height` must not exceed the head's height.
+    /// through this method.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `height > N`.
     #[expect(
         clippy::expect_used,
         reason = "each recorded rank is at most `rank`, so the distance is at least 1"
@@ -1353,6 +1376,10 @@ impl<V, const N: usize> Frontier<V, N> {
         height: usize,
         value: V,
     ) -> NonNull<Node<V, N>> {
+        let head = self.head;
+        // SAFETY: the head is live and no reference to it is held.
+        unsafe { (*head.as_ptr()).grow_to(height) };
+        self.last.grow(height, |_| (head, 0));
         // SAFETY: the caller guarantees `tail` is the live last node.
         let new = unsafe { Node::insert_after(tail, Node::with_value(height, value)) };
         let new_rank = rank.wrapping_add(1);

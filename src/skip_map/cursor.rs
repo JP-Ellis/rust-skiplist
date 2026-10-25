@@ -774,6 +774,7 @@ impl<K, V, const N: usize, C: Comparator<K>, G: LevelGenerator> CursorMut<'_, K,
         let list_mut = unsafe { self.list.as_mut_unchecked() };
         self.raw.ensure_precursors(list_mut.head);
         let height = list_mut.generator.level();
+        self.raw.raise(list_mut.head, height);
         let new_rank = self.raw.current_rank.saturating_add(1);
         let is_new_tail = list_mut.tail.is_none_or(|tail| self.raw.current == tail);
 

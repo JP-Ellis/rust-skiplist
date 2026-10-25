@@ -555,13 +555,18 @@ impl<'a, K, V, const N: usize, C: Comparator<K>, G: LevelGenerator> VacantEntry<
             key,
             current,
             current_rank,
-            precursors,
-            precursor_distances,
+            mut precursors,
+            mut precursor_distances,
             map,
         } = self;
 
         // height ∈ [0, total]: number of skip links to allocate.
         let height = map.generator.level();
+        let head = map.head;
+        // SAFETY: the head is live and no reference to it is held.
+        unsafe { (*head.as_ptr()).grow_to(height) };
+        precursors.grow(height, |_| head);
+        precursor_distances.grow(height, |_| 0);
         // new_rank = current_rank + 1 (current is the last node with key < our key).
         let new_rank = current_rank.saturating_add(1);
 

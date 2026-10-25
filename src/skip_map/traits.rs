@@ -333,7 +333,6 @@ impl<K, V, C: Comparator<K>, G: LevelGenerator, const N: usize> Extend<(K, V)>
             let tail = self.tail.unwrap_or(self.head);
             // SAFETY: `tail` is the last node at rank `self.len`, and the map
             // has changed only through `appender` since it was built.
-            // `height` comes from this map's generator, so it fits the head.
             let node = unsafe { appender.push(tail, self.len, height, (k, v)) };
             self.tail = Some(node);
             self.len = self.len.saturating_add(1);
