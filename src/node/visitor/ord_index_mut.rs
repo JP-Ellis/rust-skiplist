@@ -248,7 +248,8 @@ impl<T, Q: ?Sized, F: Fn(&T, &Q) -> Ordering, const N: usize> Visitor
                         // precursor for this level. We will record it later
                         // if the same level overshoots at the new node.
                         self.current = node_ptr;
-                        self.rank = self.rank.saturating_add(link.distance().get());
+                        // Ranks are bounded by the list length, so these sums never wrap.
+                        self.rank = self.rank.wrapping_add(link.distance().get());
                         // Use level + 1 so the same level is reconsidered at
                         // the new node (mirrors the fix in `IndexVisitor`).
                         self.level = level.saturating_add(1);
@@ -288,7 +289,7 @@ impl<T, Q: ?Sized, F: Fn(&T, &Q) -> Ordering, const N: usize> Visitor
                 total_order_violation();
             }
             self.current = next_nn;
-            self.rank = self.rank.saturating_add(1);
+            self.rank = self.rank.wrapping_add(1);
             self.found = ord == Ordering::Equal;
             return Step::Advanced(self.current);
         }

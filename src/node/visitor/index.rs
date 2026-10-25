@@ -61,8 +61,9 @@ impl<'a, T, const N: usize> Visitor for IndexVisitor<'a, T, N> {
         }
 
         for (level, maybe_link) in (0..self.level).zip(self.current.links()).rev() {
+            // Ranks are bounded by the list length, so these sums never wrap.
             if let Some(link) = maybe_link
-                && self.index.saturating_add(link.distance().get()) <= self.target
+                && self.index.wrapping_add(link.distance().get()) <= self.target
             {
                 // SAFETY: link.node() is a valid heap-allocated node
                 // that lives at least as long as the visitor's `'a`.
@@ -71,7 +72,7 @@ impl<'a, T, const N: usize> Visitor for IndexVisitor<'a, T, N> {
                 // node; setting to `level` would skip it, degrading O(log n)
                 // traversal to O(n) when consecutive nodes share a high level.
                 self.level = level.saturating_add(1);
-                self.index = self.index.saturating_add(link.distance().get());
+                self.index = self.index.wrapping_add(link.distance().get());
                 return Step::Advanced(self.current);
             }
         }
@@ -82,7 +83,7 @@ impl<'a, T, const N: usize> Visitor for IndexVisitor<'a, T, N> {
         self.level = 0;
         if let Some(next) = self.current.next_as_ref() {
             self.current = next;
-            self.index = self.index.saturating_add(1);
+            self.index = self.index.wrapping_add(1);
             return Step::Advanced(self.current);
         }
 

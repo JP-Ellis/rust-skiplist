@@ -110,7 +110,8 @@ where
                 Ordering::Greater => false,
             };
             if should_advance {
-                rank = rank.saturating_add(link.distance().get());
+                // Ranks are bounded by the list length, so these sums never wrap.
+                rank = rank.wrapping_add(link.distance().get());
                 current = dest;
                 // Stay at the same level: try again from the new position.
             } else {
@@ -137,7 +138,7 @@ where
             Ordering::Greater => false,
         };
         if should_advance {
-            rank = rank.saturating_add(1);
+            rank = rank.wrapping_add(1);
             current = next;
         } else {
             break;

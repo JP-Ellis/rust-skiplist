@@ -134,7 +134,8 @@ impl<'a, T, Q: ?Sized, F: Fn(&T, &Q) -> Ordering, const N: usize> Visitor
                     // from `OrdVisitor`, which also follows Equal links and
                     // may skip earlier duplicates.
                     self.current = node;
-                    self.rank = self.rank.saturating_add(link.distance().get());
+                    // Ranks are bounded by the list length, so these sums never wrap.
+                    self.rank = self.rank.wrapping_add(link.distance().get());
                     // Retain the same level on the next step (mirrors the
                     // level + 1 fix used in `IndexVisitor`).
                     self.level = level.saturating_add(1);
@@ -156,7 +157,7 @@ impl<'a, T, Q: ?Sized, F: Fn(&T, &Q) -> Ordering, const N: usize> Visitor
                 return Step::Exhausted;
             }
             self.current = next;
-            self.rank = self.rank.saturating_add(1);
+            self.rank = self.rank.wrapping_add(1);
             self.found = ord == Ordering::Equal;
             return Step::Advanced(self.current);
         }
