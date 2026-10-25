@@ -31,6 +31,8 @@
     clippy::cast_possible_truncation,
     clippy::expect_used,
     clippy::indexing_slicing,
+    clippy::integer_division,
+    clippy::integer_division_remainder_used,
     clippy::panic,
     clippy::print_stdout,
     reason = "Benchmark harness: plain index arithmetic, fixed pools, CLI output"
@@ -40,8 +42,8 @@ use core::{hint::black_box, iter, time::Duration};
 use std::env;
 
 use criterion::Criterion;
-use rand::{RngExt as _, SeedableRng, rngs::SmallRng};
-use skiplist::{Geometric, OrderedSkipList, SkipList, SkipMap, SkipSet};
+use rand::{RngExt as _, SeedableRng, rngs::SmallRng, seq::SliceRandom as _};
+use skiplist::{Geometric, OrderedSkipList, SkipList, SkipMap, SkipSet, skip_set};
 
 /// Size used by every workload.
 const SMALL: usize = 1_000;
@@ -185,6 +187,21 @@ impl Workload for ListIter {
     }
 }
 
+/// `SkipList::clone`, then drop the copy.
+struct ListClone(SkipList<u64>);
+
+impl Workload for ListClone {
+    const NAME: &'static str = "list/clone";
+
+    fn setup(n: usize) -> Self {
+        Self(skip_list(n))
+    }
+
+    fn step(&mut self, _key: u64) {
+        black_box(self.0.clone());
+    }
+}
+
 /// `OrderedSkipList::insert` of an absent key, then `take`.
 struct OslInsertTake(OrderedSkipList<u64>);
 
@@ -264,6 +281,28 @@ impl Workload for OslGetByIndex {
     }
 }
 
+/// Number of copies of each value in `osl/count_dups`.
+const DUPS: usize = 100;
+
+/// `OrderedSkipList::count` of a value present `DUPS` times.
+struct OslCountDups(OrderedSkipList<u64>);
+
+impl Workload for OslCountDups {
+    const NAME: &'static str = "osl/count_dups";
+
+    fn setup(n: usize) -> Self {
+        let mut list = OrderedSkipList::with_level_generator(generator());
+        for i in 0..n {
+            list.insert((i / DUPS) as u64);
+        }
+        Self(list)
+    }
+
+    fn step(&mut self, key: u64) {
+        black_box(self.0.count(&(key / DUPS as u64)));
+    }
+}
+
 /// `SkipSet::insert` of an absent key, then `remove`.
 struct SetInsertRemove(SkipSet<u64>);
 
@@ -293,6 +332,41 @@ impl Workload for SetInsertPresent {
 
     fn step(&mut self, key: u64) {
         black_box(self.0.insert(2 * key));
+    }
+}
+
+/// `SkipSet::replace` of a present key.
+struct SetReplace(SkipSet<u64>);
+
+impl Workload for SetReplace {
+    const NAME: &'static str = "set/replace";
+
+    fn setup(n: usize) -> Self {
+        Self(skip_set(n))
+    }
+
+    fn step(&mut self, key: u64) {
+        black_box(self.0.replace(2 * key));
+    }
+}
+
+/// `SkipSet::entry` of a present key, reading the element.
+struct SetEntryHit(SkipSet<u64>);
+
+impl Workload for SetEntryHit {
+    const NAME: &'static str = "set/entry_hit";
+
+    fn setup(n: usize) -> Self {
+        Self(skip_set(n))
+    }
+
+    fn step(&mut self, key: u64) {
+        match self.0.entry(2 * key) {
+            skip_set::Entry::Occupied(e) => {
+                black_box(e.get());
+            }
+            skip_set::Entry::Vacant(_) => panic!("key is present"),
+        }
     }
 }
 
@@ -336,6 +410,33 @@ impl Workload for SetContainsString {
     }
 }
 
+/// `SkipSet<String>::insert` of an absent key, then `remove`.
+struct SetInsertRemoveString {
+    /// Set of the even keys, as in `set/contains_string`.
+    set: SkipSet<String>,
+    /// `absent[k]` is the string for key `2 * k + 1`.
+    absent: Vec<String>,
+}
+
+impl Workload for SetInsertRemoveString {
+    const NAME: &'static str = "set/insert_remove_string";
+
+    fn setup(n: usize) -> Self {
+        let mut set = SkipSet::with_level_generator(generator());
+        for i in 0..n {
+            set.insert(format!("key-{:08}", 2 * i));
+        }
+        let absent = (0..n).map(|i| format!("key-{:08}", 2 * i + 1)).collect();
+        Self { set, absent }
+    }
+
+    fn step(&mut self, key: u64) {
+        let v = &self.absent[key as usize];
+        black_box(self.set.insert(v.clone()));
+        black_box(self.set.remove(v));
+    }
+}
+
 /// `SkipSet::range(k..)`, then the first element: a successor query.
 struct SetRangeNext(SkipSet<u64>);
 
@@ -364,6 +465,72 @@ impl Workload for SetFromIter {
     fn step(&mut self, _key: u64) {
         let set: SkipSet<u64> = (0..self.0 as u64).collect();
         black_box(set);
+    }
+}
+
+/// `SkipSet` built from `n` shuffled keys, then dropped.
+struct SetFromIterShuffled(Vec<u64>);
+
+impl Workload for SetFromIterShuffled {
+    const NAME: &'static str = "set/from_iter_shuffled";
+
+    fn setup(n: usize) -> Self {
+        let mut keys: Vec<u64> = (0..n as u64).collect();
+        keys.shuffle(&mut SmallRng::seed_from_u64(2));
+        Self(keys)
+    }
+
+    fn step(&mut self, _key: u64) {
+        let set: SkipSet<u64> = self.0.iter().copied().collect();
+        black_box(set);
+    }
+}
+
+/// `SkipSet::clone`, then drop the copy.
+struct SetClone(SkipSet<u64>);
+
+impl Workload for SetClone {
+    const NAME: &'static str = "set/clone";
+
+    fn setup(n: usize) -> Self {
+        Self(skip_set(n))
+    }
+
+    fn step(&mut self, _key: u64) {
+        black_box(self.0.clone());
+    }
+}
+
+/// `SkipSet::clone`, then consume the copy with `into_iter`. Subtract
+/// `set/clone` for the cost of `into_iter` alone.
+struct SetIntoIter(SkipSet<u64>);
+
+impl Workload for SetIntoIter {
+    const NAME: &'static str = "set/into_iter";
+
+    fn setup(n: usize) -> Self {
+        Self(skip_set(n))
+    }
+
+    fn step(&mut self, _key: u64) {
+        black_box(self.0.clone().into_iter().fold(0_u64, u64::wrapping_add));
+    }
+}
+
+/// `&a | &b` for two interleaved sets of `n / 2` keys each.
+struct SetBitOr(SkipSet<u64>, SkipSet<u64>);
+
+impl Workload for SetBitOr {
+    const NAME: &'static str = "set/bitor";
+
+    fn setup(n: usize) -> Self {
+        let set = skip_set(n);
+        let (a, b): (Vec<u64>, Vec<u64>) = set.iter().partition(|&&v| v % 4 == 0);
+        Self(a.into_iter().collect(), b.into_iter().collect())
+    }
+
+    fn step(&mut self, _key: u64) {
+        black_box(&self.0 | &self.1);
     }
 }
 
@@ -526,17 +693,26 @@ const ENTRIES: &[Entry] = &[
     entry::<ListQueue>(&[(SMALL, POINT)]),
     entry::<ListStack>(&[(SMALL, POINT)]),
     entry::<ListIter>(&[(SMALL, BULK)]),
+    entry::<ListClone>(&[(SMALL, BULK)]),
     entry::<OslInsertTake>(&[(SMALL, POINT)]),
     entry::<OslInsertTakeLast>(&[(SMALL, POINT), (LARGE, SLOW)]),
     entry::<OslContains>(&[(SMALL, POINT), (LARGE, POINT)]),
     entry::<OslRank>(&[(SMALL, POINT)]),
     entry::<OslGetByIndex>(&[(SMALL, POINT)]),
+    entry::<OslCountDups>(&[(SMALL, POINT), (LARGE, POINT)]),
     entry::<SetInsertRemove>(&[(SMALL, POINT), (LARGE, POINT)]),
     entry::<SetInsertPresent>(&[(SMALL, POINT)]),
+    entry::<SetReplace>(&[(SMALL, POINT)]),
+    entry::<SetEntryHit>(&[(SMALL, POINT)]),
     entry::<SetContains>(&[(SMALL, POINT)]),
     entry::<SetContainsString>(&[(SMALL, POINT)]),
+    entry::<SetInsertRemoveString>(&[(SMALL, POINT)]),
     entry::<SetRangeNext>(&[(SMALL, POINT), (LARGE, SLOW)]),
     entry::<SetFromIter>(&[(SMALL, BULK)]),
+    entry::<SetFromIterShuffled>(&[(SMALL, BULK)]),
+    entry::<SetClone>(&[(SMALL, BULK)]),
+    entry::<SetIntoIter>(&[(SMALL, BULK)]),
+    entry::<SetBitOr>(&[(SMALL, BULK)]),
     entry::<MapInsertRemove>(&[(SMALL, POINT), (LARGE, POINT)]),
     entry::<MapInsertReplace>(&[(SMALL, POINT)]),
     entry::<MapGet>(&[(SMALL, POINT), (LARGE, POINT)]),
