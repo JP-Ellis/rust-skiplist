@@ -559,39 +559,12 @@ impl<K, V, const N: usize, C: Comparator<K>, G: LevelGenerator> SkipMap<K, V, N,
         // &mut self.  No other &mut reference to it exists.
         let tail_height = unsafe { tail_ptr.as_ref() }.level();
 
-        // Find the predecessor of the tail at each skip level using a
-        // pointer-equality forward traversal.
+        // Clearing the links into the tail needs its precursor at every level
+        // below its height.
         //
-        // At each level l < tail_height, advance from `current` while the
-        // level-l link does NOT point to the tail.  When the loop stops,
-        // `current` is the unique predecessor at level l (the node whose
-        // link[l] == tail).  `current` is not reset between levels: the
-        // skip-list structure guarantees we can only advance forward.
-        //
-        // For levels l >= tail_height, no node can link directly to the tail
-        // (tail has no tower slot at those levels), so no links need clearing.
-        let precursors: [NonNull<Node<(K, V), N>>; N] = {
-            let mut arr = [self.head; N];
-            let mut current = self.head;
-
-            for l in (0..tail_height).rev() {
-                loop {
-                    // SAFETY: `current` is a valid node in this list, live for
-                    // the duration of &mut self.  No exclusive reference exists.
-                    let maybe_link = unsafe { current.as_ref() }
-                        .links()
-                        .get(l)
-                        .and_then(|lk| lk.as_ref());
-                    match maybe_link {
-                        None => break,
-                        Some(link) if link.node() == tail_ptr => break,
-                        Some(link) => current = link.node(),
-                    }
-                }
-                arr[l] = current;
-            }
-            arr
-        };
+        // SAFETY: `self.head` heads this live list and `tail_ptr` is its last
+        // node.
+        let precursors = unsafe { Node::tail_precursors(self.head, tail_ptr) };
 
         // SAFETY: All raw pointers come from NonNull<Node<(K,V), N>> values
         // captured during traversal or from self.tail.  No safe &mut

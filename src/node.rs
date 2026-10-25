@@ -671,6 +671,42 @@ impl<V, const N: usize> Node<V, N> {
         }
     }
 
+    /// For each level of the head's tower, the last node at that level
+    /// before `tail`.
+    ///
+    /// Descends from the head's top level, each level resuming where the one
+    /// above stopped, so the walk is `$O(\log n)$` on average. Below the
+    /// tail's height the returned node links to `tail`; at and above it the
+    /// node is the last one on its level. Only pointers are compared, so the
+    /// result does not depend on any comparator.
+    ///
+    /// # Safety
+    ///
+    /// `head` must be the head of a live list whose last node is `tail`.
+    pub(crate) unsafe fn tail_precursors(
+        head: NonNull<Self>,
+        tail: NonNull<Self>,
+    ) -> LevelArray<NonNull<Self>, N> {
+        // SAFETY: the caller guarantees `head` is live.
+        let max_levels = unsafe { head.as_ref() }.level();
+        let mut precursors = LevelArray::from_fn(max_levels, |_| head);
+        let mut current = head;
+        for (l, precursor) in precursors.iter_mut().enumerate().rev() {
+            // SAFETY: `current` is `head` or was reached through a link, so it
+            // is live.
+            while let Some(link) = unsafe { current.as_ref() }
+                .links()
+                .get(l)
+                .and_then(Option::as_ref)
+                && link.node() != tail
+            {
+                current = link.node();
+            }
+            *precursor = current;
+        }
+        precursors
+    }
+
     /// Filter and rebuild skip links in a single `$O(n)$` forward pass.
     ///
     /// Walks the `next` chain starting from `head` (the head sentinel).
