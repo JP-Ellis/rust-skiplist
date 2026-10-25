@@ -10,11 +10,14 @@ use core::{
 /// Replaces a heap-free vector for per-level bookkeeping: skip-link slots
 /// on a node, and precursor stacks in the mutable visitors.  Dereferences to
 /// the in-use prefix, so callers index and iterate it as a slice.
+///
+/// `len` comes first so that it sits next to the low slots.
+#[repr(C)]
 pub(crate) struct LevelArray<T, const N: usize> {
-    /// Backing storage; only `items[..len]` is exposed.
-    items: [T; N],
     /// Number of in-use slots, always `<= N`.
     len: u8,
+    /// Backing storage; only `items[..len]` is exposed.
+    items: [T; N],
 }
 
 impl<T, const N: usize> LevelArray<T, N> {
@@ -205,6 +208,16 @@ mod tests {
         let b: LevelArray<usize, 4> = LevelArray::from_fn(2, |i| if i < 2 { i } else { 99 });
         assert_eq!(a, b);
         assert_eq!(format!("{a:?}"), "[0, 1]");
+    }
+
+    #[test]
+    fn len_precedes_items() {
+        type A = LevelArray<u64, 4>;
+        assert_eq!(core::mem::offset_of!(A, len), 0, "`len` must be first");
+        assert!(
+            core::mem::offset_of!(A, len) < core::mem::offset_of!(A, items),
+            "`len` must precede `items`"
+        );
     }
 
     #[test]
