@@ -24,6 +24,9 @@
 //! - `hot opcount <workload> <n> <iters>`: build the container and run `iters`
 //!   steps with no timing, for `perf stat`. The per-step cost is the difference
 //!   between a run with `iters` steps and one with zero, divided by `iters`.
+//!
+//! Setting `HOT_OPT_IN` to a non-empty value adds the opt-in workloads to
+//! `hot` and `hot list`. `hot opcount` finds them either way.
 
 #![expect(
     clippy::arithmetic_side_effects,
@@ -453,6 +456,114 @@ impl Workload for SetInsertRemoveString {
     }
 }
 
+/// A 264-byte value ordered by its first field, `key`.
+///
+/// `repr(C)` keeps `key` at offset 0, so a comparison reads the value's first
+/// cache line. As the node's `Option` the value takes 272 bytes, more than
+/// four cache lines.
+#[repr(C)]
+#[derive(Clone)]
+struct Large {
+    /// Sort key.
+    key: u64,
+    /// Filler; never compared.
+    payload: [u64; 32],
+}
+
+const _: () = assert!(
+    core::mem::size_of::<Large>() == 264,
+    "Large must stay 264 bytes"
+);
+
+impl Large {
+    /// The value with sort key `key`.
+    fn new(key: u64) -> Self {
+        Self {
+            key,
+            payload: [key; 32],
+        }
+    }
+}
+
+impl PartialEq for Large {
+    fn eq(&self, other: &Self) -> bool {
+        self.key == other.key
+    }
+}
+
+impl Eq for Large {}
+
+impl PartialOrd for Large {
+    fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for Large {
+    fn cmp(&self, other: &Self) -> core::cmp::Ordering {
+        self.key.cmp(&other.key)
+    }
+}
+
+/// `SkipSet<Large>` of the even keys.
+fn large_set(n: usize) -> SkipSet<Large> {
+    let mut set = SkipSet::with_level_generator(generator());
+    for i in 0..n as u64 {
+        set.insert(Large::new(2 * i));
+    }
+    set
+}
+
+/// `SkipSet<Large>::contains` of a present key (opt-in).
+struct SetContainsLarge {
+    /// Set of the even keys.
+    set: SkipSet<Large>,
+    /// `queries[k]` is the value with key `2 * k`.
+    queries: Vec<Large>,
+}
+
+impl Workload for SetContainsLarge {
+    const NAME: &'static str = "set/contains_large";
+
+    fn setup(n: usize) -> Self {
+        let queries = (0..n as u64).map(|i| Large::new(2 * i)).collect();
+        Self {
+            set: large_set(n),
+            queries,
+        }
+    }
+
+    fn step(&mut self, key: u64) {
+        black_box(self.set.contains(&self.queries[key as usize]));
+    }
+}
+
+/// `SkipSet<Large>::insert` of an absent key, then `remove` (opt-in).
+struct SetInsertRemoveLarge {
+    /// Set of the even keys.
+    set: SkipSet<Large>,
+    /// `absent[k]` is the value with key `2 * k + 1`.
+    absent: Vec<Large>,
+}
+
+impl Workload for SetInsertRemoveLarge {
+    const NAME: &'static str = "set/insert_remove_large";
+
+    fn setup(n: usize) -> Self {
+        let absent = (0..n as u64).map(|i| Large::new(2 * i + 1)).collect();
+        Self {
+            set: large_set(n),
+            absent,
+        }
+    }
+
+    fn step(&mut self, key: u64) {
+        let v = &self.absent[key as usize];
+        black_box(self.set.insert(v.clone()));
+        black_box(self.set.remove(v));
+    }
+}
+
 /// `SkipSet::range(k..)`, then the first element: a successor query.
 struct SetRangeNext(SkipSet<u64>);
 
@@ -734,7 +845,7 @@ const BULK: u64 = 10_000;
 /// `LARGE`.
 const SLOW: u64 = 1_000;
 
-/// Every workload, in run order.
+/// The default workloads, in run order.
 const ENTRIES: &[Entry] = &[
     entry::<ListGet>(&[(SMALL, POINT), (LARGE, POINT)]),
     entry::<ListInsertRemove>(&[(SMALL, POINT)]),
@@ -772,6 +883,24 @@ const ENTRIES: &[Entry] = &[
     entry::<MapIter>(&[(SMALL, BULK)]),
     entry::<MapSplitAppend>(&[(SMALL, BULK), (LARGE, SLOW)]),
 ];
+
+/// Workloads that run only when `HOT_OPT_IN` is non-empty, for questions the
+/// default suite does not ask. `opcount` finds them either way.
+const OPT_IN: &[Entry] = &[
+    entry::<SetContainsLarge>(&[(SMALL, POINT), (LARGE, POINT)]),
+    entry::<SetInsertRemoveLarge>(&[(SMALL, POINT), (LARGE, POINT)]),
+];
+
+/// The workloads to list and run: every default one, then the opt-in ones
+/// when `HOT_OPT_IN` is non-empty.
+fn entries() -> impl Iterator<Item = &'static Entry> {
+    let opt_in: &[Entry] = if env::var_os("HOT_OPT_IN").is_some_and(|v| !v.is_empty()) {
+        OPT_IN
+    } else {
+        &[]
+    };
+    ENTRIES.iter().chain(opt_in)
+}
 
 // MARK: Drivers
 
@@ -817,7 +946,7 @@ fn main() {
     let args: Vec<String> = env::args().collect();
     match args.get(1).map(String::as_str) {
         Some("list") => {
-            for e in ENTRIES {
+            for e in entries() {
                 for (n, iters) in e.sizes {
                     println!("{} {n} {iters}", e.name);
                 }
@@ -829,6 +958,7 @@ fn main() {
             };
             let e = ENTRIES
                 .iter()
+                .chain(OPT_IN)
                 .find(|e| e.name == name)
                 .unwrap_or_else(|| panic!("unknown workload {name}"));
             (e.count)(
@@ -842,7 +972,7 @@ fn main() {
                 .measurement_time(Duration::from_secs(3))
                 .without_plots()
                 .configure_from_args();
-            for e in ENTRIES {
+            for e in entries() {
                 for &(n, _) in e.sizes {
                     (e.bench)(&mut c, n);
                 }

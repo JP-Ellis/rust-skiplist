@@ -18,6 +18,7 @@
 #   -m <mode>    perf, criterion or all (default all)
 #   -r <rounds>  Criterion rounds (default 10)
 #   -f <regex>   Criterion filter, e.g. '^set/' (default: everything)
+#   -o           include the opt-in workloads (sets HOT_OPT_IN on the host)
 #   -w           wait for completion, then fetch the summary
 #
 # Environment:
@@ -48,14 +49,15 @@ usage() {
 # MARK: Commands
 
 cmd_run() {
-  local label mode=all rounds=10 filter="" wait=0 opt
+  local label mode=all rounds=10 filter="" opt_in="" wait=0 opt
   label=$(date '+%Y%m%d-%H%M%S')
-  while getopts 'l:m:r:f:w' opt; do
+  while getopts 'l:m:r:f:ow' opt; do
     case $opt in
     l) label=$OPTARG ;;
     m) mode=$OPTARG ;;
     r) rounds=$OPTARG ;;
     f) filter=$OPTARG ;;
+    o) opt_in=1 ;;
     w) wait=1 ;;
     *) usage ;;
     esac
@@ -90,7 +92,7 @@ cmd_run() {
   remote "cd '$CLONE' && git fetch -q '$run/commits.bundle' 'refs/bench/*:refs/bench/*'"
 
   remote "systemd-run --user --quiet --collect --unit='$unit' \
-    --setenv=MODE='$mode' --setenv=ROUNDS='$rounds' --setenv=FILTER='$filter' \
+    --setenv=MODE='$mode' --setenv=ROUNDS='$rounds' --setenv=FILTER='$filter' --setenv=HOT_OPT_IN='$opt_in' \
     --setenv=QUIET_UNITS='${QUIET_UNITS:-}' --setenv=WAIT_UNITS='${WAIT_UNITS:-}' \
     --setenv=PATH=\"\$PATH\" \
     -p ExecStopPost='/usr/bin/env bash $run/host.sh restore $run' \

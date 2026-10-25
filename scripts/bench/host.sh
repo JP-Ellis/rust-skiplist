@@ -24,6 +24,7 @@
 #   FILTER      Criterion filter regex (default: every benchmark)
 #   CRIT_ARGS   extra Criterion arguments
 #   PERF_SCALE  divides the perf step counts that `hot list` suggests (default 1)
+#   HOT_OPT_IN  non-empty to include the opt-in workloads (read by `hot`)
 #   CPU         CPU to pin to (default 5; its SMT sibling should stay idle)
 #   QUIET_UNITS space-separated user units to stop for the run and restore after,
 #               such as backup timers and file-sync services
@@ -221,7 +222,7 @@ log "run $(basename "$RUN"): mode $MODE, commits ${SHAS[*]}"
   uname -r
   grep -m1 'model name' /proc/cpuinfo
   rustc --version
-  echo "MODE=$MODE ROUNDS=$ROUNDS FILTER=$FILTER CRIT_ARGS=$CRIT_ARGS PERF_SCALE=$PERF_SCALE CPU=$CPU"
+  echo "MODE=$MODE ROUNDS=$ROUNDS FILTER=$FILTER CRIT_ARGS=$CRIT_ARGS PERF_SCALE=$PERF_SCALE CPU=$CPU HOT_OPT_IN=${HOT_OPT_IN:-}"
 } >"$RUN/env.txt"
 check_cpu
 for sha in "${SHAS[@]}"; do build "$sha"; done
