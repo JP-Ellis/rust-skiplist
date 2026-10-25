@@ -9,7 +9,7 @@ use crate::{
     node::{
         Node,
         link::Link,
-        visitor::{OrdIndexMutVisitor, OrdMutVisitor, Path, Visitor},
+        visitor::{OrdIndexMutVisitor, OrdMutVisitor, Path, Visitor, VisitorMut},
     },
 };
 
@@ -65,7 +65,7 @@ impl<K, V, const N: usize, C: Comparator<K>, G: LevelGenerator> SkipMap<K, V, N,
         // `self.head` is a `NonNull` (a `Copy` type), so copying it does not
         // borrow `self`.  The closure borrows only `self.comparator` (shared),
         // which is a distinct field from `self.head`.  Both borrows coexist
-        // safely and are released when `visitor` is dropped via `into_parts()`.
+        // safely; the path outlives both.
         let head = self.head;
         // SAFETY: `head` is this list's live head node.
         let mut path = unsafe { Path::new(head) };
@@ -268,13 +268,13 @@ impl<K, V, const N: usize, C: Comparator<K>, G: LevelGenerator> SkipMap<K, V, N,
     )]
     #[inline]
     pub(super) fn remove_impl(&mut self, key: &K) -> Option<(K, V)> {
-        let (target_ptr, found, precursors) = {
-            let head = self.head;
-            let cmp = |entry: &(K, V), k: &K| self.comparator.compare(&entry.0, k);
-            let mut visitor = OrdMutVisitor::new(head, key, cmp);
-            visitor.traverse();
-            visitor.into_parts()
-        };
+        let head = self.head;
+        let cmp = |entry: &(K, V), k: &K| self.comparator.compare(&entry.0, k);
+        let mut visitor = OrdMutVisitor::new(head, key, cmp);
+        visitor.traverse();
+        let target_ptr = visitor.current();
+        let found = visitor.found();
+        let precursors = visitor.precursors();
 
         if !found {
             return None;
@@ -283,7 +283,7 @@ impl<K, V, const N: usize, C: Comparator<K>, G: LevelGenerator> SkipMap<K, V, N,
         // SAFETY: `target_ptr` and every precursor come from the visitor's
         // walk of this list and are live for `&mut self`; no `&mut`
         // reference to any node exists.
-        unsafe { Node::check_precursors(&precursors, target_ptr) };
+        unsafe { Node::check_precursors(precursors, target_ptr) };
 
         let max_levels = self.head_ref().level();
 
@@ -366,13 +366,13 @@ impl<K, V, const N: usize, C: Comparator<K>, G: LevelGenerator> SkipMap<K, V, N,
         Q: ?Sized,
         C: ComparatorKey<K, Q>,
     {
-        let (target_ptr, found, precursors) = {
-            let head = self.head;
-            let cmp = |entry: &(K, V), q: &Q| self.comparator.compare_key(&entry.0, q);
-            let mut visitor = OrdMutVisitor::new(head, key, cmp);
-            visitor.traverse();
-            visitor.into_parts()
-        };
+        let head = self.head;
+        let cmp = |entry: &(K, V), q: &Q| self.comparator.compare_key(&entry.0, q);
+        let mut visitor = OrdMutVisitor::new(head, key, cmp);
+        visitor.traverse();
+        let target_ptr = visitor.current();
+        let found = visitor.found();
+        let precursors = visitor.precursors();
 
         if !found {
             return None;
@@ -381,7 +381,7 @@ impl<K, V, const N: usize, C: Comparator<K>, G: LevelGenerator> SkipMap<K, V, N,
         // SAFETY: `target_ptr` and every precursor come from the visitor's
         // walk of this list and are live for `&mut self`; no `&mut`
         // reference to any node exists.
-        unsafe { Node::check_precursors(&precursors, target_ptr) };
+        unsafe { Node::check_precursors(precursors, target_ptr) };
 
         let max_levels = self.head_ref().level();
 
