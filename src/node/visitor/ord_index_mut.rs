@@ -687,7 +687,6 @@ mod tests {
         assert_eq!(calls.get(), 1);
         assert_eq!(unsafe { visitor.current().as_ref() }.value(), Some(&20));
         assert_eq!(visitor.current_rank_internal(), 2);
-        drop(visitor);
         unsafe { Node::assert_well_formed(head, 4, Some(tail)) };
         assert_eq!(base_chain(head), [10, 20, 30, 40]);
         unsafe { drop(Box::from_raw(head.as_ptr())) };
