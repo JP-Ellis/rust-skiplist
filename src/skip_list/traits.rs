@@ -9,7 +9,7 @@ use core::{
     hash::{Hash, Hasher},
 };
 
-use crate::{level_generator::LevelGenerator, skip_list::SkipList};
+use crate::{level_generator::LevelGenerator, node::Node, skip_list::SkipList};
 
 // MARK: Debug
 
@@ -35,11 +35,12 @@ impl<T: fmt::Debug, G: LevelGenerator, const N: usize> fmt::Debug for SkipList<T
 impl<T: Clone, G: LevelGenerator + Clone, const N: usize> Clone for SkipList<T, N, G> {
     /// Returns a deep clone of the list.
     ///
-    /// The cloned list has the same elements in the same order. The level
-    /// generator is also cloned, so the clone shares the same probability
-    /// distribution for future insertions but has its own independent state.
+    /// The cloned list has the same elements in the same order, with the
+    /// same tower heights. The level generator is also cloned, so the clone
+    /// shares the same probability distribution for future insertions but
+    /// has its own independent state.
     ///
-    /// This operation is `$O(n \log n)$`.
+    /// This operation is `$O(n)$`.
     ///
     /// # Examples
     ///
@@ -50,11 +51,46 @@ impl<T: Clone, G: LevelGenerator + Clone, const N: usize> Clone for SkipList<T, 
     /// let cloned = list.clone();
     /// assert_eq!(list, cloned);
     /// ```
+    #[expect(
+        clippy::expect_used,
+        reason = "`value()` returns None only for the head sentinel, which is never visited \
+                  in the data-node walk; the expect fires only on invariant violations"
+    )]
+    #[expect(
+        clippy::multiple_unsafe_ops_per_block,
+        reason = "insert_after and rebuild touch provably disjoint heap nodes; \
+                  splitting across blocks would require unsafe-crossing raw-pointer variables"
+    )]
     #[inline]
     fn clone(&self) -> Self {
         let mut new_list = Self::with_level_generator(self.generator.clone());
-        for item in self {
-            new_list.push_back(item.clone());
+        if self.is_empty() {
+            return new_list;
+        }
+
+        // Clone each node at its tower height along the base chain, then wire
+        // every skip link in one pass.  A panicking `clone` leaves a valid
+        // chain for `Drop`.
+        //
+        // SAFETY: `self.head` is the live head of this list and every
+        // `src_nn` is one of its data nodes.  `new_list.head` and `prev_nn`
+        // are owned by `new_list`, with no other live references.
+        unsafe {
+            let mut prev_nn = new_list.head;
+            let mut src_opt = self.head.as_ref().next();
+            while let Some(src_nn) = src_opt {
+                let src_node = src_nn.as_ref();
+                let val = src_node.value().expect("data node has a value").clone();
+                prev_nn = Node::insert_after(prev_nn, Node::with_value(src_node.level(), val));
+                src_opt = src_node.next();
+            }
+            Node::filter_rebuild(
+                new_list.head,
+                &mut new_list.len,
+                &mut new_list.tail,
+                |_| true,
+                |_| {},
+            );
         }
         new_list
     }
