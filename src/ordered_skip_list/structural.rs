@@ -9,7 +9,7 @@ use crate::{
     level_generator::LevelGenerator,
     node::{
         Node,
-        visitor::{IndexMutVisitor, OrdMutVisitor, Visitor},
+        visitor::{IndexMutVisitor, OrdIndexVisitor, Visitor},
     },
     ordered_skip_list::OrderedSkipList,
 };
@@ -73,12 +73,12 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
     ///
     /// When the two sorted ranges are non-overlapping (every element of
     /// `other` is >= every element of `self`, or every element of `other`
-    /// is <= every element of `self`), the raw node chains are spliced and
-    /// skip links are rebuilt in one `$O(n+m)$` pass.  When the ranges
-    /// overlap, each element of `other` is inserted individually in
-    /// `$O(m \log(n+m))$` time.
+    /// is <= every element of `self`), the raw node chains are spliced in
+    /// `$O(\log n)$` time, or `$O(n+m)$` when the two lists have different
+    /// maximum heights (different capacities).  When the ranges overlap, each
+    /// element of `other` is inserted individually in `$O(m \log(n+m))$` time.
     ///
-    /// The `$O(n+m)$` path compares only the boundary elements and trusts the
+    /// The splice compares only the boundary elements and trusts the
     /// comparator for the rest.  A [`Comparator`] that is not a total order
     /// can therefore leave the result unordered.
     ///
@@ -128,8 +128,8 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
         // chain after self's tail and rebuild skip links in one O(n+m) pass.
         //
         // Comparator trust: the comparison below runs before any write and only
-        // picks a path.  Each splice ends in a rebuild of every skip link from
-        // the base chain, so a wrong answer can unsort the list but not mislink it.
+        // picks a path.  The splices never consult the comparator, so a wrong
+        // answer can unsort the list but not mislink it.
         let can_concat = self.is_empty()
             || self.tail.is_some_and(|tail_nn| {
                 // SAFETY: tail_nn is a live data node; other.head is a valid sentinel.
@@ -146,7 +146,11 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
                 self.comparator.compare(self_last, other_first) != Ordering::Greater
             });
 
-        if can_concat {
+        let same_height = self.head_ref().level() == other.head_ref().level();
+
+        if can_concat && same_height {
+            self.concat(other);
+        } else if can_concat {
             // Detach other's entire node chain from its head sentinel.
             //
             // SAFETY: other.head is a valid head sentinel; we hold &mut other.
@@ -202,7 +206,13 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
                 self.comparator.compare(other_last, self_first) != Ordering::Greater
             });
 
-            if can_prepend {
+            if can_prepend && same_height {
+                // `other` goes first: swap the two chains, then append.
+                core::mem::swap(&mut self.head, &mut other.head);
+                core::mem::swap(&mut self.tail, &mut other.tail);
+                core::mem::swap(&mut self.len, &mut other.len);
+                self.concat(other);
+            } else if can_prepend {
                 let other_tail_nn = other_tail_saved.expect("other is non-empty in this branch");
 
                 // Detach other's chain and clear its sentinel's skip links.
@@ -258,6 +268,17 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
         }
     }
 
+    /// Moves every element of the non-empty `other`, whose head has the same
+    /// height, to the end of `self` in `$O(\log n)$`.
+    fn concat(&mut self, other: &mut Self) {
+        // SAFETY: we hold `&mut self` and `&mut other`, two distinct lists of
+        // the same height, and the caller guarantees `other` is non-empty.
+        unsafe { Node::concat(self.head, self.len, self.tail, other.head) };
+        self.len = self.len.saturating_add(other.len);
+        self.tail = other.tail.take();
+        other.len = 0;
+    }
+
     /// Splits the list at the given value, returning a new list containing
     /// all elements with value `>= value`.
     ///
@@ -265,7 +286,7 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
     /// the returned list contains all elements with value `>= value`.  When
     /// duplicates of `value` are present they all move to the returned list.
     ///
-    /// This operation runs in `$O(n)$` time.
+    /// This operation runs in `$O(\log n)$` time.
     ///
     /// # Examples
     ///
@@ -283,12 +304,6 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
     /// assert_eq!(a_vals, [1, 2]);
     /// assert_eq!(b_vals, [3, 4, 5]);
     /// ```
-    #[expect(
-        clippy::multiple_unsafe_ops_per_block,
-        reason = "take_next_chain is an unsafe fn called on a raw-pointer dereference; \
-                  both operations act on one exclusively-owned node and are \
-                  provably disjoint from the set_head_next and filter_rebuild calls around them"
-    )]
     #[inline]
     #[must_use]
     pub fn split_off<Q>(&mut self, value: &Q) -> Self
@@ -297,82 +312,17 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
         C: Clone + ComparatorKey<T, Q>,
         G: Clone,
     {
-        let max_levels = self.head_ref().level();
-
-        // Use OrdMutVisitor to find the last node strictly < value.
-        // If all nodes are >= value, the visitor leaves precursors[0] = head.
-        //
-        // `self.head` is `NonNull` (a `Copy` type) so copying it does not
-        // borrow `self`.  The closure only borrows `self.comparator` (shared),
-        // which is a distinct field.  Both borrows are released when `visitor`
-        // is consumed by `into_parts()`.
-        let pivot_nn = {
-            let head = self.head;
-            let cmp = |v: &T, q: &Q| self.comparator.compare_key(v, q);
-            let mut visitor = OrdMutVisitor::new(head, value, cmp);
-            visitor.traverse();
-            let (current, found, _precursors) = visitor.into_parts();
-            // `found=true`:  current = first node with value == split_value;
-            //                pivot = the node just before it (prev()).
-            // `found=false`: current = last node with value < split_value
-            //                (or head if all values >= split_value);
-            //                pivot = current.
-            if found {
-                // SAFETY: current is a live data node; prev() gives the
-                // predecessor node (always Some for a non-head data node).
-                unsafe { current.as_ref() }.prev().unwrap_or(head)
-            } else {
-                current
-            }
+        // The comparator only picks the split rank; the split itself goes by
+        // rank, so a wrong answer moves the wrong elements but keeps both
+        // lists well formed.
+        let cmp = |v: &T, q: &Q| match self.comparator.compare_key(v, q) {
+            Ordering::Less => Ordering::Less,
+            Ordering::Equal | Ordering::Greater => Ordering::Greater,
         };
-
-        // SAFETY: `Box::into_raw` transfers ownership; freed in `Drop`.
-        let result_head =
-            unsafe { NonNull::new_unchecked(Box::into_raw(Box::new(Node::new(max_levels)))) };
-        let mut result = Self {
-            head: result_head,
-            tail: None,
-            len: 0,
-            comparator: self.comparator.clone(),
-            generator: self.generator.clone(),
-        };
-
-        // Detach the "≥ value" suffix from pivot_nn.
-        //
-        // SAFETY: `pivot_nn` is a valid, live node in this list (either the
-        // head sentinel or a data node) for the duration of `&mut self`.  No
-        // other live `&mut` references to any node exist.
-        let first_nn = unsafe { (*pivot_nn.as_ptr()).take_next_chain() };
-
-        if let Some(nn) = first_nn {
-            // SAFETY: `result.head` is a freshly allocated, exclusively-owned
-            // sentinel node.  `nn` is the first node of the detached chain
-            // with no other live references.
-            unsafe { Node::set_head_next(result.head, nn) };
-        }
-
-        // Rebuild skip links for both halves and compute their element counts.
-        //
-        // `filter_rebuild` clears all forward skip links from the head, walks
-        // the sequential chain in O(n), re-wires skip links, and returns
-        // `(element_count, tail)`.
-        //
-        // SAFETY: `self.head` is exclusively owned; every node reachable from
-        // it is a live heap allocation with no other live references.
-        unsafe { Node::filter_rebuild(self.head, &mut self.len, &mut self.tail, |_| true, |_| {}) };
-        // SAFETY: `result.head` is exclusively owned; every node reachable
-        // from it is a live heap allocation with no other live references.
-        unsafe {
-            Node::filter_rebuild(
-                result.head,
-                &mut result.len,
-                &mut result.tail,
-                |_| true,
-                |_| {},
-            );
-        }
-
-        result
+        let mut visitor = OrdIndexVisitor::new(self.head_ref(), value, cmp);
+        visitor.traverse();
+        let at = visitor.current_rank();
+        self.split_off_index(at)
     }
 
     /// Splits the list at the given 0-based index, returning a new list
@@ -380,7 +330,7 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
     ///
     /// After the call, `self` retains elements at positions `0..at`, and the
     /// returned list contains elements at positions `at..`.  This operation
-    /// runs in `$O(n)$` time.
+    /// runs in `$O(\log n)$` time.
     ///
     /// # Panics
     ///
@@ -402,17 +352,6 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
     /// assert_eq!(a_vals, [1, 2]);
     /// assert_eq!(b_vals, [3, 4, 5]);
     /// ```
-    #[expect(
-        clippy::expect_used,
-        reason = "the pivot node exists because 0 < at < self.len was checked before the \
-                  traversal; the expect fires only on invariant violations"
-    )]
-    #[expect(
-        clippy::multiple_unsafe_ops_per_block,
-        reason = "take_next_chain is an unsafe fn called on a raw-pointer dereference; \
-                  both operations act on one exclusively-owned node and are \
-                  provably disjoint from the set_head_next and rebuild calls around them"
-    )]
     #[inline]
     #[must_use]
     pub fn split_off_index(&mut self, at: usize) -> Self
@@ -426,115 +365,29 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
             self.len
         );
 
-        let tail_len = self.len.saturating_sub(at);
         let max_levels = self.head_ref().level();
-
-        // Edge case: nothing to split off.
-        if tail_len == 0 {
-            // SAFETY: `Box::into_raw` transfers ownership; freed in `Drop`.
-            let head =
-                unsafe { NonNull::new_unchecked(Box::into_raw(Box::new(Node::new(max_levels)))) };
-            return Self {
-                head,
-                tail: None,
-                len: 0,
-                comparator: self.comparator.clone(),
-                generator: self.generator.clone(),
-            };
-        }
-
-        // Edge case: split at position 0, transfer everything.
-        if at == 0 {
-            let old_len = self.len;
-            // SAFETY: `Box::into_raw` transfers ownership; freed in `Drop`.
-            let result_head =
-                unsafe { NonNull::new_unchecked(Box::into_raw(Box::new(Node::new(max_levels)))) };
-            let mut result = Self {
-                head: result_head,
-                tail: None, // set by rebuild below
-                len: old_len,
-                comparator: self.comparator.clone(),
-                generator: self.generator.clone(),
-            };
-
-            // SAFETY: We hold &mut self; no other references to any node exist.
-            unsafe {
-                let head_ptr: *mut Node<T, N> = self.head.as_ptr();
-                if let Some(first_nn) = (*head_ptr).take_next_chain() {
-                    Node::set_head_next(result.head, first_nn);
-                }
-            }
-
-            for link in self.head_mut().links_mut() {
-                *link = None;
-            }
-            self.tail = None;
-            self.len = 0;
-
-            // Rebuild result's skip links.
-            // SAFETY: result.head is exclusively owned; all reachable nodes are live.
-            unsafe {
-                Node::filter_rebuild(
-                    result.head,
-                    &mut result.len,
-                    &mut result.tail,
-                    |_| true,
-                    |_| {},
-                );
-            }
-
+        // SAFETY: `Box::into_raw` transfers ownership; freed in `Drop`.
+        let head =
+            unsafe { NonNull::new_unchecked(Box::into_raw(Box::new(Node::new(max_levels)))) };
+        let mut result = Self {
+            head,
+            tail: None,
+            len: 0,
+            comparator: self.comparator.clone(),
+            generator: self.generator.clone(),
+        };
+        if at == self.len {
             return result;
         }
 
-        // General case: 0 < at < self.len.
-        //
-        // Navigate to the pivot (the last node to keep in self, at 0-based
-        // index `at - 1`, internal rank `at`), detach the tail chain, wire it
-        // to a fresh head, then rebuild skip links for both halves.
-        //
-        // head = internal rank 0, first data node = rank 1, so 0-based index
-        // i corresponds to internal rank i + 1.  The last kept node is at
-        // 0-based index `at - 1` = internal rank `at`.
-        // `IndexMutVisitor::new(head, at).traverse()` returns the node at
-        // internal rank `at` as its `current`.
-        let (pivot_nn, _, _) = {
-            let mut visitor = IndexMutVisitor::new(self.head, at);
-            visitor.traverse();
-            visitor.into_parts()
-        };
-
-        // SAFETY: at > 0 and at < self.len guarantee the pivot exists.
-        // We hold &mut self so exclusive access is guaranteed.
-        unsafe {
-            let pivot: *mut Node<T, N> = pivot_nn.as_ptr();
-
-            let first_of_tail = (*pivot)
-                .take_next_chain()
-                .expect("pivot has a successor because at < self.len");
-
-            // SAFETY: `Box::into_raw` transfers ownership; freed in `Drop`.
-            let result_head =
-                NonNull::new_unchecked(Box::into_raw(Box::new(Node::new(max_levels))));
-            let mut result = Self {
-                head: result_head,
-                tail: None, // set by rebuild below
-                len: tail_len,
-                comparator: self.comparator.clone(),
-                generator: self.generator.clone(),
-            };
-            Node::set_head_next(result.head, first_of_tail);
-
-            Node::filter_rebuild(self.head, &mut self.len, &mut self.tail, |_| true, |_| {});
-            Node::filter_rebuild(
-                result.head,
-                &mut result.len,
-                &mut result.tail,
-                |_| true,
-                |_| {},
-            );
-
-            result
-        }
+        // SAFETY: we hold `&mut self`, `at < self.len`, and `result.head` is a
+        // fresh empty head of the same height.
+        let last_kept = unsafe { Node::split_after(self.head, at, result.head) };
+        result.len = self.len.wrapping_sub(at);
+        result.tail = self.tail;
+        self.len = at;
+        self.tail = (at > 0).then_some(last_kept);
+        result
     }
 
     /// Shortens the list, keeping only the first `len` elements and dropping
@@ -1591,6 +1444,62 @@ mod tests {
         assert_eq!(list.last().map(PanicOnDrop::id), Some(15));
         for (index, id) in ids.iter().enumerate() {
             assert_eq!(list.get_by_index(index).map(PanicOnDrop::id), Some(*id));
+        }
+    }
+
+    // MARK: structure after split_off and append
+
+    /// A list of `values` with tower heights from `seed`.
+    fn seeded(values: core::ops::Range<usize>, seed: u32) -> OrderedSkipList<usize> {
+        let mut list =
+            OrderedSkipList::with_level_generator(crate::test_util::seeded_geometric(seed));
+        for v in values {
+            list.insert(v);
+        }
+        list
+    }
+
+    #[test]
+    fn split_off_every_point_is_well_formed() {
+        for (len, seed) in (0..40).zip(0_u32..) {
+            for at in 0..=len {
+                let mut kept = seeded(0..len, seed);
+                let moved = kept.split_off_index(at);
+                kept.assert_well_formed();
+                moved.assert_well_formed();
+                assert!(kept.iter().copied().eq(0..at));
+                assert!(moved.iter().copied().eq(at..len));
+
+                let mut kept_by_value = seeded(0..len, seed);
+                let moved_by_value = kept_by_value.split_off(&at);
+                kept_by_value.assert_well_formed();
+                moved_by_value.assert_well_formed();
+                assert!(kept_by_value.iter().copied().eq(0..at));
+                assert!(moved_by_value.iter().copied().eq(at..len));
+            }
+        }
+    }
+
+    #[test]
+    fn append_spliced_in_both_directions_is_well_formed() {
+        for left in 0..20 {
+            for right in 0..20 {
+                let mut low = seeded(0..left, 1);
+                let mut high = seeded(left..left + right, 2);
+                low.append(&mut high);
+                low.assert_well_formed();
+                high.assert_well_formed();
+                assert!(low.iter().copied().eq(0..left + right));
+
+                let mut first = seeded(0..left, 3);
+                let mut second = seeded(left..left + right, 4);
+                second.append(&mut first);
+                second.assert_well_formed();
+                first.assert_well_formed();
+                assert!(second.iter().copied().eq(0..left + right));
+                second.insert(left + right);
+                second.assert_well_formed();
+            }
         }
     }
 

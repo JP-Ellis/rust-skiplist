@@ -8,7 +8,6 @@ use crate::{
     level_generator::LevelGenerator,
     node::{
         Node,
-        link::Link,
         visitor::{IndexMutVisitor, Visitor},
     },
     skip_list::SkipList,
@@ -173,8 +172,8 @@ impl<T, G: LevelGenerator, const N: usize> SkipList<T, N, G> {
     /// returned list contains elements previously at indices `[at, len)`,
     /// renumbered from 0 in the returned list.
     ///
-    /// Navigation to the split point is `$O(\log n)$`. Both halves are left in a
-    /// consistent state after the call.
+    /// This operation runs in `$O(\log n)$` time: only the links that cross
+    /// the split point move, so every element keeps its tower.
     ///
     /// # Panics
     ///
@@ -196,19 +195,6 @@ impl<T, G: LevelGenerator, const N: usize> SkipList<T, N, G> {
     /// assert_eq!(a_vals, [1, 2, 3]);
     /// assert_eq!(b_vals, [4, 5]);
     /// ```
-    #[expect(
-        clippy::expect_used,
-        reason = "`take_next_chain` returns None only if there is no successor, \
-                  which cannot happen when at < self.len (validated above); \
-                  Link::new(dist) succeeds because dist >= 1 by construction"
-    )]
-    #[expect(
-        clippy::multiple_unsafe_ops_per_block,
-        reason = "take_next_chain, set_head_next, NonNull::new_unchecked, and \
-                  rebuild_skip_links all touch provably disjoint heap nodes; \
-                  splitting across blocks would require unsafe-crossing raw-pointer \
-                  variables"
-    )]
     #[inline]
     #[must_use]
     pub fn split_off(&mut self, at: usize) -> Self
@@ -221,111 +207,28 @@ impl<T, G: LevelGenerator, const N: usize> SkipList<T, N, G> {
             self.len
         );
 
-        let tail_len = self.len.saturating_sub(at);
         let max_levels = self.head_ref().level();
-
-        // Edge case: nothing to split off, return an empty list.
-        if tail_len == 0 {
-            // SAFETY: `Box::into_raw` transfers ownership; freed in `Drop`.
-            let head =
-                unsafe { NonNull::new_unchecked(Box::into_raw(Box::new(Node::new(max_levels)))) };
-            return Self {
-                head,
-                tail: None,
-                len: 0,
-                generator: self.generator.clone(),
-            };
-        }
-
-        // Edge case: split at position 0, transfer everything to the result.
-        if at == 0 {
-            let old_len = self.len;
-            // SAFETY: `Box::into_raw` transfers ownership; freed in `Drop`.
-            let result_head =
-                unsafe { NonNull::new_unchecked(Box::into_raw(Box::new(Node::new(max_levels)))) };
-            let mut result = Self {
-                head: result_head,
-                tail: None, // set by rebuild below
-                len: old_len,
-                generator: self.generator.clone(),
-            };
-
-            // Transfer the entire node chain from self.head to result.head.
-            // SAFETY: We hold &mut self; no other references to any node
-            // exist.  take_next_chain detaches cleanly.  set_head_next
-            // wires the first node to result.head.
-            unsafe {
-                let head_ptr: *mut Node<T, N> = self.head.as_ptr();
-                if let Some(first_nn) = (*head_ptr).take_next_chain() {
-                    Node::set_head_next(result.head, first_nn);
-                }
-            }
-
-            for link in self.head_mut().links_mut() {
-                *link = None;
-            }
-            self.tail = None;
-            self.len = 0;
-
-            // Rebuild result's skip links (result.head is new; data nodes'
-            // inter-node links are stale for the new head).
-            // SAFETY: result.head is exclusively owned; all nodes reachable
-            // via result.head.next are live heap allocations.
-            unsafe {
-                Node::filter_rebuild(
-                    result.head,
-                    &mut result.len,
-                    &mut result.tail,
-                    |_| true,
-                    |_| {},
-                );
-            }
-
+        // SAFETY: `Box::into_raw` transfers ownership; freed in `Drop`.
+        let head =
+            unsafe { NonNull::new_unchecked(Box::into_raw(Box::new(Node::new(max_levels)))) };
+        let mut result = Self {
+            head,
+            tail: None,
+            len: 0,
+            generator: self.generator.clone(),
+        };
+        if at == self.len {
             return result;
         }
 
-        // General case: 0 < at < self.len.
-        //
-        // Navigate to the pivot (node[at - 1], the last node to keep in
-        // self), detach the tail chain, wire it to a fresh head, then
-        // rebuild skip links for both halves.
-        //
-        // SAFETY: at > 0 and at < self.len, so node_ptr_at(at - 1) returns
-        // a valid data node.  We hold &mut self, so exclusive access is
-        // guaranteed throughout.
-        unsafe {
-            let pivot: *mut Node<T, N> = self.node_ptr_at(at.saturating_sub(1)).as_ptr();
-
-            // Detach nodes [at ..] from the pivot.  Guaranteed to succeed
-            // because at < self.len means the pivot has at least one
-            // successor.
-            let first_of_tail = (*pivot)
-                .take_next_chain()
-                .expect("pivot has a successor because at < self.len");
-
-            // Build the returned list.
-            // SAFETY: `Box::into_raw` transfers ownership; freed in `Drop`.
-            let result_head =
-                NonNull::new_unchecked(Box::into_raw(Box::new(Node::new(max_levels))));
-            let mut result = Self {
-                head: result_head,
-                tail: None, // set by rebuild below
-                len: tail_len,
-                generator: self.generator.clone(),
-            };
-            Node::set_head_next(result.head, first_of_tail);
-
-            Node::filter_rebuild(self.head, &mut self.len, &mut self.tail, |_| true, |_| {});
-            Node::filter_rebuild(
-                result.head,
-                &mut result.len,
-                &mut result.tail,
-                |_| true,
-                |_| {},
-            );
-
-            result
-        }
+        // SAFETY: we hold `&mut self`, `at < self.len`, and `result.head` is a
+        // fresh empty head of the same height.
+        let last_kept = unsafe { Node::split_after(self.head, at, result.head) };
+        result.len = self.len.wrapping_sub(at);
+        result.tail = self.tail;
+        self.len = at;
+        self.tail = (at > 0).then_some(last_kept);
+        result
     }
 
     /// Moves all elements from `other` to the end of `self`, leaving `other` empty.
@@ -376,24 +279,6 @@ impl<T, G: LevelGenerator, const N: usize> SkipList<T, N, G> {
         not(any(feature = "std", feature = "getrandom")),
         doc = "[`with_capacity`]: crate#features"
     )]
-    #[expect(
-        clippy::expect_used,
-        clippy::missing_panics_doc,
-        reason = "take_next_chain returns Some because other.is_empty() was checked above; \
-                  Link::new distance = self_len + other_link.distance - pred_rank >= 1 always \
-                  because other_link.distance >= 1 (NonZeroUsize) and pred_rank <= self_len"
-    )]
-    #[expect(
-        clippy::indexing_slicing,
-        reason = "l < max_levels = precursors.len() = head.links.len() = other_head.links.len(); \
-                  l indexes both precursors[l] and links[][l] simultaneously"
-    )]
-    #[expect(
-        clippy::multiple_unsafe_ops_per_block,
-        reason = "chain detach, prev/next splice, and cross-seam link wiring all touch \
-                  provably disjoint heap nodes; splitting across blocks would require \
-                  unsafe-crossing raw-pointer variables"
-    )]
     #[inline]
     pub fn append(&mut self, other: &mut Self) {
         if other.is_empty() {
@@ -413,72 +298,12 @@ impl<T, G: LevelGenerator, const N: usize> SkipList<T, N, G> {
             return;
         }
 
-        // Fast path: splice chains and rewrite only the cross-seam skip links.
-        //
-        // IndexMutVisitor with target = self_len + 1 advances to the end of self,
-        // recording the rightmost predecessor at each level.
-        // into_parts() releases the &mut borrow on self.head.
-        let (_, precursors, precursor_distances) = {
-            let mut visitor = IndexMutVisitor::new(self.head, self_len.saturating_add(1));
-            visitor.traverse();
-            visitor.into_parts()
-        };
-
-        // SAFETY: We hold `&mut self` and `&mut other`, giving exclusive access to
-        // every node in both lists.  `other_head_ptr` is derived from `other`'s
-        // disjoint `Box<Node<T>>` allocation.  Within the block each node field is
-        // accessed at most once, so no simultaneous aliasing occurs.
-        unsafe {
-            let other_head_ptr: *mut Node<T, N> = other.head.as_ptr();
-
-            // Step 1: detach other's node chain from other's sentinel head.
-            let first_nn = (*other_head_ptr)
-                .take_next_chain()
-                .expect("other is non-empty");
-
-            // Step 2: splice other's chain onto the end of self's chain.
-            // If self is non-empty, attach after self.tail; otherwise attach
-            // directly after self's sentinel head.
-            if let Some(tail_nn) = self.tail {
-                Node::set_head_next(tail_nn, first_nn);
-            } else {
-                Node::set_head_next(self.head, first_nn);
-            }
-
-            // Step 3: wire the cross-seam skip links.
-            //
-            // For each level l, if other's head had a link at level l pointing
-            // into other's chain, compute a new distance for the corresponding
-            // predecessor in self:
-            //
-            //   distance = (self_len + other_link.distance) - pred_rank
-            //
-            // distance >= 1 because other_link.distance >= 1 (NonZeroUsize) and
-            // pred_rank <= self_len.
-            for l in 0..max_levels {
-                if let Some(other_link) = (*other_head_ptr).links()[l].as_ref() {
-                    let pred_ptr = precursors[l].as_ptr();
-                    let pred_rank = precursor_distances[l];
-                    let distance = self_len
-                        .saturating_add(other_link.distance().get())
-                        .saturating_sub(pred_rank);
-                    (*pred_ptr).links_mut()[l] = Some(
-                        Link::new(other_link.node(), distance)
-                            .expect("distance >= 1 by construction"),
-                    );
-                }
-            }
-
-            let new_tail = other.tail;
-            for link in (*other_head_ptr).links_mut() {
-                *link = None;
-            }
-            other.tail = None;
-            other.len = 0;
-
-            self.len = self_len.saturating_add(other_len);
-            self.tail = new_tail;
-        }
+        // SAFETY: we hold `&mut self` and `&mut other`, two distinct lists of
+        // the same height, and `other` is non-empty.
+        unsafe { Node::concat(self.head, self_len, self.tail, other.head) };
+        self.len = self_len.saturating_add(other_len);
+        self.tail = other.tail.take();
+        other.len = 0;
     }
 }
 
@@ -490,7 +315,24 @@ mod tests {
     use pretty_assertions::assert_eq;
 
     use super::super::SkipList;
-    use crate::test_util::{PanicOnDrop, bombs};
+    use crate::{
+        node::Node,
+        test_util::{PanicOnDrop, bombs},
+    };
+
+    /// Panic unless `list`'s nodes are well formed.
+    fn assert_well_formed<T>(list: &SkipList<T>) {
+        // SAFETY: `head` is the live head of `list`, which owns every node it
+        // reaches.
+        unsafe { Node::assert_well_formed(list.head, list.len, list.tail) };
+    }
+
+    /// A list of `0..len` with seeded tower heights.
+    fn seeded(len: usize, seed: u64) -> SkipList<usize> {
+        let mut list = SkipList::with_capacity_and_seed(64, seed);
+        list.extend(0..len);
+        list
+    }
 
     // MARK: clear
 
@@ -874,7 +716,39 @@ mod tests {
         }
     }
 
+    #[test]
+    fn split_off_every_index_is_well_formed() {
+        for (len, seed) in (0..40).zip(0_u64..) {
+            for at in 0..=len {
+                let mut list = seeded(len, seed);
+                let tail = list.split_off(at);
+                assert_well_formed(&list);
+                assert_well_formed(&tail);
+                assert!(list.iter().copied().eq(0..at));
+                assert!(tail.iter().copied().eq(at..len));
+            }
+        }
+    }
+
     // MARK: append
+
+    #[test]
+    fn append_every_pair_of_lengths_is_well_formed() {
+        for left in 0..24 {
+            for right in 0..24 {
+                let mut a = seeded(left, 1);
+                let mut b = SkipList::with_capacity_and_seed(64, 2);
+                b.extend(left..left + right);
+                a.append(&mut b);
+                assert_well_formed(&a);
+                assert_well_formed(&b);
+                assert!(a.iter().copied().eq(0..left + right));
+                assert!(b.is_empty());
+                a.push_back(left + right);
+                assert_well_formed(&a);
+            }
+        }
+    }
 
     #[test]
     fn append_both_empty() {

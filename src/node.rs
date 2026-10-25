@@ -144,7 +144,7 @@ use crate::{
     node::{
         level_array::LevelArray,
         link::Link,
-        visitor::{IndexMutVisitor, Visitor},
+        visitor::{IndexMutVisitor, Visitor, VisitorMut},
     },
 };
 
@@ -840,6 +840,124 @@ impl<V, const N: usize> Node<V, N> {
             *precursor = current;
         }
         precursors
+    }
+
+    /// Moves every node after internal rank `at` to the empty list headed by
+    /// `new_head`, and returns the node at rank `at` (the head when `at` is
+    /// 0), now the last node left in the list.
+    ///
+    /// Each level's link that crosses the cut moves to `new_head`, so moved
+    /// nodes keep their towers and the split is `$O(\log n)$`. The walk is by
+    /// rank, so the result does not depend on any comparator.
+    ///
+    /// # Safety
+    ///
+    /// - `head` must be the exclusively-owned head of a well-formed list with
+    ///   more than `at` data nodes.
+    /// - `new_head` must be a live, exclusively-owned head of an empty list,
+    ///   with the same height as `head`, and not part of `head`'s list.
+    #[expect(
+        clippy::expect_used,
+        reason = "`at` is below the length, so the walk reaches rank `at + 1`, whose node \
+                  has a predecessor; a crossing link ends past rank `at`, so its new \
+                  distance is at least 1"
+    )]
+    #[expect(
+        clippy::indexing_slicing,
+        reason = "l < precursors.len() == head.level() == new_head.level(), and each \
+                  precursor at level l has a link slot at l"
+    )]
+    #[expect(
+        clippy::multiple_unsafe_ops_per_block,
+        reason = "the chain cut and the link moves touch disjoint fields of exclusively \
+                  owned nodes"
+    )]
+    pub(crate) unsafe fn split_after(
+        head: NonNull<Self>,
+        at: usize,
+        new_head: NonNull<Self>,
+    ) -> NonNull<Self> {
+        let mut visitor = IndexMutVisitor::new(head, at.wrapping_add(1));
+        let first_moved = visitor.traverse().expect("the list is longer than `at`");
+        let precursors = visitor.precursors();
+        let ranks = visitor.precursor_distances();
+        // SAFETY: the caller guarantees exclusive access to both lists. Every
+        // precursor is the last node at its level with rank at most `at`, so
+        // its link at that level, if any, ends in the moved part.
+        unsafe {
+            let last_kept = first_moved
+                .as_ref()
+                .prev()
+                .expect("a data node has a predecessor");
+            let first = (*last_kept.as_ptr())
+                .take_next_chain()
+                .expect("`first_moved` follows `last_kept`");
+            Node::set_head_next(new_head, first);
+            for (l, (&pred, &rank)) in precursors.iter().zip(ranks).enumerate() {
+                if let Some(link) = (*pred.as_ptr()).links_mut()[l].take() {
+                    let distance = rank.wrapping_add(link.distance().get()).wrapping_sub(at);
+                    (*new_head.as_ptr()).links_mut()[l] =
+                        Some(Link::new(link.node(), distance).expect("the link crosses the cut"));
+                }
+            }
+            last_kept
+        }
+    }
+
+    /// Moves every node of the list headed by `other_head` to the end of the
+    /// list headed by `head`, leaving `other_head` empty.
+    ///
+    /// Only the links that end the first list are rewritten, so the splice is
+    /// `$O(\log n)$`. No comparator is consulted.
+    ///
+    /// # Safety
+    ///
+    /// - `head` must be the exclusively-owned head of a well-formed list of
+    ///   `len` data nodes whose last node is `tail` (`None` when empty).
+    /// - `other_head` must be the exclusively-owned head of a different,
+    ///   non-empty, well-formed list with the same height as `head`.
+    #[expect(
+        clippy::expect_used,
+        reason = "the other list is non-empty, and a link from its head ends at rank 1 or \
+                  later, past every node of the first list"
+    )]
+    #[expect(
+        clippy::indexing_slicing,
+        reason = "l < head.level() == other_head.level(); the last node at level l has a \
+                  link slot at l"
+    )]
+    #[expect(
+        clippy::multiple_unsafe_ops_per_block,
+        reason = "the chain splice and the link moves touch disjoint fields of exclusively \
+                  owned nodes"
+    )]
+    pub(crate) unsafe fn concat(
+        head: NonNull<Self>,
+        len: usize,
+        tail: Option<NonNull<Self>>,
+        other_head: NonNull<Self>,
+    ) {
+        // Every rank is below `len + 1`, so the walk ends at the tail having
+        // recorded the last node at each level.
+        let mut visitor = IndexMutVisitor::new(head, len.wrapping_add(1));
+        visitor.traverse();
+        let precursors = visitor.precursors();
+        let ranks = visitor.precursor_distances();
+        // SAFETY: the caller guarantees exclusive access to both lists, which
+        // share no nodes.
+        unsafe {
+            let first = (*other_head.as_ptr())
+                .take_next_chain()
+                .expect("the other list is non-empty");
+            Node::set_head_next(tail.unwrap_or(head), first);
+            for (l, (&pred, &rank)) in precursors.iter().zip(ranks).enumerate() {
+                if let Some(link) = (*other_head.as_ptr()).links_mut()[l].take() {
+                    let distance = len.wrapping_add(link.distance().get()).wrapping_sub(rank);
+                    (*pred.as_ptr()).links_mut()[l] =
+                        Some(Link::new(link.node(), distance).expect("the link crosses the seam"));
+                }
+            }
+        }
     }
 
     /// Filter and rebuild skip links in a single `$O(n)$` forward pass.
