@@ -2,24 +2,26 @@
 
 use core::{
     fmt,
+    mem::MaybeUninit,
     ops::{Deref, DerefMut},
+    ptr, slice,
 };
 
 /// A `[T; N]` of which only the first `len` elements are in use.
 ///
 /// Replaces a heap-free vector for per-level bookkeeping: skip-link slots
 /// on a node, and precursor stacks in the mutable visitors.  Dereferences to
-/// the in-use prefix, so callers index and iterate it as a slice.
+/// the in-use prefix, so callers index and iterate it as a slice.  Slots past
+/// `len` are never initialised, so a short array costs only its prefix.
 pub(crate) struct LevelArray<T, const N: usize> {
-    /// Backing storage; only `items[..len]` is exposed.
-    items: [T; N],
+    /// Backing storage; exactly `items[..len]` is initialised.
+    items: [MaybeUninit<T>; N],
     /// Number of in-use slots, always `<= N`.
     len: u8,
 }
 
 impl<T, const N: usize> LevelArray<T, N> {
-    /// Builds an array whose first `len` slots are `f(0)`, `f(1)`, ... and
-    /// whose remaining slots are also produced by `f` but never exposed.
+    /// Builds an array whose `len` slots are `f(0)`, `f(1)`, ...
     ///
     /// # Panics
     ///
@@ -33,7 +35,7 @@ impl<T, const N: usize> LevelArray<T, N> {
         clippy::expect_used,
         reason = "narrowing is guarded by the assert above"
     )]
-    pub(crate) fn from_fn(len: usize, f: impl FnMut(usize) -> T) -> Self {
+    pub(crate) fn from_fn(len: usize, mut f: impl FnMut(usize) -> T) -> Self {
         const {
             assert!(
                 N <= u8::MAX as usize,
@@ -41,8 +43,13 @@ impl<T, const N: usize> LevelArray<T, N> {
             );
         }
         assert!(len <= N, "length ({len}) exceeds capacity ({N})");
+        let mut items = [const { MaybeUninit::uninit() }; N];
+        // A panic in `f` leaks the slots written so far; nothing reads them.
+        for (i, slot) in items.iter_mut().take(len).enumerate() {
+            slot.write(f(i));
+        }
         Self {
-            items: core::array::from_fn(f),
+            items,
             // `len <= N <= u8::MAX` was just checked, so the narrowing cannot fail.
             len: u8::try_from(len).expect("len <= N <= u8::MAX"),
         }
@@ -56,9 +63,9 @@ impl<T, const N: usize> Deref for LevelArray<T, N> {
     fn deref(&self) -> &[T] {
         let len = usize::from(self.len);
         debug_assert!(len <= N, "length ({len}) exceeds capacity ({N})");
-        // SAFETY: `len <= N` is established by `from_fn` and `len` is never
-        // written afterwards, so the range is within `items`.
-        unsafe { self.items.get_unchecked(..len) }
+        // SAFETY: `from_fn` initialised exactly `items[..len]`, `len <= N`,
+        // and `len` is never written afterwards.
+        unsafe { slice::from_raw_parts(self.items.as_ptr().cast::<T>(), len) }
     }
 }
 
@@ -68,17 +75,25 @@ impl<T, const N: usize> DerefMut for LevelArray<T, N> {
         let len = usize::from(self.len);
         debug_assert!(len <= N, "length ({len}) exceeds capacity ({N})");
         // SAFETY: as in `deref`.
-        unsafe { self.items.get_unchecked_mut(..len) }
+        unsafe { slice::from_raw_parts_mut(self.items.as_mut_ptr().cast::<T>(), len) }
+    }
+}
+
+impl<T, const N: usize> Drop for LevelArray<T, N> {
+    #[inline]
+    fn drop(&mut self) {
+        // SAFETY: the in-use prefix is initialised and dropped only here.
+        unsafe { ptr::drop_in_place(&raw mut **self) };
     }
 }
 
 impl<T: Clone, const N: usize> Clone for LevelArray<T, N> {
     #[inline]
     fn clone(&self) -> Self {
-        Self {
-            items: self.items.clone(),
-            len: self.len,
-        }
+        Self::from_fn(self.len(), |i| {
+            // SAFETY: `from_fn` calls this only for `i < self.len()`.
+            unsafe { self.get_unchecked(i) }.clone()
+        })
     }
 }
 
