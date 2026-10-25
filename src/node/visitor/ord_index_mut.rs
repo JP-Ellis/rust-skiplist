@@ -200,7 +200,7 @@ impl<T, Q: ?Sized, F: Fn(&T, &Q) -> Ordering, const N: usize> Visitor
     #[inline]
     #[expect(
         clippy::indexing_slicing,
-        reason = "`l < level <= max_levels == precursors.len()`, as in `step`"
+        reason = "`level <= max_levels == precursors.len()`, as in `step`"
     )]
     fn traverse(&mut self) -> Option<Self::NodeRef> {
         if self.found {
@@ -217,8 +217,23 @@ impl<T, Q: ?Sized, F: Fn(&T, &Q) -> Ordering, const N: usize> Visitor
         let result = 'walk: loop {
             // SAFETY: as in `step`.
             let links = unsafe { current.as_ref() }.links();
-            for l in (0..level).rev() {
-                let maybe_link = links.get(l).and_then(Option::as_ref);
+            // Levels above this node's tower have no link, so `current` is
+            // their precursor. A walk never rises above the tower it arrived
+            // on, so this range is normally empty.
+            let height = level.min(links.len());
+            precursors[height..level].fill(current);
+            distances[height..level].fill(rank);
+            for (l, (slot, (precursor, distance))) in links[..height]
+                .iter()
+                .zip(
+                    precursors[..height]
+                        .iter_mut()
+                        .zip(&mut distances[..height]),
+                )
+                .enumerate()
+                .rev()
+            {
+                let maybe_link = slot.as_ref();
                 if let Some(link) = maybe_link {
                     let node = link.node();
                     // SAFETY: as in `step`.
@@ -235,8 +250,8 @@ impl<T, Q: ?Sized, F: Fn(&T, &Q) -> Ordering, const N: usize> Visitor
                         continue 'walk;
                     }
                 }
-                precursors[l] = current;
-                distances[l] = rank;
+                *precursor = current;
+                *distance = rank;
                 if let Some(link) = maybe_link {
                     bound = Some(link.node());
                 } else {
