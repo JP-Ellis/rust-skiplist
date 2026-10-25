@@ -53,6 +53,15 @@ rumdl = "v0.3.0"
   description = "Run unit tests across all feature combinations"
   run = "cargo hack {{vars.powerset}} --at-least-one-of std,getrandom nextest run"
 
+  [tasks."test:release"]
+  description = "Build every feature set and run the tests with debug assertions off"
+  # The other tasks build with debug assertions on, so an import used only
+  # under `cfg(debug_assertions)` could break the release build unnoticed.
+  run = [
+    "cargo hack {{vars.powerset}} check --release --lib",
+    "cargo nextest run --all-features --cargo-profile release",
+  ]
+
   [tasks."test:docs"]
   description = "Run documentation tests"
   run = "cargo test --doc --features docs"
@@ -160,6 +169,7 @@ rumdl = "v0.3.0"
     { task = "prek" },
     { task = "lint" },
     { task = "test" },
+    { task = "test:release" },
     { task = "test:docs" },
     { task = "lint:docs" },
     { task = "test:benches" },
