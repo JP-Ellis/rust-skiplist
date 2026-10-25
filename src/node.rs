@@ -735,13 +735,14 @@ impl<V, const N: usize> Node<V, N> {
         let mut current = head;
         // SAFETY: the caller guarantees `head` is live.
         let mut level = unsafe { head.as_ref() }.level();
-        loop {
+        'walk: loop {
             // SAFETY: `current` is `head` or was reached through a link or
             // `next`, so it is live.
             let links = unsafe { current.as_ref() }.links();
-            let mut advanced = false;
-            for (l, slot) in links.iter().take(level).enumerate().rev() {
-                let Some(link) = slot else { continue };
+            for l in (0..level).rev() {
+                let Some(link) = links.get(l).and_then(Option::as_ref) else {
+                    continue;
+                };
                 let node = link.node();
                 // SAFETY: link targets are live nodes of this list.
                 match unsafe { node.as_ref() }
@@ -751,28 +752,25 @@ impl<V, const N: usize> Node<V, N> {
                     Ordering::Less => {
                         current = node;
                         level = l.wrapping_add(1);
-                        advanced = true;
-                        break;
+                        continue 'walk;
                     }
                     Ordering::Equal => return Some(node),
                     Ordering::Greater => {}
                 }
             }
-            if !advanced {
-                // SAFETY: as above.
-                let next = unsafe { current.as_ref() }.next()?;
-                // SAFETY: `next` is a live node of this list.
-                match unsafe { next.as_ref() }
-                    .value()
-                    .map_or(Ordering::Less, &cmp)
-                {
-                    Ordering::Less => {
-                        current = next;
-                        level = 0;
-                    }
-                    Ordering::Equal => return Some(next),
-                    Ordering::Greater => return None,
+            // SAFETY: as above.
+            let next = unsafe { current.as_ref() }.next()?;
+            // SAFETY: `next` is a live node of this list.
+            match unsafe { next.as_ref() }
+                .value()
+                .map_or(Ordering::Less, &cmp)
+            {
+                Ordering::Less => {
+                    current = next;
+                    level = 0;
                 }
+                Ordering::Equal => return Some(next),
+                Ordering::Greater => return None,
             }
         }
     }
