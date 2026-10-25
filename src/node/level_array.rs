@@ -54,15 +54,21 @@ impl<T, const N: usize> Deref for LevelArray<T, N> {
 
     #[inline]
     fn deref(&self) -> &[T] {
-        // `len <= N` is an invariant established by `from_fn`.
-        &self.items[..usize::from(self.len)]
+        let len = usize::from(self.len);
+        debug_assert!(len <= N, "length ({len}) exceeds capacity ({N})");
+        // SAFETY: `len <= N` is established by `from_fn` and `len` is never
+        // written afterwards, so the range is within `items`.
+        unsafe { self.items.get_unchecked(..len) }
     }
 }
 
 impl<T, const N: usize> DerefMut for LevelArray<T, N> {
     #[inline]
     fn deref_mut(&mut self) -> &mut [T] {
-        &mut self.items[..usize::from(self.len)]
+        let len = usize::from(self.len);
+        debug_assert!(len <= N, "length ({len}) exceeds capacity ({N})");
+        // SAFETY: as in `deref`.
+        unsafe { self.items.get_unchecked_mut(..len) }
     }
 }
 
