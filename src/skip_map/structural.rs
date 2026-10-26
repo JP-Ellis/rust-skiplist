@@ -121,6 +121,10 @@ impl<K, V, const N: usize, C: Comparator<K>, G: LevelGenerator> SkipMap<K, V, N,
                   heap nodes; splitting across blocks would require unsafe-crossing raw-pointer \
                   variables"
     )]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "the splice paths share the comparisons that choose between them"
+    )]
     #[inline]
     pub fn append(&mut self, other: &mut Self) {
         if other.is_empty() {
@@ -160,7 +164,18 @@ impl<K, V, const N: usize, C: Comparator<K>, G: LevelGenerator> SkipMap<K, V, N,
         let same_height = self.head_ref().level() == other.head_ref().level();
 
         if can_concat && same_height {
-            self.concat(other);
+            // SAFETY: we hold `&mut self` and `&mut other`, two distinct maps
+            // of the same height, and `other` is non-empty.
+            unsafe {
+                Node::concat(
+                    self.head,
+                    &mut self.len,
+                    &mut self.tail,
+                    other.head,
+                    &mut other.len,
+                    &mut other.tail,
+                );
+            }
         } else if can_concat {
             // SAFETY: other.head is a valid head sentinel; we hold &mut other.
             let first_of_other = unsafe { (*other.head.as_ptr()).take_next_chain() };
@@ -225,7 +240,19 @@ impl<K, V, const N: usize, C: Comparator<K>, G: LevelGenerator> SkipMap<K, V, N,
                 core::mem::swap(&mut self.head, &mut other.head);
                 core::mem::swap(&mut self.tail, &mut other.tail);
                 core::mem::swap(&mut self.len, &mut other.len);
-                self.concat(other);
+                // SAFETY: we hold `&mut self` and `&mut other`, two distinct
+                // maps of the same height, and `other` now holds the
+                // non-empty original `self`.
+                unsafe {
+                    Node::concat(
+                        self.head,
+                        &mut self.len,
+                        &mut self.tail,
+                        other.head,
+                        &mut other.len,
+                        &mut other.tail,
+                    );
+                }
             } else if can_prepend {
                 let other_tail_nn = other_tail_saved.expect("other is non-empty in this branch");
 
@@ -281,17 +308,6 @@ impl<K, V, const N: usize, C: Comparator<K>, G: LevelGenerator> SkipMap<K, V, N,
                 }
             }
         }
-    }
-
-    /// Moves every entry of the non-empty `other`, whose head has the same
-    /// height, to the end of `self` in `$O(\log n)$`.
-    fn concat(&mut self, other: &mut Self) {
-        // SAFETY: we hold `&mut self` and `&mut other`, two distinct maps of
-        // the same height, and the caller guarantees `other` is non-empty.
-        unsafe { Node::concat(self.head, self.len, self.tail, other.head) };
-        self.len = self.len.saturating_add(other.len);
-        self.tail = other.tail.take();
-        other.len = 0;
     }
 
     /// Splits the map at the given key, returning a new map containing all

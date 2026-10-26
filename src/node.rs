@@ -905,17 +905,19 @@ impl<V, const N: usize> Node<V, N> {
     }
 
     /// Moves every node of the list headed by `other_head` to the end of the
-    /// list headed by `head`, leaving `other_head` empty.
+    /// list headed by `head`, leaving the other list empty.
     ///
     /// Only the links that end the first list are rewritten, so the splice is
-    /// `$O(\log n)$`. No comparator is consulted.
+    /// `$O(\log n)$`. No comparator is consulted. Both lists' lengths and
+    /// tails are updated to match.
     ///
     /// # Safety
     ///
     /// - `head` must be the exclusively-owned head of a well-formed list of
-    ///   `len` data nodes whose last node is `tail` (`None` when empty).
+    ///   `*len` data nodes whose last node is `*tail` (`None` when empty).
     /// - `other_head` must be the exclusively-owned head of a different,
-    ///   non-empty, well-formed list with the same height as `head`.
+    ///   non-empty, well-formed list of `*other_len` data nodes whose last
+    ///   node is `*other_tail`, with the same height as `head`.
     #[expect(
         clippy::expect_used,
         reason = "the other list is non-empty, and a link from its head ends at rank 1 or \
@@ -933,9 +935,11 @@ impl<V, const N: usize> Node<V, N> {
     )]
     pub(crate) unsafe fn concat(
         head: NonNull<Self>,
-        len: usize,
-        tail: Option<NonNull<Self>>,
+        len: &mut usize,
+        tail: &mut Option<NonNull<Self>>,
         other_head: NonNull<Self>,
+        other_len: &mut usize,
+        other_tail: &mut Option<NonNull<Self>>,
     ) {
         // Every rank is below `len + 1`, so the walk ends at the tail having
         // recorded the last node at each level.
@@ -943,6 +947,7 @@ impl<V, const N: usize> Node<V, N> {
         visitor.traverse();
         let precursors = visitor.precursors();
         let ranks = visitor.precursor_distances();
+        let len_before = *len;
         // SAFETY: the caller guarantees exclusive access to both lists, which
         // share no nodes.
         unsafe {
@@ -952,12 +957,17 @@ impl<V, const N: usize> Node<V, N> {
             Node::set_head_next(tail.unwrap_or(head), first);
             for (l, (&pred, &rank)) in precursors.iter().zip(ranks).enumerate() {
                 if let Some(link) = (*other_head.as_ptr()).links_mut()[l].take() {
-                    let distance = len.wrapping_add(link.distance().get()).wrapping_sub(rank);
+                    let distance = len_before
+                        .wrapping_add(link.distance().get())
+                        .wrapping_sub(rank);
                     (*pred.as_ptr()).links_mut()[l] =
                         Some(Link::new(link.node(), distance).expect("the link crosses the seam"));
                 }
             }
         }
+        *len = len_before.saturating_add(*other_len);
+        *tail = other_tail.take();
+        *other_len = 0;
     }
 
     /// Filter and rebuild skip links in a single `$O(n)$` forward pass.
