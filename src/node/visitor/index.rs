@@ -1,9 +1,6 @@
 //! Index-based visitor for rank-based traversal of a skip list.
 
-use crate::node::{
-    Node,
-    visitor::{Step, Visitor},
-};
+use crate::node::{Node, visitor::Visitor};
 
 /// Traverses a skip list to locate a node at a given 0-based rank.
 ///
@@ -55,7 +52,8 @@ impl<'a, T, const N: usize> Visitor for IndexVisitor<'a, T, N> {
         self.index == self.target
     }
 
-    // Runs `step` to completion with the walk state held in locals.
+    // The walk state lives in locals so the loop does not reload and store
+    // it through `self` on every link.
     #[inline]
     fn traverse(&mut self) -> Option<Self::NodeRef> {
         let target = self.target;
@@ -67,11 +65,16 @@ impl<'a, T, const N: usize> Visitor for IndexVisitor<'a, T, N> {
                 break Some(current);
             }
             for (l, maybe_link) in (0..level).zip(current.links()).rev() {
+                // Ranks are bounded by the list length, so these sums never wrap.
                 if let Some(link) = maybe_link
                     && index.wrapping_add(link.distance().get()) <= target
                 {
-                    // SAFETY: as in `step`.
+                    // SAFETY: a link targets a live node of the list, and the
+                    // list outlives `'a`.
                     current = unsafe { link.node().as_ref() };
+                    // Reconsider the same level at the new node; resuming one
+                    // level lower degrades the walk to O(n) when consecutive
+                    // nodes share a high level.
                     level = l.wrapping_add(1);
                     index = index.wrapping_add(link.distance().get());
                     continue 'walk;
@@ -88,41 +91,6 @@ impl<'a, T, const N: usize> Visitor for IndexVisitor<'a, T, N> {
         self.index = index;
         self.level = level;
         result
-    }
-
-    fn step(&mut self) -> Step<Self::NodeRef> {
-        if self.found() {
-            return Step::FoundTarget;
-        }
-
-        for (level, maybe_link) in (0..self.level).zip(self.current.links()).rev() {
-            // Ranks are bounded by the list length, so these sums never wrap.
-            if let Some(link) = maybe_link
-                && self.index.wrapping_add(link.distance().get()) <= self.target
-            {
-                // SAFETY: link.node() is a valid heap-allocated node
-                // that lives at least as long as the visitor's `'a`.
-                self.current = unsafe { link.node().as_ref() };
-                // Use level + 1 so the same level is reconsidered at the new
-                // node; setting to `level` would skip it, degrading O(log n)
-                // traversal to O(n) when consecutive nodes share a high level.
-                self.level = level.saturating_add(1);
-                self.index = self.index.wrapping_add(link.distance().get());
-                return Step::Advanced(self.current);
-            }
-        }
-
-        // No skip link advanced far enough: fall through to the level-0 next
-        // pointer. By construction, `self.index < self.target` here, so if a
-        // next node exists we can always advance by 1.
-        self.level = 0;
-        if let Some(next) = self.current.next_as_ref() {
-            self.current = next;
-            self.index = self.index.wrapping_add(1);
-            return Step::Advanced(self.current);
-        }
-
-        Step::Exhausted
     }
 }
 
@@ -143,43 +111,23 @@ mod tests {
         Node,
         tests::{MAX_LEVELS, skiplist},
         visitor::{
-            Step, Visitor,
-            tests::{LEVELS, SHAPES, list, step_to_end},
+            Visitor,
+            tests::{SHAPES, list, nodes, rank_of},
         },
     };
 
-    /// Test the `IndexVisitor` for finding a node by index.
+    /// A walk past the end stops at the last node.
     #[rstest]
-    fn index_traverser_step(skiplist: Result<NonNull<Node<u8, MAX_LEVELS>>>) -> Result<()> {
-        let head = skiplist?;
-        // SAFETY: head is a valid heap-allocated node for the duration of this test.
-        let mut traverser = IndexVisitor::new(unsafe { head.as_ref() }, 2);
-
-        let mut last_node = None;
-        while let Step::Advanced(node) = traverser.step() {
-            last_node = Some(node);
-        }
-
-        assert!(traverser.found());
-        assert_eq!(last_node.and_then(|n| n.value()), Some(&20));
-
-        unsafe { drop(Box::from_raw(head.as_ptr())) };
-        Ok(())
-    }
-
-    #[rstest]
-    fn index_traverser_step_none(skiplist: Result<NonNull<Node<u8, MAX_LEVELS>>>) -> Result<()> {
+    fn index_traverser_stops_at_tail(
+        skiplist: Result<NonNull<Node<u8, MAX_LEVELS>>>,
+    ) -> Result<()> {
         let head = skiplist?;
         // SAFETY: head is a valid heap-allocated node for the duration of this test.
         let mut traverser = IndexVisitor::new(unsafe { head.as_ref() }, 5);
 
-        let mut last_node = None;
-        while let Step::Advanced(node) = traverser.step() {
-            last_node = Some(node);
-        }
-
+        assert!(traverser.traverse().is_none());
         assert!(!traverser.found());
-        assert_eq!(last_node.and_then(|n| n.value()), Some(&40));
+        assert_eq!(traverser.current().value(), Some(&40));
 
         unsafe { drop(Box::from_raw(head.as_ptr())) };
         Ok(())
@@ -215,46 +163,28 @@ mod tests {
         Ok(())
     }
 
-    // MARK: traverse matches step
+    // MARK: traverse matches a scan
 
-    /// The state of an `IndexVisitor` once it stops.
-    type Snapshot = (
-        Option<*const Node<u8, LEVELS>>,
-        *const Node<u8, LEVELS>,
-        usize,
-        usize,
-        bool,
-    );
-
-    fn snapshot(
-        visitor: &IndexVisitor<'_, u8, LEVELS>,
-        result: Option<&Node<u8, LEVELS>>,
-    ) -> Snapshot {
-        (
-            result.map(core::ptr::from_ref),
-            core::ptr::from_ref(visitor.current),
-            visitor.index,
-            visitor.level,
-            visitor.found(),
-        )
-    }
-
-    /// `traverse` ends in the same state as the `step` loop for every rank
-    /// before, inside and after each shape.
+    /// `traverse` reaches the node at each rank before, inside and after
+    /// each shape, and otherwise stops at the tail.
     #[test]
-    fn traverse_matches_step() {
+    fn traverse_matches_scan() {
         for entries in SHAPES {
             let head = list(entries);
+            let nodes = nodes(head);
             let head_ref = unsafe { head.as_ref() };
             for target in 0..entries.len().saturating_add(3) {
-                let mut stepped = IndexVisitor::new(head_ref, target);
-                let stepped_result = step_to_end(&mut stepped);
-                let mut traversed = IndexVisitor::new(head_ref, target);
-                let traversed_result = traversed.traverse();
+                let mut visitor = IndexVisitor::new(head_ref, target);
+                let result = visitor.traverse().map(core::ptr::from_ref);
+                let expected = nodes.get(target).map(|node| node.as_ptr().cast_const());
+                let context = format!("shape {entries:?}, target {target}");
+                assert_eq!(result, expected, "{context}");
+                assert_eq!(visitor.found(), expected.is_some(), "{context}");
+                let current = NonNull::from(visitor.current());
                 assert_eq!(
-                    snapshot(&traversed, traversed_result),
-                    snapshot(&stepped, stepped_result),
-                    "shape {entries:?}, target {target}",
+                    rank_of(&nodes, current),
+                    target.min(entries.len()),
+                    "{context}"
                 );
             }
             unsafe { drop(Box::from_raw(head.as_ptr())) };

@@ -42,17 +42,6 @@ pub(crate) use ord_index::OrdIndexVisitor;
 pub(crate) use ord_index_mut::OrdIndexMutVisitor;
 pub(crate) use ord_mut::OrdMutVisitor;
 
-/// Outcome of a single [`Visitor::step`] call.
-#[derive(Debug, PartialEq, Eq)]
-pub(crate) enum Step<NodeRef> {
-    /// The visitor advanced to a new node.
-    Advanced(NodeRef),
-    /// The visitor has reached its target and can step no further.
-    FoundTarget,
-    /// The visitor has exhausted the list without finding the target.
-    Exhausted,
-}
-
 /// Basic interface for a visitor.
 ///
 /// This trait defines the interface for visiting nodes.
@@ -72,64 +61,32 @@ pub(crate) trait Visitor {
     /// Whether the traverser has reached its destination.
     fn found(&self) -> bool;
 
-    /// Step towards the target.
+    /// Walk towards the target until it is reached or cannot be reached.
     ///
-    /// This attempts to take a single step towards the target. This may be
-    /// either through a link, or by moving through the node's `next` pointer.
+    /// Each move follows the highest skip link that does not pass the target,
+    /// and falls back to the node's `next` pointer when none does.
     ///
-    /// Returns [`Step::Advanced`] with the new node when a step was taken,
-    /// [`Step::FoundTarget`] when the target has been reached and no further
-    /// steps are possible, or [`Step::Exhausted`] when the list has been
-    /// exhausted without finding the target.
-    fn step(&mut self) -> Step<Self::NodeRef>;
-
-    /// Traverse until we reach the target, or we can no longer step.
-    ///
-    /// This will continue to step until we reach the target, or we can no
-    /// longer step. If we reach the target, this will return the target node
-    /// reference, otherwise it will return `None`.
-    ///
-    /// # Invariant
-    ///
-    /// When [`Step::FoundTarget`] is returned by [`step`][Visitor::step],
-    /// `current` holds the last node returned by [`Step::Advanced`], which is
-    /// the target node itself (the visitor advanced *to* the target, then the
-    /// following call signals it cannot advance further). This is why
-    /// `Some(current)` (not a new call to [`current`][Visitor::current]) is
-    /// the correct value to return.
-    fn traverse(&mut self) -> Option<Self::NodeRef> {
-        let mut current = self.current();
-        loop {
-            match self.step() {
-                Step::Advanced(node) => current = node,
-                Step::FoundTarget => return Some(current),
-                Step::Exhausted => return None,
-            }
-        }
-    }
+    /// Returns the target node if it was reached, otherwise `None`. Either
+    /// way, [`current`][Visitor::current] is left at the last node the walk
+    /// reached, and calling `traverse` again returns the same result.
+    fn traverse(&mut self) -> Option<Self::NodeRef>;
 }
 
 /// Extension to the [`Visitor`] trait for mutation.
 ///
-/// This trait extends the [`Visitor`] trait to allow for mutation of the
-/// current node and the links around it during insert and remove operations.
+/// This trait extends the [`Visitor`] trait to expose the links around the
+/// target, which insert and remove operations rewrite.
 ///
 /// During traversal the visitor records, for each level `l`, the last node
 /// whose skip-link at level `l` points to the target position or beyond.
 /// These precursor nodes are the ones whose links must be rewritten when
 /// a node is inserted or removed.
 pub(crate) trait VisitorMut: Visitor {
-    /// Mutable node reference returned by [`current_mut`][VisitorMut::current_mut].
-    type NodeMut;
-
     /// Opaque pointer to a precursor node (typically `NonNull<Node<V>>`).
     ///
     /// This is `Copy` so that precursor slices can be indexed cheaply and
     /// individual entries can be read without consuming the array.
     type Precursor: Copy;
-
-    /// Get a mutable reference to the current (target) node.
-    fn current_mut(&mut self) -> Self::NodeMut;
 
     /// Precursor nodes, one per level.
     ///
@@ -145,13 +102,12 @@ pub(crate) trait VisitorMut: Visitor {
 
 #[cfg(test)]
 pub(crate) mod tests {
-    //! Helpers that check each visitor's `traverse` override against its
-    //! `step` loop.
+    //! Helpers that check each visitor's `traverse` against a linear scan of
+    //! the list.
 
     use core::{panic::AssertUnwindSafe, ptr::NonNull};
     use std::panic::catch_unwind;
 
-    use super::{Step, Visitor};
     use crate::node::Node;
 
     /// The head height of every list built by [`list`].
@@ -205,21 +161,94 @@ pub(crate) mod tests {
         head
     }
 
-    /// Drives `visitor` with [`Visitor::step`] until it stops.
-    ///
-    /// Returns what the default [`Visitor::traverse`] returns.
-    pub(crate) fn step_to_end<V>(visitor: &mut V) -> Option<V::NodeRef>
-    where
-        V: Visitor,
-    {
-        let mut current = visitor.current();
-        loop {
-            match visitor.step() {
-                Step::Advanced(node) => current = node,
-                Step::FoundTarget => return Some(current),
-                Step::Exhausted => return None,
-            }
+    /// Every node of the list at `head` in base-chain order, the head first,
+    /// so each node's position is its rank.
+    pub(crate) fn nodes(head: NonNull<Node<u8, LEVELS>>) -> Vec<NonNull<Node<u8, LEVELS>>> {
+        let mut nodes = vec![head];
+        let mut current = head;
+        // SAFETY: every node of the list is live.
+        while let Some(next) = unsafe { current.as_ref() }.next() {
+            nodes.push(next);
+            current = next;
         }
+        nodes
+    }
+
+    /// The rank of the node at `ptr` within `nodes`.
+    pub(crate) fn rank_of(
+        nodes: &[NonNull<Node<u8, LEVELS>>],
+        ptr: NonNull<Node<u8, LEVELS>>,
+    ) -> usize {
+        nodes
+            .iter()
+            .position(|&node| node == ptr)
+            .expect("pointer is a node of the list")
+    }
+
+    /// The rank of each level's precursor for a target placed after the
+    /// first `before` data nodes of `entries`.
+    ///
+    /// At level `l` that is the last of those nodes whose tower has a link
+    /// at `l`, or the head (rank 0) when none does.
+    pub(crate) fn scan_precursors(entries: &[(u8, usize)], before: usize) -> Vec<usize> {
+        (0..LEVELS)
+            .map(|l| {
+                entries
+                    .iter()
+                    .take(before)
+                    .rposition(|&(_, height)| height > l)
+                    .map_or(0, |i| i.wrapping_add(1))
+            })
+            .collect()
+    }
+
+    /// Asserts that `current` and `precursors` describe a stop a forward walk
+    /// can make, whatever the comparator answered.
+    ///
+    /// Each level's precursor lies at or after the one above it and at or
+    /// before `current`, and its link at that level, if any, reaches
+    /// `current` or beyond.
+    pub(crate) fn assert_consistent_stop(
+        nodes: &[NonNull<Node<u8, LEVELS>>],
+        current: NonNull<Node<u8, LEVELS>>,
+        precursors: &[NonNull<Node<u8, LEVELS>>],
+        context: &str,
+    ) {
+        let current_rank = rank_of(nodes, current);
+        let mut above = 0;
+        for (l, &precursor) in precursors.iter().enumerate().rev() {
+            let rank = rank_of(nodes, precursor);
+            assert!(
+                rank >= above,
+                "{context}: level {l} precursor before the one above"
+            );
+            assert!(
+                rank <= current_rank,
+                "{context}: level {l} precursor past current"
+            );
+            // SAFETY: every precursor is a live node of the list.
+            let maybe_link = unsafe { precursor.as_ref() }
+                .links()
+                .get(l)
+                .and_then(Option::as_ref);
+            if let Some(link) = maybe_link {
+                assert!(
+                    rank_of(nodes, link.node()) >= current_rank,
+                    "{context}: level {l} link stops short of current"
+                );
+            }
+            above = rank;
+        }
+    }
+
+    /// The number of `entries` whose value is below `target`.
+    pub(crate) fn count_below(entries: &[(u8, usize)], target: u8) -> usize {
+        entries.iter().filter(|&&(value, _)| value < target).count()
+    }
+
+    /// Whether some entry holds `target`.
+    pub(crate) fn contains(entries: &[(u8, usize)], target: u8) -> bool {
+        entries.iter().any(|&(value, _)| value == target)
     }
 
     /// Runs `walk`, catching a panic as its message.
