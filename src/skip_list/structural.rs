@@ -285,8 +285,6 @@ impl<T, G: LevelGenerator, const N: usize> SkipList<T, N, G> {
             return;
         }
 
-        let self_len = self.len;
-        let other_len = other.len;
         let max_levels = self.head_ref().level();
 
         // Slow path: different level-generator sizes, fall back to re-insertion
@@ -300,10 +298,16 @@ impl<T, G: LevelGenerator, const N: usize> SkipList<T, N, G> {
 
         // SAFETY: we hold `&mut self` and `&mut other`, two distinct lists of
         // the same height, and `other` is non-empty.
-        unsafe { Node::concat(self.head, self_len, self.tail, other.head) };
-        self.len = self_len.saturating_add(other_len);
-        self.tail = other.tail.take();
-        other.len = 0;
+        unsafe {
+            Node::concat(
+                self.head,
+                &mut self.len,
+                &mut self.tail,
+                other.head,
+                &mut other.len,
+                &mut other.tail,
+            );
+        }
     }
 }
 
