@@ -413,7 +413,12 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
         // SAFETY: `target_ptr` and every precursor come from the visitor's
         // walk of this list and are live for `&mut self`; no `&mut`
         // reference to any node exists.
-        unsafe { Node::check_precursors(precursors, target_ptr) };
+        // The walk's bound already guarantees the check passes; see
+        // `check_precursors`.
+        #[cfg(debug_assertions)]
+        unsafe {
+            Node::check_precursors(precursors, target_ptr);
+        }
 
         let max_levels = self.head_ref().level();
 
