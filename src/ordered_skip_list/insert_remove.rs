@@ -3,7 +3,7 @@
 use core::{cmp::Ordering, ptr::NonNull};
 
 use crate::{
-    comparator::{Comparator, ComparatorKey},
+    comparator::{Comparator, ComparatorKey, past_equal},
     level_generator::LevelGenerator,
     node::{
         Node,
@@ -520,10 +520,7 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
         // skip-link at level l spans over target and must be decremented.
         let (target_ptr, cmp_past_precursors) = {
             let head = self.head;
-            let cmp_past = |v: &T, q: &Q| match self.comparator.compare_key(v, q) {
-                Ordering::Equal | Ordering::Less => Ordering::Less,
-                Ordering::Greater => Ordering::Greater,
-            };
+            let cmp_past = |v: &T, q: &Q| past_equal(self.comparator.compare_key(v, q));
             let mut visitor = OrdMutVisitor::new(head, value, cmp_past);
             visitor.traverse();
             // With cmp_past, `current` is the last node whose value compares

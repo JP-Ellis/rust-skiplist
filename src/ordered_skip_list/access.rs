@@ -3,7 +3,7 @@
 use core::{cmp::Ordering, ops::Index};
 
 use crate::{
-    comparator::{Comparator, ComparatorKey},
+    comparator::{Comparator, ComparatorKey, past_equal},
     level_generator::LevelGenerator,
     node::visitor::{IndexVisitor, OrdIndexVisitor, OrdVisitor, Visitor},
     ordered_skip_list::OrderedSkipList,
@@ -250,10 +250,7 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
         // Treat Equal as Less so that traversal advances through *all* equal
         // nodes. After exhaustion, current() is the last equal node (or a
         // node that compares Less if none exist).
-        let cmp_past = |e: &T, q: &Q| match self.comparator.compare_key(e, q) {
-            core::cmp::Ordering::Equal | core::cmp::Ordering::Less => core::cmp::Ordering::Less,
-            core::cmp::Ordering::Greater => core::cmp::Ordering::Greater,
-        };
+        let cmp_past = |v: &T, q: &Q| past_equal(self.comparator.compare_key(v, q));
         let mut visitor = OrdVisitor::new(head, value, cmp_past);
         visitor.traverse();
         let current = visitor.current();
@@ -394,10 +391,7 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
             match node.value() {
                 Some(v) if self.comparator.compare_key(v, value) == Ordering::Equal => {
                     if count == WALK {
-                        let cmp_past = |e: &T, q: &Q| match self.comparator.compare_key(e, q) {
-                            Ordering::Less | Ordering::Equal => Ordering::Less,
-                            Ordering::Greater => Ordering::Greater,
-                        };
+                        let cmp_past = |e: &T, q: &Q| past_equal(self.comparator.compare_key(e, q));
                         let mut last = OrdIndexVisitor::new(head, value, cmp_past);
                         last.traverse();
                         // Ranks are structural, so the difference is a node

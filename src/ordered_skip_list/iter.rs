@@ -16,7 +16,7 @@ use core::{
 };
 
 use crate::{
-    comparator::{Comparator, OrdComparator},
+    comparator::{Comparator, OrdComparator, past_equal},
     level_generator::{LevelGenerator, geometric::Geometric},
     node::{
         Node,
@@ -66,10 +66,8 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
                 // After traversal, current() is the last node ≤ v (or head),
                 // so current().next() is the first node > v.
                 let head = self.head_ref();
-                let cmp = |node_val: &T, target: &T| match self.comparator.compare(node_val, target)
-                {
-                    Ordering::Less | Ordering::Equal => Ordering::Less,
-                    Ordering::Greater => Ordering::Greater,
+                let cmp = |node_val: &T, target: &T| {
+                    past_equal(self.comparator.compare(node_val, target))
                 };
                 let mut visitor = OrdIndexVisitor::new(head, v, cmp);
                 visitor.traverse();
@@ -95,10 +93,8 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, 
                 // Advance through all nodes ≤ v; stop before > v.
                 // After traversal, current() is the last node ≤ v (or head).
                 let head = self.head_ref();
-                let cmp = |node_val: &T, target: &T| match self.comparator.compare(node_val, target)
-                {
-                    Ordering::Less | Ordering::Equal => Ordering::Less,
-                    Ordering::Greater => Ordering::Greater,
+                let cmp = |node_val: &T, target: &T| {
+                    past_equal(self.comparator.compare(node_val, target))
                 };
                 let mut visitor = OrdIndexVisitor::new(head, v, cmp);
                 visitor.traverse();

@@ -298,6 +298,18 @@ pub(crate) fn total_order_violation() -> ! {
     panic!("comparator does not implement a total order");
 }
 
+/// Answer `Less` for an element equal to the target.
+///
+/// An ordered walk that advances on `Less` then passes every equal element
+/// and stops on the last one.
+#[inline]
+pub(crate) const fn past_equal(ord: Ordering) -> Ordering {
+    match ord {
+        Ordering::Less | Ordering::Equal => Ordering::Less,
+        Ordering::Greater => Ordering::Greater,
+    }
+}
+
 // MARK: Tests
 
 #[cfg(test)]
