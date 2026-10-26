@@ -142,7 +142,10 @@ mod tests {
     use crate::node::{
         Node,
         tests::{MAX_LEVELS, skiplist},
-        visitor::{Step, Visitor},
+        visitor::{
+            Step, Visitor,
+            tests::{LEVELS, SHAPES, list, step_to_end},
+        },
     };
 
     /// Test the `IndexVisitor` for finding a node by index.
@@ -210,5 +213,51 @@ mod tests {
 
         unsafe { drop(Box::from_raw(head.as_ptr())) };
         Ok(())
+    }
+
+    // MARK: traverse matches step
+
+    /// The state of an `IndexVisitor` once it stops.
+    type Snapshot = (
+        Option<*const Node<u8, LEVELS>>,
+        *const Node<u8, LEVELS>,
+        usize,
+        usize,
+        bool,
+    );
+
+    fn snapshot(
+        visitor: &IndexVisitor<'_, u8, LEVELS>,
+        result: Option<&Node<u8, LEVELS>>,
+    ) -> Snapshot {
+        (
+            result.map(core::ptr::from_ref),
+            core::ptr::from_ref(visitor.current),
+            visitor.index,
+            visitor.level,
+            visitor.found(),
+        )
+    }
+
+    /// `traverse` ends in the same state as the `step` loop for every rank
+    /// before, inside and after each shape.
+    #[test]
+    fn traverse_matches_step() {
+        for entries in SHAPES {
+            let head = list(entries);
+            let head_ref = unsafe { head.as_ref() };
+            for target in 0..entries.len().saturating_add(3) {
+                let mut stepped = IndexVisitor::new(head_ref, target);
+                let stepped_result = step_to_end(&mut stepped);
+                let mut traversed = IndexVisitor::new(head_ref, target);
+                let traversed_result = traversed.traverse();
+                assert_eq!(
+                    snapshot(&traversed, traversed_result),
+                    snapshot(&stepped, stepped_result),
+                    "shape {entries:?}, target {target}",
+                );
+            }
+            unsafe { drop(Box::from_raw(head.as_ptr())) };
+        }
     }
 }

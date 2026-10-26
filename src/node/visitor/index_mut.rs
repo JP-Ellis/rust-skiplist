@@ -288,7 +288,10 @@ mod tests {
     use crate::node::{
         Node,
         tests::{MAX_LEVELS, skiplist},
-        visitor::{Step, Visitor, VisitorMut},
+        visitor::{
+            Step, Visitor, VisitorMut,
+            tests::{LEVELS, SHAPES, list, step_to_end},
+        },
     };
 
     #[rstest]
@@ -384,5 +387,56 @@ mod tests {
         assert_eq!(visitor.precursor_distances().len(), max_levels);
         unsafe { drop(Box::from_raw(head.as_ptr())) };
         Ok(())
+    }
+
+    // MARK: traverse matches step
+
+    type Ptr = NonNull<Node<u8, LEVELS>>;
+
+    /// The state of an `IndexMutVisitor` once it stops.
+    #[derive(Debug, PartialEq, Eq)]
+    struct Snapshot {
+        result: Option<Ptr>,
+        current: Ptr,
+        index: usize,
+        level: usize,
+        found: bool,
+        precursors: Vec<Ptr>,
+        distances: Vec<usize>,
+    }
+
+    impl Snapshot {
+        fn new(visitor: &IndexMutVisitor<u8, LEVELS>, result: Option<Ptr>) -> Self {
+            Self {
+                result,
+                current: visitor.current,
+                index: visitor.index,
+                level: visitor.level,
+                found: visitor.found(),
+                precursors: visitor.precursors().to_vec(),
+                distances: visitor.precursor_distances().to_vec(),
+            }
+        }
+    }
+
+    /// `traverse` ends in the same state as the `step` loop, precursors
+    /// included, for every rank before, inside and after each shape.
+    #[test]
+    fn traverse_matches_step() {
+        for entries in SHAPES {
+            let head = list(entries);
+            for target in 0..entries.len().saturating_add(3) {
+                let mut stepped = IndexMutVisitor::new(head, target);
+                let stepped_result = step_to_end(&mut stepped);
+                let mut traversed = IndexMutVisitor::new(head, target);
+                let traversed_result = traversed.traverse();
+                assert_eq!(
+                    Snapshot::new(&traversed, traversed_result),
+                    Snapshot::new(&stepped, stepped_result),
+                    "shape {entries:?}, target {target}",
+                );
+            }
+            unsafe { drop(Box::from_raw(head.as_ptr())) };
+        }
     }
 }
