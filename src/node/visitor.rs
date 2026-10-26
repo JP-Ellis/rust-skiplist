@@ -142,3 +142,94 @@ pub(crate) trait VisitorMut: Visitor {
     /// levels for this skip list).
     fn precursors(&self) -> &[Self::Precursor];
 }
+
+#[cfg(test)]
+pub(crate) mod tests {
+    //! Helpers that check each visitor's `traverse` override against its
+    //! `step` loop.
+
+    use core::{panic::AssertUnwindSafe, ptr::NonNull};
+    use std::panic::catch_unwind;
+
+    use super::{Step, Visitor};
+    use crate::node::Node;
+
+    /// The head height of every list built by [`list`].
+    pub(crate) const LEVELS: usize = 4;
+
+    /// List shapes as `(value, height)` pairs in base-chain order.
+    ///
+    /// Values are ascending, so the ordered visitors can walk every shape.
+    pub(crate) const SHAPES: &[&[(u8, usize)]] = &[
+        &[],
+        &[(10, 0)],
+        &[(10, LEVELS)],
+        &[(10, 0), (20, 0), (30, 0), (40, 0), (50, 0)],
+        &[
+            (10, 0),
+            (20, 2),
+            (30, 1),
+            (40, LEVELS),
+            (50, 0),
+            (60, 3),
+            (70, 1),
+            (80, 0),
+        ],
+        &[(10, LEVELS), (20, LEVELS), (30, LEVELS), (40, LEVELS)],
+        &[
+            (10, 1),
+            (20, 0),
+            (20, 3),
+            (20, 2),
+            (30, 0),
+            (30, 1),
+            (40, 0),
+        ],
+    ];
+
+    /// Builds a well-formed list from `(value, height)` pairs and returns
+    /// its head.
+    ///
+    /// The caller frees the list with `drop(Box::from_raw(head.as_ptr()))`.
+    pub(crate) fn list(entries: &[(u8, usize)]) -> NonNull<Node<u8, LEVELS>> {
+        // SAFETY: `Box::into_raw` never returns null.
+        let head = unsafe { NonNull::new_unchecked(Box::into_raw(Box::new(Node::new(LEVELS)))) };
+        let mut last = head;
+        for &(value, height) in entries {
+            // SAFETY: `last` is the live tail of the list under construction.
+            last = unsafe { Node::insert_after(last, Node::with_value(height, value)) };
+        }
+        let (mut len, mut tail) = (0, None);
+        // SAFETY: `head` is exclusively owned and every data node is live.
+        unsafe { Node::filter_rebuild(head, &mut len, &mut tail, |_| true, |_| {}) };
+        head
+    }
+
+    /// Drives `visitor` with [`Visitor::step`] until it stops.
+    ///
+    /// Returns what the default [`Visitor::traverse`] returns.
+    pub(crate) fn step_to_end<V>(visitor: &mut V) -> Option<V::NodeRef>
+    where
+        V: Visitor,
+    {
+        let mut current = visitor.current();
+        loop {
+            match visitor.step() {
+                Step::Advanced(node) => current = node,
+                Step::FoundTarget => return Some(current),
+                Step::Exhausted => return None,
+            }
+        }
+    }
+
+    /// Runs `walk`, catching a panic as its message.
+    pub(crate) fn outcome<S>(walk: impl FnOnce() -> S) -> Result<S, String> {
+        catch_unwind(AssertUnwindSafe(walk)).map_err(|payload| {
+            payload
+                .downcast_ref::<&str>()
+                .map(|message| (*message).to_owned())
+                .or_else(|| payload.downcast_ref::<String>().cloned())
+                .unwrap_or_else(|| "<non-string panic payload>".to_owned())
+        })
+    }
+}

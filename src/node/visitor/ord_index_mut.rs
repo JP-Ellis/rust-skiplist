@@ -396,7 +396,12 @@ impl<T, Q: ?Sized, F: Fn(&T, &Q) -> Ordering, const N: usize> VisitorMut
 )]
 #[cfg(test)]
 mod tests {
-    use core::{cell::Cell, cmp::Ordering, panic::AssertUnwindSafe, ptr::NonNull};
+    use core::{
+        cell::{Cell, RefCell},
+        cmp::Ordering,
+        panic::AssertUnwindSafe,
+        ptr::NonNull,
+    };
     use std::panic::catch_unwind;
 
     use anyhow::Result;
@@ -405,12 +410,16 @@ mod tests {
 
     use super::OrdIndexMutVisitor;
     use crate::{
+        comparator::Comparator,
         node::{
             Node,
             tests::{MAX_LEVELS, skiplist, tall_skiplist, well_formed_skiplist},
-            visitor::{Step, Visitor, VisitorMut},
+            visitor::{
+                Step, Visitor, VisitorMut,
+                tests::{LEVELS, SHAPES, list, outcome, step_to_end},
+            },
         },
-        test_util::TOTAL_ORDER_PANIC,
+        test_util::{Chaos, TOTAL_ORDER_PANIC, seeds},
     };
 
     type Ptr = NonNull<Node<u8, MAX_LEVELS>>;
@@ -727,5 +736,114 @@ mod tests {
         );
         unsafe { drop(Box::from_raw(head.as_ptr())) };
         Ok(())
+    }
+
+    // MARK: traverse matches step
+
+    type EqPtr = NonNull<Node<u8, LEVELS>>;
+
+    /// The state of an `OrdIndexMutVisitor` once it stops.
+    #[derive(Debug, PartialEq, Eq)]
+    struct Snapshot {
+        result: Option<EqPtr>,
+        current: EqPtr,
+        level: usize,
+        found: bool,
+        bound: Option<EqPtr>,
+        precursors: Vec<EqPtr>,
+        rank: usize,
+        distances: Vec<usize>,
+    }
+
+    impl Snapshot {
+        fn new<F>(
+            visitor: &OrdIndexMutVisitor<'_, u8, u8, F, LEVELS>,
+            result: Option<EqPtr>,
+        ) -> Self
+        where
+            F: Fn(&u8, &u8) -> Ordering,
+        {
+            Self {
+                result,
+                current: visitor.current,
+                level: visitor.level,
+                found: visitor.found(),
+                bound: visitor.bound,
+                precursors: visitor.precursors().to_vec(),
+                rank: visitor.rank,
+                distances: visitor.precursor_distances().to_vec(),
+            }
+        }
+    }
+
+    /// Walks `head` towards `target` with `step` or `traverse`.
+    ///
+    /// Returns the final state, or the panic message, together with every
+    /// value handed to the comparator in call order.
+    fn walk(
+        head: EqPtr,
+        target: u8,
+        use_traverse: bool,
+        cmp: impl Fn(&u8, &u8) -> Ordering,
+    ) -> (Result<Snapshot, String>, Vec<u8>) {
+        let calls = RefCell::new(Vec::new());
+        let logged = |value: &u8, probe: &u8| {
+            calls.borrow_mut().push(*value);
+            cmp(value, probe)
+        };
+        let state = outcome(|| {
+            let mut visitor = OrdIndexMutVisitor::new(head, &target, logged);
+            let result = if use_traverse {
+                visitor.traverse()
+            } else {
+                step_to_end(&mut visitor)
+            };
+            Snapshot::new(&visitor, result)
+        });
+        (state, calls.into_inner())
+    }
+
+    /// With a consistent comparator, `traverse` makes the same comparisons
+    /// and ends in the same state as the `step` loop for every target
+    /// before, between, on and after the values of each shape.
+    #[test]
+    fn traverse_matches_step() {
+        for entries in SHAPES {
+            let head = list(entries);
+            for target in 0_u8..=95 {
+                let stepped = walk(head, target, false, Ord::cmp);
+                let traversed = walk(head, target, true, Ord::cmp);
+                assert!(stepped.0.is_ok(), "shape {entries:?}, target {target}");
+                assert_eq!(traversed, stepped, "shape {entries:?}, target {target}");
+            }
+            unsafe { drop(Box::from_raw(head.as_ptr())) };
+        }
+    }
+
+    /// With a chaotic comparator, `traverse` panics exactly when the `step`
+    /// loop does, after the same comparisons, and otherwise ends in the same
+    /// state.
+    #[test]
+    fn traverse_matches_step_under_chaos() {
+        let (mut refused, mut completed) = (0_usize, 0_usize);
+        for entries in SHAPES {
+            let head = list(entries);
+            for seed in seeds() {
+                let (step_chaos, traverse_chaos) = (Chaos::new(seed), Chaos::new(seed));
+                let stepped = walk(head, 25, false, |v, t| step_chaos.compare(v, t));
+                let traversed = walk(head, 25, true, |v, t| traverse_chaos.compare(v, t));
+                assert_eq!(traversed, stepped, "shape {entries:?}, seed {seed}");
+                match stepped.0 {
+                    Ok(_) => completed = completed.saturating_add(1),
+                    Err(message) => {
+                        assert_eq!(message, TOTAL_ORDER_PANIC);
+                        refused = refused.saturating_add(1);
+                    }
+                }
+            }
+            unsafe { drop(Box::from_raw(head.as_ptr())) };
+        }
+        assert!(refused > 0, "no seed tripped the bound");
+        assert!(completed > 0, "every seed tripped the bound");
     }
 }
