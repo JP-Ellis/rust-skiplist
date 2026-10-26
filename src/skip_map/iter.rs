@@ -14,7 +14,7 @@ use core::{
 
 use super::SkipMap;
 use crate::{
-    comparator::{Comparator, OrdComparator},
+    comparator::{Comparator, OrdComparator, past_equal},
     level_generator::{LevelGenerator, geometric::Geometric},
     node::{
         Node,
@@ -64,11 +64,9 @@ impl<K, V, const N: usize, C: Comparator<K>, G: LevelGenerator> SkipMap<K, V, N,
                 // After traversal, current() is the last node <= k (or head),
                 // so current().next() is the first node > k.
                 let head = self.head_ref();
-                let cmp =
-                    |entry: &(K, V), target: &K| match self.comparator.compare(&entry.0, target) {
-                        Ordering::Less | Ordering::Equal => Ordering::Less,
-                        Ordering::Greater => Ordering::Greater,
-                    };
+                let cmp = |entry: &(K, V), target: &K| {
+                    past_equal(self.comparator.compare(&entry.0, target))
+                };
                 let mut visitor = OrdIndexVisitor::new(head, k, cmp);
                 visitor.traverse();
                 (
@@ -109,11 +107,9 @@ impl<K, V, const N: usize, C: Comparator<K>, G: LevelGenerator> SkipMap<K, V, N,
                 // Advance through all nodes <= k; stop before > k.
                 // After traversal, current() is the last node <= k (or head).
                 let head = self.head_ref();
-                let cmp =
-                    |entry: &(K, V), target: &K| match self.comparator.compare(&entry.0, target) {
-                        Ordering::Less | Ordering::Equal => Ordering::Less,
-                        Ordering::Greater => Ordering::Greater,
-                    };
+                let cmp = |entry: &(K, V), target: &K| {
+                    past_equal(self.comparator.compare(&entry.0, target))
+                };
                 let mut visitor = OrdIndexVisitor::new(head, k, cmp);
                 visitor.traverse();
                 // `None` when traversal stays on the head sentinel (all nodes > k).
