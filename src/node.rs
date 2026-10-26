@@ -1224,6 +1224,67 @@ impl<V, const N: usize> Frontier<V, N> {
     }
 }
 
+/// A sorted list that [`extend_appending`] can append to.
+///
+/// # Safety
+///
+/// [`chain`][Self::chain] must return the head, length and tail of one live
+/// list, and [`level`][Self::level] must draw heights no taller than its
+/// head.
+pub(crate) unsafe trait Appendable<V, const N: usize> {
+    /// Whether `item` sorts strictly after the last element; `true` for an
+    /// empty list.
+    fn after_tail(&self, item: &V) -> bool;
+
+    /// Draws the tower height for a new node.
+    fn level(&mut self) -> usize;
+
+    /// The list's head, with its length and tail for the caller to update.
+    #[expect(clippy::type_complexity, reason = "internal code")]
+    fn chain(
+        &mut self,
+    ) -> (
+        NonNull<Node<V, N>>,
+        &mut usize,
+        &mut Option<NonNull<Node<V, N>>>,
+    );
+}
+
+/// Adds every item from `iter` to `list`, appending in O(1) each item that
+/// sorts after the last element and passing the rest to `insert`.
+///
+/// Sorted input therefore costs O(n) after one O(log n) walk. An item that
+/// does not sort after the tail, such as an equal one, takes the container's
+/// own insertion path, so duplicates are handled exactly as `insert` would.
+pub(crate) fn extend_appending<L, V, const N: usize>(
+    list: &mut L,
+    iter: impl IntoIterator<Item = V>,
+    mut insert: impl FnMut(&mut L, V),
+) where
+    L: Appendable<V, N>,
+{
+    let mut frontier: Option<Frontier<V, N>> = None;
+    for item in iter {
+        if !list.after_tail(&item) {
+            frontier = None;
+            insert(list, item);
+            continue;
+        }
+        let height = list.level();
+        let (head, len, tail) = list.chain();
+        // SAFETY: `Appendable` guarantees `head` heads a live list of `*len`
+        // nodes.
+        let appender = frontier.get_or_insert_with(|| unsafe { Frontier::new(head, *len) });
+        let last = tail.unwrap_or(head);
+        // SAFETY: `last` is the last node at rank `*len`, and the list has
+        // changed only through `appender` since it was built. `Appendable`
+        // guarantees `height` fits the head.
+        let node = unsafe { appender.push(last, *len, height, item) };
+        *tail = Some(node);
+        *len = len.saturating_add(1);
+    }
+}
+
 /// Incremental state of a [`Node::filter_rebuild`] walk.
 ///
 /// Dropping the guard retains every node the walk has not yet reached and

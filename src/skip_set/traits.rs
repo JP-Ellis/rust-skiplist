@@ -9,7 +9,10 @@ use core::{
     hash::{Hash, Hasher},
 };
 
-use crate::{comparator::Comparator, level_generator::LevelGenerator, skip_set::SkipSet};
+use crate::{
+    comparator::Comparator, level_generator::LevelGenerator, node::extend_appending,
+    skip_set::SkipSet,
+};
 
 // MARK: Debug
 
@@ -205,7 +208,7 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> Extend<T> for SkipS
     where
         I: IntoIterator<Item = T>,
     {
-        self.inner.extend_appending(iter, |inner, item| {
+        extend_appending(&mut self.inner, iter, |inner, item| {
             inner.get_or_insert(item);
         });
     }

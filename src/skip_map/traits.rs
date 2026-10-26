@@ -13,7 +13,7 @@ use super::SkipMap;
 use crate::{
     comparator::Comparator,
     level_generator::LevelGenerator,
-    node::{Frontier, Node},
+    node::{Appendable, Node, extend_appending},
 };
 
 // MARK: Debug
@@ -278,6 +278,35 @@ impl<K: Hash, V: Hash, C: Comparator<K>, G: LevelGenerator, const N: usize> Hash
 
 // MARK: Extend
 
+// SAFETY: `chain` returns this map's own head, length and tail, and `level`
+// draws from its generator, whose heights fit the head.
+unsafe impl<K, V, C: Comparator<K>, G: LevelGenerator, const N: usize> Appendable<(K, V), N>
+    for SkipMap<K, V, N, C, G>
+{
+    fn after_tail(&self, (key, _): &(K, V)) -> bool {
+        self.tail.is_none_or(|tail| {
+            // SAFETY: `tail` is a live data node of this map.
+            unsafe { tail.as_ref() }
+                .value()
+                .is_some_and(|(tk, _)| self.comparator.compare(tk, key) == Ordering::Less)
+        })
+    }
+
+    fn level(&mut self) -> usize {
+        self.generator.level()
+    }
+
+    fn chain(
+        &mut self,
+    ) -> (
+        NonNull<Node<(K, V), N>>,
+        &mut usize,
+        &mut Option<NonNull<Node<(K, V), N>>>,
+    ) {
+        (self.head, &mut self.len, &mut self.tail)
+    }
+}
+
 impl<K, V, C: Comparator<K>, G: LevelGenerator, const N: usize> Extend<(K, V)>
     for SkipMap<K, V, N, C, G>
 {
@@ -311,33 +340,11 @@ impl<K, V, C: Comparator<K>, G: LevelGenerator, const N: usize> Extend<(K, V)>
     where
         I: IntoIterator<Item = (K, V)>,
     {
-        // Each entry whose key is greater than the last key is appended in
-        // O(1); any other goes through `insert`, which replaces on a match.
-        let mut frontier: Option<Frontier<(K, V), N>> = None;
-        for (k, v) in iter {
-            let after_tail = self.tail.is_none_or(|tail| {
-                // SAFETY: `tail` is a live data node of this map.
-                unsafe { tail.as_ref() }
-                    .value()
-                    .is_some_and(|(tk, _)| self.comparator.compare(tk, &k) == Ordering::Less)
-            });
-            if !after_tail {
-                frontier = None;
-                self.insert(k, v);
-                continue;
-            }
-            // SAFETY: `self.head` heads this live map of `self.len` nodes.
-            let appender =
-                frontier.get_or_insert_with(|| unsafe { Frontier::new(self.head, self.len) });
-            let height = self.generator.level();
-            let tail = self.tail.unwrap_or(self.head);
-            // SAFETY: `tail` is the last node at rank `self.len`, and the map
-            // has changed only through `appender` since it was built.
-            // `height` comes from this map's generator, so it fits the head.
-            let node = unsafe { appender.push(tail, self.len, height, (k, v)) };
-            self.tail = Some(node);
-            self.len = self.len.saturating_add(1);
-        }
+        // An entry whose key matches an existing one goes through `insert`,
+        // which replaces the value.
+        extend_appending(self, iter, |map, (k, v)| {
+            map.insert(k, v);
+        });
     }
 }
 

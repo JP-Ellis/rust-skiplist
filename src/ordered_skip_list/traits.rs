@@ -14,7 +14,7 @@ use core::{
 use crate::{
     comparator::Comparator,
     level_generator::LevelGenerator,
-    node::{Frontier, Node},
+    node::{Appendable, Node, extend_appending},
     ordered_skip_list::OrderedSkipList,
 };
 
@@ -266,44 +266,32 @@ impl<T: Hash, C: Comparator<T>, G: LevelGenerator, const N: usize> Hash
 
 // MARK: Extend
 
-impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> OrderedSkipList<T, N, C, G> {
-    /// Adds every item from `iter`, appending in O(1) each item that
-    /// compares greater than the current last element and passing the rest
-    /// to `insert`.
-    ///
-    /// Sorted input therefore costs O(n) after one O(log n) walk.  An item
-    /// that is not greater, such as an equal one, takes the type's own
-    /// insertion path, so duplicates are handled exactly as `insert` would.
-    pub(crate) fn extend_appending<I, F>(&mut self, iter: I, mut insert: F)
-    where
-        I: IntoIterator<Item = T>,
-        F: FnMut(&mut Self, T),
-    {
-        let mut frontier: Option<Frontier<T, N>> = None;
-        for item in iter {
-            let after_tail = self.tail.is_none_or(|tail| {
-                // SAFETY: `tail` is a live data node of this list.
-                unsafe { tail.as_ref() }
-                    .value()
-                    .is_some_and(|v| self.comparator.compare(v, &item) == Ordering::Less)
-            });
-            if !after_tail {
-                frontier = None;
-                insert(self, item);
-                continue;
-            }
-            // SAFETY: `self.head` heads this live list of `self.len` nodes.
-            let appender =
-                frontier.get_or_insert_with(|| unsafe { Frontier::new(self.head, self.len) });
-            let height = self.generator.level();
-            let tail = self.tail.unwrap_or(self.head);
-            // SAFETY: `tail` is the last node at rank `self.len`, and the
-            // list has changed only through `appender` since it was built.
-            // `height` comes from this list's generator, so it fits the head.
-            let node = unsafe { appender.push(tail, self.len, height, item) };
-            self.tail = Some(node);
-            self.len = self.len.saturating_add(1);
-        }
+// SAFETY: `chain` returns this list's own head, length and tail, and `level`
+// draws from its generator, whose heights fit the head.
+unsafe impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> Appendable<T, N>
+    for OrderedSkipList<T, N, C, G>
+{
+    fn after_tail(&self, item: &T) -> bool {
+        self.tail.is_none_or(|tail| {
+            // SAFETY: `tail` is a live data node of this list.
+            unsafe { tail.as_ref() }
+                .value()
+                .is_some_and(|v| self.comparator.compare(v, item) == Ordering::Less)
+        })
+    }
+
+    fn level(&mut self) -> usize {
+        self.generator.level()
+    }
+
+    fn chain(
+        &mut self,
+    ) -> (
+        NonNull<Node<T, N>>,
+        &mut usize,
+        &mut Option<NonNull<Node<T, N>>>,
+    ) {
+        (self.head, &mut self.len, &mut self.tail)
     }
 }
 
@@ -332,7 +320,7 @@ impl<T, C: Comparator<T>, G: LevelGenerator, const N: usize> Extend<T>
     where
         I: IntoIterator<Item = T>,
     {
-        self.extend_appending(iter, Self::insert);
+        extend_appending(self, iter, Self::insert);
     }
 }
 
