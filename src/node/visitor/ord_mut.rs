@@ -7,7 +7,7 @@ use crate::{
     node::{
         Node,
         level_array::LevelArray,
-        visitor::{Step, Visitor, VisitorMut},
+        visitor::{Visitor, VisitorMut},
     },
 };
 
@@ -142,12 +142,17 @@ impl<T, Q: ?Sized, F: Fn(&T, &Q) -> Ordering, const N: usize> Visitor
         self.found
     }
 
-    // Runs `step` to completion with the walk state held in locals, so the
-    // hot loop does not reload and store it through `self` on every link.
+    // The walk state lives in locals so the hot loop does not reload and
+    // store it through `self` on every link.
+    //
+    // In a well-formed list, `current` lies at or before `bound`, and every
+    // recorded precursor's link targets `bound` or later. Refusing a `Less`
+    // advance onto `bound` keeps the final position at or before each target.
     #[inline]
     #[expect(
         clippy::indexing_slicing,
-        reason = "`l < level <= max_levels == precursors.len()`, as in `step`"
+        reason = "`level` starts at `max_levels == precursors.len()` and never \
+                  grows, so every `l < level` indexes `precursors`"
     )]
     fn traverse(&mut self) -> Option<Self::NodeRef> {
         if self.found {
@@ -160,38 +165,53 @@ impl<T, Q: ?Sized, F: Fn(&T, &Q) -> Ordering, const N: usize> Visitor
         let target = self.target;
         let precursors: &mut [NonNull<Node<T, N>>] = &mut self.precursors;
         let result = 'walk: loop {
-            // SAFETY: as in `step`.
+            // SAFETY: `current` is the head or a node reached through a link
+            // or `next` pointer, so it is live, and the visitor holds the only
+            // access to the list.
             let links = unsafe { current.as_ref() }.links();
             for l in (0..level).rev() {
+                // A level above this node's tower has no link, so it records
+                // a precursor like a link that overshoots.
                 let maybe_link = links.get(l).and_then(Option::as_ref);
                 if let Some(link) = maybe_link {
                     let node = link.node();
-                    // SAFETY: as in `step`.
+                    // A value-less node compares `Less`. Links never target
+                    // the head, so this is defensive.
+                    // SAFETY: a link targets a live node of the list.
                     let ord = unsafe { node.as_ref() }
                         .value()
                         .map_or(Ordering::Less, |v| cmp(v, target));
                     if ord == Ordering::Less {
+                        // A link from before `bound` at a level below every
+                        // recorded one cannot pass `bound`; reaching it with
+                        // `Less` contradicts the answer that recorded it.
                         if Some(node) == bound {
                             total_order_violation();
                         }
                         current = node;
+                        // Reconsider the same level at the new node.
                         level = l.wrapping_add(1);
                         continue 'walk;
                     }
                 }
+                // The link reaches a node at or past the target, or is
+                // absent: `current` is the precursor at level `l`.
                 precursors[l] = current;
                 if let Some(link) = maybe_link {
                     bound = Some(link.node());
                 } else {
+                    // A node before `bound` has a link at every level below
+                    // `bound`'s tower.
                     debug_assert!(bound.is_none(), "absent link below the bound");
                 }
             }
             level = 0;
-            // SAFETY: as in `step`.
+            // SAFETY: `current` is live and the visitor holds the only access
+            // to the list.
             let Some(next) = unsafe { current.as_ref() }.next() else {
                 break None;
             };
-            // SAFETY: as in `step`.
+            // SAFETY: a `next` pointer targets a live node of the list.
             let ord = unsafe { next.as_ref() }
                 .value()
                 .map_or(Ordering::Less, |v| cmp(v, target));
@@ -212,115 +232,12 @@ impl<T, Q: ?Sized, F: Fn(&T, &Q) -> Ordering, const N: usize> Visitor
         self.bound = bound;
         result
     }
-
-    // In a well-formed list, `current` lies at or before `bound`, and every
-    // recorded precursor's link targets `bound` or later. Refusing a `Less`
-    // advance onto `bound` keeps the final position at or before each target.
-    #[expect(
-        clippy::indexing_slicing,
-        reason = "`level` comes from `(0..self.level).rev()` where `self.level` is \
-                  initialised to `max_levels = precursors.len()` and only decreases, \
-                  so `level < max_levels == precursors.len()` is always true"
-    )]
-    fn step(&mut self) -> Step<Self::NodeRef> {
-        if self.found {
-            return Step::FoundTarget;
-        }
-
-        // Borrow only the links slice for the duration of the for loop, then
-        // drop the reference so `self.current` can be re-borrowed for `next`.
-        {
-            // SAFETY: `self.current` was obtained from a valid `&mut Node<T, N>`
-            // during construction or from a link/next pointer during traversal.
-            // No other `&mut` to the same node exists while we hold `self`.
-            let current_ref: &Node<T, N> = unsafe { self.current.as_ref() };
-            let links = current_ref.links();
-
-            for level in (0..self.level).rev() {
-                // Use `.get()` rather than `.zip()` so that levels beyond
-                // this node's actual height are treated as `None` (overshoot),
-                // not silently skipped: every level must get a precursor
-                // recorded.
-                let maybe_link = links.get(level).and_then(|l| l.as_ref());
-
-                if let Some(link) = maybe_link {
-                    let node_ptr = link.node();
-                    // Treat a value-less node (head sentinel) as strictly less
-                    // than any target. In a well-formed skip list every
-                    // skip-link target has a value, so this is defensive.
-                    // SAFETY: node_ptr is a valid heap-allocated node.
-                    let ord = unsafe { node_ptr.as_ref() }
-                        .value()
-                        .map_or(Ordering::Less, |v| (self.cmp)(v, self.target));
-
-                    if ord == Ordering::Less {
-                        // A link from before `bound` at a level below every
-                        // recorded one cannot pass `bound`; reaching it with
-                        // `Less` contradicts the answer that recorded it.
-                        if Some(node_ptr) == self.bound {
-                            total_order_violation();
-                        }
-                        // This link advances us strictly closer to the target.
-                        // Do NOT record a precursor here: the current node's
-                        // link[level] points to < target, so it is not the
-                        // precursor for this level. We will record it later
-                        // if the same level overshoots at the new node.
-                        self.current = node_ptr;
-                        // Use level + 1 so the same level is reconsidered at
-                        // the new node (mirrors the fix in `IndexVisitor`).
-                        self.level = level.saturating_add(1);
-                        return Step::Advanced(self.current);
-                    }
-                }
-
-                // Link overshoots the target (Greater), points exactly to the
-                // target (Equal), or is absent (node has no link at this
-                // level): current is the precursor for this level.
-                self.precursors[level] = self.current;
-                if let Some(link) = maybe_link {
-                    self.bound = Some(link.node());
-                } else {
-                    // A node before `bound` always has a link at every level
-                    // below `bound`'s tower.
-                    debug_assert!(self.bound.is_none(), "absent link below the bound");
-                }
-            }
-        }
-
-        // No skip-link can advance us; fall back to the sequential next pointer.
-        self.level = 0;
-        // SAFETY: `self.current` is valid for `'a` and no other `&mut` exists.
-        if let Some(next_nn) = unsafe { self.current.as_ref() }.next() {
-            // SAFETY: next_nn is a valid heap-allocated node.
-            let ord = unsafe { next_nn.as_ref() }
-                .value()
-                .map_or(Ordering::Less, |v| (self.cmp)(v, self.target));
-            if ord == Ordering::Greater {
-                // The next sequential node is already past the target; the
-                // target is absent from the list.
-                return Step::Exhausted;
-            }
-            if ord == Ordering::Less && Some(next_nn) == self.bound {
-                total_order_violation();
-            }
-            self.current = next_nn;
-            self.found = ord == Ordering::Equal;
-            return Step::Advanced(self.current);
-        }
-
-        Step::Exhausted
-    }
 }
 
 impl<T, Q: ?Sized, F: Fn(&T, &Q) -> Ordering, const N: usize> VisitorMut
     for OrdMutVisitor<'_, T, Q, F, N>
 {
-    type NodeMut = NonNull<Node<T, N>>;
     type Precursor = NonNull<Node<T, N>>;
-
-    fn current_mut(&mut self) -> Self::NodeMut {
-        self.current
-    }
 
     fn precursors(&self) -> &[Self::Precursor] {
         &self.precursors
@@ -333,12 +250,7 @@ impl<T, Q: ?Sized, F: Fn(&T, &Q) -> Ordering, const N: usize> VisitorMut
 )]
 #[cfg(test)]
 mod tests {
-    use core::{
-        cell::{Cell, RefCell},
-        cmp::Ordering,
-        panic::AssertUnwindSafe,
-        ptr::NonNull,
-    };
+    use core::{cell::Cell, cmp::Ordering, panic::AssertUnwindSafe, ptr::NonNull};
     use std::panic::catch_unwind;
 
     use anyhow::Result;
@@ -352,8 +264,11 @@ mod tests {
             Node,
             tests::{MAX_LEVELS, skiplist, tall_skiplist, well_formed_skiplist},
             visitor::{
-                Step, Visitor, VisitorMut,
-                tests::{LEVELS, SHAPES, list, outcome, step_to_end},
+                Visitor, VisitorMut,
+                tests::{
+                    LEVELS, SHAPES, assert_consistent_stop, contains, count_below, list, nodes,
+                    outcome, rank_of, scan_precursors,
+                },
             },
         },
         test_util::{Chaos, TOTAL_ORDER_PANIC, seeds},
@@ -449,7 +364,7 @@ mod tests {
         let head = skiplist?;
         // Target = 30 (node v3).
         let mut visitor = OrdMutVisitor::new(head, &30_u8, Ord::cmp);
-        while let Step::Advanced(_) = visitor.step() {}
+        visitor.traverse();
 
         for &ptr in visitor.precursors() {
             let value = unsafe { ptr.as_ref() }.value().copied();
@@ -462,37 +377,18 @@ mod tests {
         Ok(())
     }
 
-    /// Stepping past the end of the list produces `Exhausted`.
+    /// A walk past the end stops at the last node.
     #[rstest]
-    fn exhausted_when_target_out_of_range(
+    fn stops_at_tail_when_target_out_of_range(
         skiplist: Result<NonNull<Node<u8, MAX_LEVELS>>>,
     ) -> Result<()> {
         let head = skiplist?;
         let mut visitor = OrdMutVisitor::new(head, &99_u8, Ord::cmp);
 
-        loop {
-            let s = visitor.step();
-            match s {
-                Step::Advanced(_) => (),
-                Step::Exhausted => {
-                    assert!(!visitor.found());
-                    break;
-                }
-                Step::FoundTarget => panic!("should not find target 99"),
-            }
-        }
-        unsafe { drop(Box::from_raw(head.as_ptr())) };
-        Ok(())
-    }
-
-    /// `current_mut()` returns the same pointer as `current()`.
-    #[rstest]
-    fn current_mut_matches_current(skiplist: Result<NonNull<Node<u8, MAX_LEVELS>>>) -> Result<()> {
-        let head = skiplist?;
-        let mut visitor = OrdMutVisitor::new(head, &20_u8, Ord::cmp);
-        visitor.traverse();
-
-        assert_eq!(visitor.current(), visitor.current_mut());
+        assert!(visitor.traverse().is_none());
+        assert!(!visitor.found());
+        let value = unsafe { visitor.current().as_ref() }.value().copied();
+        assert_eq!(value, Some(40));
         unsafe { drop(Box::from_raw(head.as_ptr())) };
         Ok(())
     }
@@ -591,98 +487,75 @@ mod tests {
         Ok(())
     }
 
-    // MARK: traverse matches step
+    // MARK: traverse matches a scan
 
     type EqPtr = NonNull<Node<u8, LEVELS>>;
 
-    /// The state of an `OrdMutVisitor` once it stops.
-    #[derive(Debug, PartialEq, Eq)]
-    struct Snapshot {
-        result: Option<EqPtr>,
-        current: EqPtr,
-        level: usize,
-        found: bool,
-        bound: Option<EqPtr>,
-        precursors: Vec<EqPtr>,
-    }
+    /// Where a walk towards `target` stops: its result, `found`, `current`
+    /// and precursors, or the panic message.
+    type Stop = Result<(Option<EqPtr>, bool, EqPtr, Vec<EqPtr>), String>;
 
-    impl Snapshot {
-        fn new<F>(visitor: &OrdMutVisitor<'_, u8, u8, F, LEVELS>, result: Option<EqPtr>) -> Self
-        where
-            F: Fn(&u8, &u8) -> Ordering,
-        {
-            Self {
+    fn walk(head: EqPtr, target: u8, cmp: impl Fn(&u8, &u8) -> Ordering) -> Stop {
+        outcome(|| {
+            let mut visitor = OrdMutVisitor::new(head, &target, cmp);
+            let result = visitor.traverse();
+            (
                 result,
-                current: visitor.current,
-                level: visitor.level,
-                found: visitor.found(),
-                bound: visitor.bound,
-                precursors: visitor.precursors().to_vec(),
-            }
-        }
+                visitor.found(),
+                visitor.current(),
+                visitor.precursors().to_vec(),
+            )
+        })
     }
 
-    /// Walks `head` towards `target` with `step` or `traverse`.
-    ///
-    /// Returns the final state, or the panic message, together with every
-    /// value handed to the comparator in call order.
-    fn walk(
-        head: EqPtr,
-        target: u8,
-        use_traverse: bool,
-        cmp: impl Fn(&u8, &u8) -> Ordering,
-    ) -> (Result<Snapshot, String>, Vec<u8>) {
-        let calls = RefCell::new(Vec::new());
-        let logged = |value: &u8, probe: &u8| {
-            calls.borrow_mut().push(*value);
-            cmp(value, probe)
-        };
-        let state = outcome(|| {
-            let mut visitor = OrdMutVisitor::new(head, &target, logged);
-            let result = if use_traverse {
-                visitor.traverse()
-            } else {
-                step_to_end(&mut visitor)
-            };
-            Snapshot::new(&visitor, result)
-        });
-        (state, calls.into_inner())
-    }
-
-    /// With a consistent comparator, `traverse` makes the same comparisons
-    /// and ends in the same state as the `step` loop for every target
-    /// before, between, on and after the values of each shape.
+    /// With a consistent comparator, `traverse` stops on the first node equal
+    /// to each target, or after the last node below it, and records as each
+    /// level's precursor the last node below the target whose tower has a
+    /// link at the level.
     #[test]
-    fn traverse_matches_step() {
+    fn traverse_matches_scan() {
         for entries in SHAPES {
             let head = list(entries);
+            let nodes = nodes(head);
             for target in 0_u8..=95 {
-                let stepped = walk(head, target, false, Ord::cmp);
-                let traversed = walk(head, target, true, Ord::cmp);
-                assert!(stepped.0.is_ok(), "shape {entries:?}, target {target}");
-                assert_eq!(traversed, stepped, "shape {entries:?}, target {target}");
+                let context = format!("shape {entries:?}, target {target}");
+                let (result, found, current, precursors) =
+                    walk(head, target, Ord::cmp).expect(&context);
+                let below = count_below(entries, target);
+                let expected_found = contains(entries, target);
+                let stop = below.wrapping_add(usize::from(expected_found));
+                assert_eq!(found, expected_found, "{context}");
+                assert_eq!(
+                    result,
+                    nodes.get(stop).copied().filter(|_| found),
+                    "{context}"
+                );
+                assert_eq!(rank_of(&nodes, current), stop, "{context}");
+                let ranks: Vec<usize> = precursors.iter().map(|&p| rank_of(&nodes, p)).collect();
+                assert_eq!(ranks, scan_precursors(entries, below), "{context}");
             }
             unsafe { drop(Box::from_raw(head.as_ptr())) };
         }
     }
 
-    /// With a chaotic comparator, `traverse` panics exactly when the `step`
-    /// loop does, after the same comparisons, and otherwise ends in the same
-    /// state.
+    /// With a chaotic comparator, `traverse` either refuses with the total
+    /// order panic or stops at a position consistent with the list's links.
     #[test]
-    fn traverse_matches_step_under_chaos() {
+    fn traverse_under_chaos_stops_consistently() {
         let (mut refused, mut completed) = (0_usize, 0_usize);
         for entries in SHAPES {
             let head = list(entries);
+            let nodes = nodes(head);
             for seed in seeds() {
-                let (step_chaos, traverse_chaos) = (Chaos::new(seed), Chaos::new(seed));
-                let stepped = walk(head, 25, false, |v, t| step_chaos.compare(v, t));
-                let traversed = walk(head, 25, true, |v, t| traverse_chaos.compare(v, t));
-                assert_eq!(traversed, stepped, "shape {entries:?}, seed {seed}");
-                match stepped.0 {
-                    Ok(_) => completed = completed.saturating_add(1),
+                let chaos = Chaos::new(seed);
+                let context = format!("shape {entries:?}, seed {seed}");
+                match walk(head, 25, |v, t| chaos.compare(v, t)) {
+                    Ok((_, _, current, precursors)) => {
+                        assert_consistent_stop(&nodes, current, &precursors, &context);
+                        completed = completed.saturating_add(1);
+                    }
                     Err(message) => {
-                        assert_eq!(message, TOTAL_ORDER_PANIC);
+                        assert_eq!(message, TOTAL_ORDER_PANIC, "{context}");
                         refused = refused.saturating_add(1);
                     }
                 }

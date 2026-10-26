@@ -5,7 +5,7 @@ use core::{marker::PhantomData, ptr::NonNull};
 use crate::node::{
     Node,
     level_array::LevelArray,
-    visitor::{Step, Visitor, VisitorMut},
+    visitor::{Visitor, VisitorMut},
 };
 
 /// Mutable index-based visitor.
@@ -140,12 +140,13 @@ impl<T, const N: usize> Visitor for IndexMutVisitor<T, N> {
         self.index == self.target
     }
 
-    // Runs `step` to completion with the walk state held in locals, so the
-    // hot loop does not reload and store it through `self` on every link.
+    // The walk state lives in locals so the hot loop does not reload and
+    // store it through `self` on every link.
     #[inline]
     #[expect(
         clippy::indexing_slicing,
-        reason = "`l < level <= max_levels == precursors.len()`, as in `step`"
+        reason = "`level` starts at `max_levels == precursors.len()` and never \
+                  grows, so every `l < level` indexes `precursors` and `distances`"
     )]
     fn traverse(&mut self) -> Option<Self::NodeRef> {
         let target = self.target;
@@ -158,23 +159,34 @@ impl<T, const N: usize> Visitor for IndexMutVisitor<T, N> {
             if index == target {
                 break Some(current);
             }
-            // SAFETY: as in `step`.
+            // SAFETY: `current` is the head or a node reached through a link
+            // or `next` pointer, so it is live, and the visitor holds the only
+            // access to the list.
             let links = unsafe { current.as_ref() }.links();
             for l in (0..level).rev() {
+                // A level above this node's tower has no link, so it records
+                // a precursor like a link that overshoots.
                 if let Some(link) = links.get(l).and_then(Option::as_ref) {
+                    // Ranks are bounded by the list length, so these sums never wrap.
                     let next_index = index.wrapping_add(link.distance().get());
                     if next_index < target {
                         current = link.node();
+                        // Reconsider the same level at the new node.
                         level = l.wrapping_add(1);
                         index = next_index;
                         continue 'walk;
                     }
                 }
+                // The link reaches the target or beyond, or is absent:
+                // `current` is the last node before the target at level `l`.
                 precursors[l] = current;
                 distances[l] = index;
             }
+            // `next` keeps the pointer's write provenance, so a precursor
+            // reached through it can still anchor `insert_after`.
             level = 0;
-            // SAFETY: as in `step`.
+            // SAFETY: `current` is live and the visitor holds the only access
+            // to the list.
             let Some(next) = unsafe { current.as_ref() }.next() else {
                 break None;
             };
@@ -186,86 +198,10 @@ impl<T, const N: usize> Visitor for IndexMutVisitor<T, N> {
         self.level = level;
         result
     }
-
-    #[expect(
-        clippy::indexing_slicing,
-        reason = "`level` comes from `(0..self.level).rev()` where `self.level` is \
-                  initialised to `max_levels = precursors.len()` and only decreases, \
-                  so `level < max_levels == precursors.len()` is always true"
-    )]
-    fn step(&mut self) -> Step<Self::NodeRef> {
-        if self.found() {
-            return Step::FoundTarget;
-        }
-
-        // Borrow only the links slice for the duration of the for loop, then
-        // drop the reference so `self.current` can be re-borrowed for `next`.
-        {
-            // SAFETY: `self.current` was obtained from a valid `&mut Node<T, N>`
-            // during construction or from a link/next pointer during traversal.
-            // No other `&mut` to the same node exists while we hold `self`.
-            let current_ref: &Node<T, N> = unsafe { self.current.as_ref() };
-            let links = current_ref.links();
-
-            for level in (0..self.level).rev() {
-                // Use `.get()` rather than `.zip()` so that levels beyond
-                // this node's actual height are treated as `None` (overshoot),
-                // not silently skipped: every level must get a precursor
-                // recorded.
-                let maybe_link = links.get(level).and_then(|l| l.as_ref());
-
-                if let Some(link) = maybe_link {
-                    // Ranks are bounded by the list length, so these sums never wrap.
-                    let next_index = self.index.wrapping_add(link.distance().get());
-                    if next_index < self.target {
-                        // This link advances us strictly closer to the target.
-                        // Do NOT record a precursor here: the current node's
-                        // link[level] points to < target, so it is not the
-                        // precursor for this level.  We will record it later
-                        // if the same level overshoots at the new node.
-                        self.current = link.node();
-                        // Use level + 1 so the same level is reconsidered at
-                        // the new node (mirrors the fix in `IndexVisitor`).
-                        self.level = level.saturating_add(1);
-                        self.index = next_index;
-                        return Step::Advanced(self.current);
-                    }
-                }
-
-                // Link overshoots the target (next_index >= target), points
-                // exactly to the target (next_index == target), or is absent
-                // (node has no link at this level): current is the precursor.
-                self.precursors[level] = self.current;
-                self.precursor_distances[level] = self.index;
-            }
-        }
-
-        // No skip-link can advance us further.  Step via `next_ptr` to close
-        // the final gap.  Since found() is false we know self.index < self.target,
-        // so self.index + 1 <= self.target and the advance is always valid.
-        // `next_ptr` returns the stored raw NonNull directly, preserving its
-        // original provenance (not Frozen), so it is safe to use as self_ptr
-        // in a subsequent `insert_after` call.
-        self.level = 0;
-        // SAFETY: `self.current` is valid and no other `&mut` exists.
-        let next_opt = unsafe { self.current.as_ref() }.next();
-        if let Some(next_nn) = next_opt {
-            self.current = next_nn;
-            self.index = self.index.wrapping_add(1);
-            return Step::Advanced(self.current);
-        }
-
-        Step::Exhausted
-    }
 }
 
 impl<T, const N: usize> VisitorMut for IndexMutVisitor<T, N> {
-    type NodeMut = NonNull<Node<T, N>>;
     type Precursor = NonNull<Node<T, N>>;
-
-    fn current_mut(&mut self) -> Self::NodeMut {
-        self.current
-    }
 
     fn precursors(&self) -> &[Self::Precursor] {
         &self.precursors
@@ -289,8 +225,8 @@ mod tests {
         Node,
         tests::{MAX_LEVELS, skiplist},
         visitor::{
-            Step, Visitor, VisitorMut,
-            tests::{LEVELS, SHAPES, list, step_to_end},
+            Visitor, VisitorMut,
+            tests::{SHAPES, list, nodes, rank_of, scan_precursors},
         },
     };
 
@@ -330,7 +266,7 @@ mod tests {
 
         // Target = 3 (node v3, value 3).
         let mut visitor = IndexMutVisitor::new(head, 3);
-        while let Step::Advanced(_) = visitor.step() {}
+        visitor.traverse();
 
         for &dist in visitor.precursor_distances() {
             assert!(dist < 3, "precursor distance {dist} should be < 3");
@@ -339,37 +275,18 @@ mod tests {
         Ok(())
     }
 
-    /// Stepping past the end of the list produces `Exhausted`.
+    /// A walk past the end stops at the last node.
     #[rstest]
-    fn exhausted_when_target_out_of_range(
+    fn stops_at_tail_when_target_out_of_range(
         skiplist: Result<NonNull<Node<u8, MAX_LEVELS>>>,
     ) -> Result<()> {
         let head = skiplist?;
         let mut visitor = IndexMutVisitor::new(head, 99);
 
-        loop {
-            let s = visitor.step();
-            match s {
-                Step::Advanced(_) => {}
-                Step::Exhausted => {
-                    assert!(!visitor.found());
-                    break;
-                }
-                Step::FoundTarget => panic!("should not find target 99"),
-            }
-        }
-        unsafe { drop(Box::from_raw(head.as_ptr())) };
-        Ok(())
-    }
-
-    /// `current_mut()` returns the same pointer as `current()`.
-    #[rstest]
-    fn current_mut_matches_current(skiplist: Result<NonNull<Node<u8, MAX_LEVELS>>>) -> Result<()> {
-        let head = skiplist?;
-        let mut visitor = IndexMutVisitor::new(head, 2);
-        visitor.traverse();
-
-        assert_eq!(visitor.current(), visitor.current_mut());
+        assert!(visitor.traverse().is_none());
+        assert!(!visitor.found());
+        let value = unsafe { visitor.current().as_ref() }.value().copied();
+        assert_eq!(value, Some(40));
         unsafe { drop(Box::from_raw(head.as_ptr())) };
         Ok(())
     }
@@ -389,52 +306,35 @@ mod tests {
         Ok(())
     }
 
-    // MARK: traverse matches step
+    // MARK: traverse matches a scan
 
-    type Ptr = NonNull<Node<u8, LEVELS>>;
-
-    /// The state of an `IndexMutVisitor` once it stops.
-    #[derive(Debug, PartialEq, Eq)]
-    struct Snapshot {
-        result: Option<Ptr>,
-        current: Ptr,
-        index: usize,
-        level: usize,
-        found: bool,
-        precursors: Vec<Ptr>,
-        distances: Vec<usize>,
-    }
-
-    impl Snapshot {
-        fn new(visitor: &IndexMutVisitor<u8, LEVELS>, result: Option<Ptr>) -> Self {
-            Self {
-                result,
-                current: visitor.current,
-                index: visitor.index,
-                level: visitor.level,
-                found: visitor.found(),
-                precursors: visitor.precursors().to_vec(),
-                distances: visitor.precursor_distances().to_vec(),
-            }
-        }
-    }
-
-    /// `traverse` ends in the same state as the `step` loop, precursors
-    /// included, for every rank before, inside and after each shape.
+    /// `traverse` reaches the node at each rank before, inside and after
+    /// each shape, and records as each level's precursor the last node
+    /// before that rank whose tower has a link at the level.
     #[test]
-    fn traverse_matches_step() {
+    fn traverse_matches_scan() {
         for entries in SHAPES {
             let head = list(entries);
+            let nodes = nodes(head);
             for target in 0..entries.len().saturating_add(3) {
-                let mut stepped = IndexMutVisitor::new(head, target);
-                let stepped_result = step_to_end(&mut stepped);
-                let mut traversed = IndexMutVisitor::new(head, target);
-                let traversed_result = traversed.traverse();
+                let mut visitor = IndexMutVisitor::new(head, target);
+                let result = visitor.traverse();
+                let context = format!("shape {entries:?}, target {target}");
+                assert_eq!(result, nodes.get(target).copied(), "{context}");
+                assert_eq!(visitor.found(), result.is_some(), "{context}");
                 assert_eq!(
-                    Snapshot::new(&traversed, traversed_result),
-                    Snapshot::new(&stepped, stepped_result),
-                    "shape {entries:?}, target {target}",
+                    rank_of(&nodes, visitor.current()),
+                    target.min(entries.len()),
+                    "{context}"
                 );
+                let expected = scan_precursors(entries, target.saturating_sub(1));
+                let precursors: Vec<usize> = visitor
+                    .precursors()
+                    .iter()
+                    .map(|&ptr| rank_of(&nodes, ptr))
+                    .collect();
+                assert_eq!(precursors, expected, "{context}");
+                assert_eq!(visitor.precursor_distances(), expected, "{context}");
             }
             unsafe { drop(Box::from_raw(head.as_ptr())) };
         }

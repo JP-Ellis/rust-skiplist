@@ -2,10 +2,7 @@
 
 use core::cmp::Ordering;
 
-use crate::node::{
-    Node,
-    visitor::{Step, Visitor},
-};
+use crate::node::{Node, visitor::Visitor};
 
 /// Read-only ordered visitor for sorted skip lists.
 ///
@@ -77,53 +74,46 @@ impl<'a, T, Q: ?Sized, F: Fn(&T, &Q) -> Ordering, const N: usize> Visitor
         self.found
     }
 
-    fn step(&mut self) -> Step<Self::NodeRef> {
-        if self.found {
-            return Step::FoundTarget;
-        }
-
-        for (level, maybe_link) in (0..self.level).zip(self.current.links()).rev() {
-            if let Some(link) = maybe_link {
-                // SAFETY: link.node() is a valid heap-allocated node
-                // that lives at least as long as the visitor's `'a`.
-                let node = unsafe { link.node().as_ref() };
-                // A node with no value (head sentinel) is treated as strictly
-                // less than any target so that links to sentinel-like nodes are
-                // always followed. In a well-formed skip list every skip-link
-                // target has a value, so this branch is defensive.
-                let ord = node
-                    .value()
-                    .map_or(Ordering::Less, |v| (self.cmp)(v, self.target));
-                if ord != Ordering::Greater {
-                    self.current = node;
-                    // Retain the same level on the next step (mirrors the
-                    // level + 1 fix used in `IndexVisitor`).
-                    self.level = level.saturating_add(1);
-                    if ord == Ordering::Equal {
-                        self.found = true;
+    fn traverse(&mut self) -> Option<Self::NodeRef> {
+        'walk: while !self.found {
+            for (level, maybe_link) in (0..self.level).zip(self.current.links()).rev() {
+                if let Some(link) = maybe_link {
+                    // SAFETY: a link targets a live node of the list, and the
+                    // list outlives `'a`.
+                    let node = unsafe { link.node().as_ref() };
+                    // A node with no value (head sentinel) is treated as
+                    // strictly less than any target. In a well-formed skip
+                    // list every skip-link target has a value, so this branch
+                    // is defensive.
+                    let ord = node
+                        .value()
+                        .map_or(Ordering::Less, |v| (self.cmp)(v, self.target));
+                    if ord != Ordering::Greater {
+                        self.current = node;
+                        // Reconsider the same level at the new node.
+                        self.level = level.saturating_add(1);
+                        self.found = ord == Ordering::Equal;
+                        continue 'walk;
                     }
-                    return Step::Advanced(self.current);
                 }
             }
-        }
 
-        // No skip-link can advance us; fall back to the sequential next pointer.
-        self.level = 0;
-        if let Some(next) = self.current.next_as_ref() {
+            // No skip-link can advance us; fall back to the sequential next
+            // pointer.
+            self.level = 0;
+            let next = self.current.next_as_ref()?;
             let ord = next
                 .value()
                 .map_or(Ordering::Less, |v| (self.cmp)(v, self.target));
             if ord == Ordering::Greater {
                 // The next sequential node is already past the target, so the
                 // target is absent from the list.
-                return Step::Exhausted;
+                return None;
             }
             self.current = next;
             self.found = ord == Ordering::Equal;
-            return Step::Advanced(self.current);
         }
-
-        Step::Exhausted
+        Some(self.current)
     }
 }
 
@@ -136,14 +126,17 @@ mod tests {
     use core::ptr::NonNull;
 
     use anyhow::Result;
-    use pretty_assertions::{assert_eq, assert_matches};
+    use pretty_assertions::assert_eq;
     use rstest::rstest;
 
     use super::OrdVisitor;
     use crate::node::{
         Node,
         tests::{MAX_LEVELS, skiplist},
-        visitor::{Step, Visitor},
+        visitor::{
+            Visitor,
+            tests::{SHAPES, contains, count_below, list, nodes, rank_of},
+        },
     };
 
     #[rstest]
@@ -230,19 +223,51 @@ mod tests {
         Ok(())
     }
 
-    /// Calling `step()` again after `found()` returns `true` must immediately
-    /// return `FoundTarget` without advancing.
+    /// Calling `traverse()` again after it found the target returns the same
+    /// node without advancing.
     #[rstest]
-    fn step_after_found(skiplist: Result<NonNull<Node<u8, MAX_LEVELS>>>) -> Result<()> {
+    fn traverse_after_found(skiplist: Result<NonNull<Node<u8, MAX_LEVELS>>>) -> Result<()> {
         let head = skiplist?;
         // SAFETY: head is a valid heap-allocated node for the duration of this test.
         let mut visitor = OrdVisitor::new(unsafe { head.as_ref() }, &20_u8, Ord::cmp);
 
-        visitor.traverse();
+        let first = visitor.traverse().map(core::ptr::from_ref);
         assert!(visitor.found());
 
-        assert_matches!(visitor.step(), Step::FoundTarget);
+        assert_eq!(visitor.traverse().map(core::ptr::from_ref), first);
         unsafe { drop(Box::from_raw(head.as_ptr())) };
         Ok(())
+    }
+
+    // MARK: traverse matches a scan
+
+    /// `traverse` stops on a node equal to each target, or after the last
+    /// node below it.
+    #[test]
+    fn traverse_matches_scan() {
+        for entries in SHAPES {
+            let head = list(entries);
+            let nodes = nodes(head);
+            let head_ref = unsafe { head.as_ref() };
+            for target in 0_u8..=95 {
+                let context = format!("shape {entries:?}, target {target}");
+                let mut visitor = OrdVisitor::new(head_ref, &target, Ord::cmp);
+                let result = visitor.traverse();
+                let found = contains(entries, target);
+                assert_eq!(visitor.found(), found, "{context}");
+                assert_eq!(result.is_some(), found, "{context}");
+                let current = visitor.current();
+                if found {
+                    assert_eq!(current.value(), Some(&target), "{context}");
+                } else {
+                    assert_eq!(
+                        rank_of(&nodes, NonNull::from(current)),
+                        count_below(entries, target),
+                        "{context}"
+                    );
+                }
+            }
+            unsafe { drop(Box::from_raw(head.as_ptr())) };
+        }
     }
 }
