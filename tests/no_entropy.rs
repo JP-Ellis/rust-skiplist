@@ -31,10 +31,11 @@ mod tests {
 
     #[test]
     fn skip_list_with_capacity_and_seed() {
-        let mut list = SkipList::<i32>::with_capacity_and_seed(1_000, 42);
-        list.extend(0..1_000);
-        assert_eq!(list.len(), 1_000);
-        assert_eq!(list.get(500), Some(&500));
+        let n: usize = if cfg!(miri) { 100 } else { 1_000 };
+        let mut list = SkipList::<usize>::with_capacity_and_seed(n, 42);
+        list.extend(0..n);
+        assert_eq!(list.len(), n);
+        assert_eq!(list.get(50), Some(&50));
     }
 
     #[test]

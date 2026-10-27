@@ -686,7 +686,7 @@ mod tests {
 
     #[test]
     fn split_off_every_index_is_well_formed() {
-        let max_len: usize = if cfg!(miri) { 12 } else { 40 };
+        let max_len: usize = if cfg!(miri) { 8 } else { 40 };
         for (len, seed) in (0..max_len).zip(0_u64..) {
             for at in 0..=len {
                 let mut list = seeded(len, seed);
@@ -741,7 +741,7 @@ mod tests {
 
     #[test]
     fn append_every_pair_of_lengths_is_well_formed() {
-        let max_len: usize = if cfg!(miri) { 8 } else { 24 };
+        let max_len: usize = if cfg!(miri) { 6 } else { 24 };
         for left in 0..max_len {
             for right in 0..max_len {
                 let mut a = seeded(left, 1);

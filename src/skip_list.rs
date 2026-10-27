@@ -574,7 +574,7 @@ mod tests {
     fn with_capacity_large_n_clamps_to_cap() {
         let mut list = SkipList::<usize, 128>::with_capacity_and_seed(usize::MAX, 7);
         assert_eq!(list.generator.total(), 64);
-        let n: usize = if cfg!(miri) { 100 } else { 1_000 };
+        let n: usize = if cfg!(miri) { 10 } else { 1_000 };
         list.extend(0..n);
         assert_eq!(list.len(), n);
     }

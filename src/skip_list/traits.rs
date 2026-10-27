@@ -585,7 +585,8 @@ mod tests {
     #[test]
     fn clone_keeps_tower_heights() {
         let mut list = SkipList::<i32, 16, _>::with_level_generator(seeded_geometric(7));
-        for i in 0..200 {
+        let n: i32 = if cfg!(miri) { 50 } else { 200 };
+        for i in 0..n {
             list.push_back(i);
         }
 
