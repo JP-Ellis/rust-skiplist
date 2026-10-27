@@ -318,9 +318,7 @@ jobs:
         run: rustup toolchain install nightly --component miri --no-self-update
 
       - name: Run Miri
-        # One job per shard. With fewer jobs than shards, the last shard
-        # starts only after another finishes and then runs alone.
-        run: mise run --jobs 5 --output keep-order miri
+        run: mise run --jobs "$(nproc)" --output keep-order miri
 
   msrv:
     name: MSRV
