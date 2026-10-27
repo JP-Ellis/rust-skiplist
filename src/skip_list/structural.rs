@@ -686,7 +686,8 @@ mod tests {
 
     #[test]
     fn split_off_every_index_is_well_formed() {
-        for (len, seed) in (0..40).zip(0_u64..) {
+        let max_len: usize = if cfg!(miri) { 12 } else { 40 };
+        for (len, seed) in (0..max_len).zip(0_u64..) {
             for at in 0..=len {
                 let mut list = seeded(len, seed);
                 let tail = list.split_off(at);
@@ -716,7 +717,8 @@ mod tests {
 
     #[test]
     fn head_is_as_tall_as_the_tallest_tower() {
-        for len in [0, 1, 2, 10, 100, 1000] {
+        let large: usize = if cfg!(miri) { 100 } else { 1_000 };
+        for len in [0, 1, 2, 10, 100, large] {
             let (head, tallest) = heights(&seeded(len, 3));
             assert_eq!(head, tallest.max(1), "len {len}");
         }
@@ -724,7 +726,8 @@ mod tests {
 
     #[test]
     fn insert_trims_the_head_after_removals() {
-        let mut list = seeded(1000, 3);
+        let n: usize = if cfg!(miri) { 100 } else { 1_000 };
+        let mut list = seeded(n, 3);
         while list.len() > 1 {
             list.pop_back();
         }
@@ -738,8 +741,9 @@ mod tests {
 
     #[test]
     fn append_every_pair_of_lengths_is_well_formed() {
-        for left in 0..24 {
-            for right in 0..24 {
+        let max_len: usize = if cfg!(miri) { 8 } else { 24 };
+        for left in 0..max_len {
+            for right in 0..max_len {
                 let mut a = seeded(left, 1);
                 let mut b = SkipList::with_capacity_and_seed(64, 2);
                 b.extend(left..left + right);

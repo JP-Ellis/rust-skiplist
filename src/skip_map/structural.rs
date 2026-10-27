@@ -348,7 +348,8 @@ mod tests {
 
     #[test]
     fn split_off_every_key_is_well_formed() {
-        for (len, seed) in (0..40).zip(0_u32..) {
+        let max_len: usize = if cfg!(miri) { 12 } else { 40 };
+        for (len, seed) in (0..max_len).zip(0_u32..) {
             for at in 0..=len {
                 let mut kept = seeded(0..len, seed);
                 let moved = kept.split_off(&at);
@@ -362,8 +363,9 @@ mod tests {
 
     #[test]
     fn append_spliced_in_both_directions_is_well_formed() {
-        for left in 0..20 {
-            for right in 0..20 {
+        let max_len: usize = if cfg!(miri) { 8 } else { 20 };
+        for left in 0..max_len {
+            for right in 0..max_len {
                 let mut low = seeded(0..left, 1);
                 let mut high = seeded(left..left + right, 2);
                 low.append(&mut high);
@@ -960,7 +962,8 @@ mod tests {
 
     #[test]
     fn insert_trims_the_head_after_removals() {
-        let mut map = seeded(0..1000, 3);
+        let n: usize = if cfg!(miri) { 100 } else { 1_000 };
+        let mut map = seeded(0..n, 3);
         while map.len() > 1 {
             map.pop_last();
         }
