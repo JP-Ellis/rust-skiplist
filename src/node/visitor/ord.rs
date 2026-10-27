@@ -133,7 +133,7 @@ mod tests {
         tests::{MAX_LEVELS, skiplist},
         visitor::{
             Visitor,
-            tests::{SHAPES, contains, count_below, list, nodes, rank_of},
+            tests::{SHAPES, contains, count_below, list, nodes, rank_of, targets},
         },
     };
 
@@ -247,7 +247,7 @@ mod tests {
             let head = list(entries);
             let nodes = nodes(head);
             let head_ref = unsafe { head.as_ref() };
-            for target in 0_u8..=95 {
+            for target in targets() {
                 let context = format!("shape {entries:?}, target {target}");
                 let mut visitor = OrdVisitor::new(head_ref, &target, Ord::cmp);
                 let result = visitor.traverse();

@@ -143,6 +143,14 @@ pub(crate) mod tests {
         ],
     ];
 
+    /// Search targets for the ordered visitors over [`SHAPES`].
+    ///
+    /// Every tenth target is a stored value. Under Miri the step of five keeps
+    /// every value, every gap, and both ends.
+    pub(crate) fn targets() -> impl Iterator<Item = u8> {
+        (0_u8..=95).step_by(if cfg!(miri) { 5 } else { 1 })
+    }
+
     /// Builds a well-formed list from `(value, height)` pairs and returns
     /// its head.
     ///

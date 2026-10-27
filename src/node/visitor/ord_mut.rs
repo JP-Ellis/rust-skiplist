@@ -265,7 +265,7 @@ mod tests {
                 Visitor, VisitorMut,
                 tests::{
                     LEVELS, SHAPES, assert_consistent_stop, contains, count_below, list, nodes,
-                    outcome, rank_of, scan_precursors,
+                    outcome, rank_of, scan_precursors, targets,
                 },
             },
         },
@@ -515,7 +515,7 @@ mod tests {
         for entries in SHAPES {
             let head = list(entries);
             let nodes = nodes(head);
-            for target in 0_u8..=95 {
+            for target in targets() {
                 let context = format!("shape {entries:?}, target {target}");
                 let (result, found, current, precursors) =
                     walk(head, target, Ord::cmp).expect(&context);
