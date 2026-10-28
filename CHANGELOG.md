@@ -7,6 +7,95 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 <!-- markdownlint-disable -->
 
+## [2.0.1](https://github.com/JP-Ellis/rust-skiplist/compare/v2.0.0...v2.0.1) - _2026-10-28_
+
+### 🐛 Bug Fixes
+
+-   _(node)_ Import Box in release builds
+
+### 🚜 Refactor
+
+-   Keep the concat bookkeeping in one place
+
+-   Share the Equal-as-Less comparison
+
+-   Share the appending extend loop
+
+-   _(node)_ Drop the visitor step method
+
+### ⚡ Performance
+
+-   _(node)_ Lay out node fields hot-first
+
+-   Grow the frontier only for taller towers
+
+-   Trim the head's empty levels on insert
+
+-   Keep the head as tall as the tallest tower
+
+-   Split and append in O(log n)
+
+-   Skip the value test on walk comparisons
+
+-   Read removal precursors from the visitor
+
+-   Keep insert precursors in a caller-owned path
+
+-   Build ordered containers by appending
+
+-   _(set)_ Keep the found node in OccupiedEntry
+
+-   _(list)_ Reach the first and last index directly
+
+-   _(list)_ Clone by chain build and rebuild
+
+-   Pop owning iterators along the base chain
+
+-   _(list)_ Skip the walk for towerless tails
+
+-   _(osl)_ Count long runs of duplicates by rank
+
+-   _(set)_ Replace in a single walk
+
+-   _(map)_ Look up get_mut without precursors
+
+-   Compute range lengths from ranks
+
+-   _(osl)_ Start the take_last scan near the target
+
+-   Find tail precursors in O(log n)
+
+-   _(node)_ Keep the index walk state in locals
+
+-   _(node)_ Keep the ordered walk state in locals
+
+-   _(map)_ Draw the insert level only when needed
+
+-   _(node)_ Use wrapping adds for rank sums
+
+-   _(node)_ Skip the bounds check in LevelArray
+
+### 🧪 Testing
+
+-   Trim slow tests under Miri
+
+-   _(bench)_ Add opt-in large-payload workloads
+
+-   _(bench)_ Add split_off and append workloads
+
+-   _(node)_ Check traverse against the step loop
+
+-   Add hot workloads for the remaining items
+
+-   Add focused hot-path benchmark suite
+
+### ⚙️ Miscellaneous Tasks
+
+-   Add cargo-insta to the mise tools
+
+-   _(ci)_ Build and test with debug assertions off
+
+
 ## [2.0.0](https://github.com/JP-Ellis/rust-skiplist/compare/v1.3.4...v2.0.0) - _2026-10-24_
 
 ### ⚠️ Breaking Changes
