@@ -30,7 +30,7 @@ CARGO_BUILD_WARNINGS = "deny"
 "aqua:nextest-rs/nextest/cargo-nextest" = "0.9"
 "aqua:mitsuhiko/insta" = "1.49"
 "aqua:j178/prek" = "0.5"
-rumdl = "v0.3.0"
+rumdl = "v0.3.1"
 
 [tasks]
   [tasks.lint]
