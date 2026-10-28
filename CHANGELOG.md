@@ -9,6 +9,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [2.0.1](https://github.com/JP-Ellis/rust-skiplist/compare/v2.0.0...v2.0.1) - _2026-10-28_
 
+This release is a performance pass (with on bug fix).
+
+Critically, five operations have been refactored to ensure $O(\log n)$
+performance:
+
+-   `split_off` and `append` take $O(\log n)$ on all four collections, down from $O(n + m)$. They relink only the links that cross the split point. On the ordered collections, `append` takes this path when every element of one list sorts before every element of the other. Lists whose elements interleave still cost $O(m \log(n + m))$.
+-   `range` on `OrderedSkipList`, `SkipSet` and `SkipMap`, and `SkipMap::range_mut`, take $O(\log n)$ to create the iterator, down from time linear in the length of the range. A successor query such as `range(k..).next()` is now as cheap as `contains`.
+-   `pop_last` on `OrderedSkipList`, `SkipSet` and `SkipMap` takes $O(\log n)$, down from $O(n)$.
+-   `OrderedSkipList::take_last` takes $O(\log n)$, down from $O(n)$.
+-   `OrderedSkipList::count` takes $O(\log n)$ however many elements match, down from $O(\log n + k)$ for $k$ matches.
+
+Other improvements:
+
+-   `FromIterator` on the ordered collections sorts its input, then appends each element at the end in $O(1)$. `Extend` appends in $O(1)$ any element that sorts after the current last element, and inserts the rest as before.
+-   `SkipList::clone` takes $O(n)$, down from $O(n \log n)$. The clone keeps the original's tower heights.
+-   The owning iterators of all four collections yield each element in $O(1)$ from either end.
+-   `SkipList::get`, `get_mut` and `range` reach the first and last index in $O(1)$. `push_back` and `pop_back` take $O(1)$ when the node has a tower of height one, which is half of all nodes.
+-   `SkipSet::entry` and `SkipSet::replace` search the set once, down from twice. When the value is present, `replace` swaps it in place and allocates nothing.
+-   `SkipMap::get_mut` stops searching at the first matching key. `SkipMap::insert` no longer draws a random tower height when the key is already present.
+-   Each collection keeps its head only as tall as its tallest tower, so a search no longer steps through empty levels.
+-   Each node stores its value and forward pointer first, so a search reads fewer cache lines per node.
+-   The search loops run fewer instructions per step.
+
+Selected timings, 2.0.0 (with the release-build fix) against 2.0.1, on an AMD Ryzen 5 5600X. Each figure is the median of 10 paired Criterion rounds of `benches/hot.rs`, with `u64` elements.
+
+
+| Operation | n | 2.0.0 | 2.0.1 | Speedup |
+| --- | ---: | ---: | ---: | ---: |
+| `SkipMap::split_off`, then `append` | 100,000 | 2.34 ms | 571 ns | 4100× |
+| `SkipMap::pop_last`, then `insert` | 100,000 | 142 µs | 119 ns | 1190× |
+| `SkipSet::range(k..).next()` | 100,000 | 88.6 µs | 259 ns | 342× |
+| `OrderedSkipList::insert`, then `take_last` | 100,000 | 72.5 µs | 476 ns | 152× |
+| `SkipSet::replace` of a present value | 1,000 | 301 ns | 34.6 ns | 8.7× |
+| `SkipSet::from_iter` of shuffled keys | 1,000 | 169 µs | 46.6 µs | 3.6× |
+| `OrderedSkipList::count` of 100 duplicates | 1,000 | 300 ns | 87.1 ns | 3.4× |
+| `SkipList::clone` | 1,000 | 94.7 µs | 31.9 µs | 3.0× |
+| `SkipMap::get_mut` | 1,000 | 72.3 ns | 27.4 ns | 2.6× |
+| `SkipList::push_back`, then `pop_back` | 1,000 | 108 ns | 42.8 ns | 2.5× |
+| `SkipSet::insert`, then `remove` | 1,000 | 255 ns | 174 ns | 1.5× |
+| `SkipSet::insert`, then `remove` | 100,000 | 556 ns | 462 ns | 1.2× |
+| `SkipSet::contains` | 1,000 | 51.4 ns | 37.3 ns | 1.4× |
+
+
+Lookups on 100,000 elements barely change.
+
 ### 🐛 Bug Fixes
 
 -   _(node)_ Import Box in release builds
