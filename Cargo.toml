@@ -79,7 +79,7 @@ required-features = ["std"]
 rand = { version = "0.10", default-features = false }
 
 [dev-dependencies]
-anyhow = "=1.0.104"
+anyhow = "=1.0.105"
 criterion = { version = "=0.8.2", features = ["html_reports"] }
 insta = "=1.49.0"
 pretty_assertions = { version = "=1.4.1", features = ["unstable"] }
